@@ -17,7 +17,7 @@ export class AccessControlService {
       where: { workspaceId_userId: { workspaceId, userId } },
     });
     if (!member) {
-      throw new ForbiddenException("Bu workspace için erişiminiz yok");
+      throw new ForbiddenException("You don't have access to this workspace");
     }
     return member;
   }
@@ -29,7 +29,7 @@ export class AccessControlService {
   ) {
     const member = await this.requireWorkspaceMembership(userId, workspaceId);
     if (!roles.includes(member.role)) {
-      throw new ForbiddenException("Bu işlem için yetkiniz yok");
+      throw new ForbiddenException("You don't have permission to do this");
     }
     return member;
   }
@@ -39,7 +39,7 @@ export class AccessControlService {
       where: { projectId_userId: { projectId, userId } },
     });
     if (!member) {
-      throw new ForbiddenException("Bu proje için erişiminiz yok");
+      throw new ForbiddenException("You don't have access to this project");
     }
     return member;
   }
@@ -51,7 +51,7 @@ export class AccessControlService {
   ) {
     const member = await this.requireProjectMembership(userId, projectId);
     if (!roles.includes(member.role)) {
-      throw new ForbiddenException("Bu işlem için yetkiniz yok");
+      throw new ForbiddenException("You don't have permission to do this");
     }
     return member;
   }
@@ -114,7 +114,7 @@ export class AccessControlService {
       where: { id: { in: ids }, projectId },
       select: { id: true },
     });
-    throwIfMissing(ids, found, "Bu projede bulunamayan test case");
+    throwIfMissing(ids, found, "Test cases not found in this project");
   }
 
   async assertResultsInProject(projectId: string, resultIds: string[]) {
@@ -124,7 +124,7 @@ export class AccessControlService {
       where: { id: { in: ids }, runCase: { run: { projectId } } },
       select: { id: true },
     });
-    throwIfMissing(ids, found, "Bu projede bulunamayan sonuç");
+    throwIfMissing(ids, found, "Results not found in this project");
   }
 
   /** `suiteId` boşsa (kök seviye) kontrol atlanır. */
@@ -134,7 +134,7 @@ export class AccessControlService {
       where: { id: suiteId, projectId },
       select: { id: true },
     });
-    if (!suite) throw new NotFoundException("Suite bulunamadı");
+    if (!suite) throw new NotFoundException("Suite not found");
   }
 
   /** `milestoneId` boşsa kontrol atlanır. */
@@ -147,7 +147,7 @@ export class AccessControlService {
       where: { id: milestoneId, projectId },
       select: { id: true },
     });
-    if (!milestone) throw new NotFoundException("Milestone bulunamadı");
+    if (!milestone) throw new NotFoundException("Milestone not found");
   }
 
   /** Atanacak kullanıcının projeye (üyelik veya workspace admin yoluyla) erişimi olmalı. */
@@ -158,7 +158,7 @@ export class AccessControlService {
     });
     if (member) return;
     if (await this.isWorkspaceAdminOfProject(assigneeId, projectId)) return;
-    throw new NotFoundException("Atanan kullanıcı bu projede bulunamadı");
+    throw new NotFoundException("The assignee is not a member of this project");
   }
 
   async assertProjectMemberRecord(projectId: string, memberId: string) {
@@ -166,7 +166,7 @@ export class AccessControlService {
       where: { id: memberId, projectId },
       select: { id: true },
     });
-    if (!member) throw new NotFoundException("Proje üyesi bulunamadı");
+    if (!member) throw new NotFoundException("Project member not found");
   }
 
   async assertWorkspaceMemberRecord(workspaceId: string, memberId: string) {
@@ -174,7 +174,7 @@ export class AccessControlService {
       where: { id: memberId, workspaceId },
       select: { id: true },
     });
-    if (!member) throw new NotFoundException("Workspace üyesi bulunamadı");
+    if (!member) throw new NotFoundException("Workspace member not found");
   }
 }
 

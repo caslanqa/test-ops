@@ -47,10 +47,27 @@ export class RunsService {
       userId,
       projectId,
     );
-    return this.prisma.testRun.findMany({
+    const runs = await this.prisma.testRun.findMany({
       where: { projectId, status },
       orderBy: { createdAt: "desc" },
     });
+    // Liste görünümündeki sonuç şeridi için run başına durum sayıları; tüm
+    // runCase satırlarını çekmek yerine tek bir groupBy sorgusuyla hesaplanır.
+    const counts = await this.prisma.runCase.groupBy({
+      by: ["runId", "status"],
+      where: { runId: { in: runs.map((r) => r.id) } },
+      _count: { _all: true },
+    });
+    const progressByRun = new Map<string, Record<string, number>>();
+    for (const row of counts) {
+      const progress = progressByRun.get(row.runId) ?? {};
+      progress[row.status] = row._count._all;
+      progressByRun.set(row.runId, progress);
+    }
+    return runs.map((run) => ({
+      ...run,
+      progress: progressByRun.get(run.id) ?? {},
+    }));
   }
 
   async getOne(userId: string, projectId: string, runId: string) {
@@ -68,7 +85,7 @@ export class RunsService {
       },
     });
     if (!run || run.projectId !== projectId) {
-      throw new NotFoundException("Run bulunamadı");
+      throw new NotFoundException("Run not found");
     }
     const progress = run.runCases.reduce<Record<string, number>>((acc, rc) => {
       acc[rc.status] = (acc[rc.status] ?? 0) + 1;
@@ -96,7 +113,7 @@ export class RunsService {
         include: { items: true },
       });
       if (!plan || plan.projectId !== projectId) {
-        throw new NotFoundException("Plan bulunamadı");
+        throw new NotFoundException("Plan not found");
       }
       caseIds = plan.items.map((i) => i.testCaseId);
     } else if (dto.testCaseIds) {
@@ -215,7 +232,7 @@ export class RunsService {
       },
     });
     if (!run || !run.publicShareEnabled) {
-      throw new NotFoundException("Payla\u015f\u0131lan run bulunamad\u0131");
+      throw new NotFoundException("Shared run not found");
     }
     return {
       title: run.title,
@@ -235,11 +252,11 @@ export class RunsService {
   async assertWritableRun(projectId: string, runId: string) {
     const run = await this.prisma.testRun.findUnique({ where: { id: runId } });
     if (!run || run.projectId !== projectId) {
-      throw new NotFoundException("Run bulunamadı");
+      throw new NotFoundException("Run not found");
     }
     if (run.status === RunStatus.COMPLETED) {
       throw new ForbiddenException(
-        "Run tamamlanmış; yeni sonuç eklenemez (FR-035)",
+        "This run is completed; new results can't be added (FR-035)",
       );
     }
     return run;

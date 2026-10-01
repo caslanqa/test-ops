@@ -49,13 +49,15 @@ export class ApiTokensService {
     const token = await this.prisma.apiToken.findUnique({
       where: { id: tokenId },
     });
-    if (!token) throw new NotFoundException("Token bulunamadı");
+    if (!token) throw new NotFoundException("Token not found");
     if (token.userId !== userId) {
-      throw new ForbiddenException("Bu token size ait değil");
+      throw new ForbiddenException("This token does not belong to you");
     }
+    // Yanıt tokenHash içermez; hash de olsa sızdırılmamalı.
     return this.prisma.apiToken.update({
       where: { id: tokenId },
       data: { revokedAt: new Date() },
+      select: { id: true, name: true, lastUsedAt: true, revokedAt: true, createdAt: true },
     });
   }
 }

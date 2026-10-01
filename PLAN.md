@@ -63,14 +63,23 @@
 
 ## 3. Web arayüzünde eksik ekranlar (Faz 1 kapsamında backend hazır, UI minimal/yok)
 
+**Arayüz yenilendi (2 Ekim 2026):** Qase benzeri iş akışı (sol proje navigasyonu, suite ağacı + case tablosu + detay paneli, run ilerleme şeridi ve satır içi sonuç girişi, plan/run/requirement dialoglarında ortak case seçici) kendi görsel kimliğiyle; marka/görsel tasarım kopyalanmadı (design-doc bölüm 1). WCAG 2.2 AA: axe taramasında ihlal yok, 390 px'te yatay kaydırma yok. Planlar sayfasının ilk planla çökmesi giderildi.
+
 - [ ] Milestone yönetimi ekranı (API'de yalnızca list/create var; update/delete yok, UI yok).
-- [ ] API token oluşturma/iptal ekranı (API var, UI yok).
+- [x] API token oluşturma/iptal ekranı (API var, UI yok). _(2 Ekim 2026: Hesabım sayfasında; token yalnızca bir kez gösterilir, iptal onay ister. İptal yanıtı artık tokenHash döndürmüyor.)_
 - [ ] Run "public share" linkini açma/kapama ekranı (API var, UI yok).
-- [ ] Workspace/project üye yönetimi ekranı — listeleme, ekleme, rol güncelleme ve çıkarma UI'ın hiçbiri yok (MVP kabul kriteri 1 şu an yalnızca API ile karşılanıyor).
-- [ ] Suite hiyerarşisi (alt suite/klasör ağacı) — şu an tek seviye liste.
+- [x] Workspace/project üye yönetimi ekranı — listeleme, ekleme, rol güncelleme ve çıkarma UI'ın hiçbiri yok (MVP kabul kriteri 1 şu an yalnızca API ile karşılanıyor). _(2 Ekim 2026: workspace "Üyeler" sekmesi ve proje "Üyeler" bölümü; açıklamalı rol seçimi; yeni hesap admin tarafından geçici parolayla oluşturulabilir. Arayüz kullanıcının rolüne göre eylemleri gizler, sidebar'da rol görünür.)_
+- [x] Kullanıcı kaydı ve hesap ayarları. _(Kayıt ekranı (`SELF_REGISTRATION`, varsayılan açık), profil ve parola değiştirme; e-posta eşleşmesi büyük/küçük harf duyarsız.)_
+- [x] Üyelik güvenliği. _(Projeye yalnızca workspace üyeleri eklenebilir; workspace'ten çıkarılan kişinin o workspace'teki proje üyelikleri de silinir (önceden projelere erişmeye devam ediyordu); workspace'in son admin'i çıkarılamaz/düşürülemez; üyeler yalnızca üyesi oldukları projelerin adlarını görür. `tests/smoke/users.mjs`: 33 senaryo.)_
+- [ ] Parola sıfırlama ve e-posta daveti — SMTP altyapısı yok; şu an admin yeni hesabı geçici parolayla oluşturuyor, unutulan parolayı sıfırlamanın yolu yok (admin'in başka kullanıcının parolasını sıfırlaması da yok).
+- [ ] Giriş/kayıt için rate limit — kayıt endpoint'i herkese açık; bölüm 0'daki rate limiting maddesi artık daha öncelikli.
+- [x] Suite hiyerarşisi (alt suite/klasör ağacı) — şu an tek seviye liste. _(2 Ekim 2026: Repository'de iç içe suite ağacı, alt suite'ler dahil sayaçlar ve ağaç sırasıyla gruplanmış case listesi.)_
 - [ ] Adım bazlı (step-level) sonuç girme — şu an case bazlı tek durum.
 - [ ] Düzenleme/arşivleme/silme — web hiçbir yerde `PATCH`/`DELETE` çağırmıyor; case, requirement, plan, run, defect yalnızca oluşturulabiliyor (FR-011).
-- [ ] Requirement coverage görünümü (FR-022, akış 5.1 adım 3) ve case değişiklik geçmişi (FR-015) — API var, UI yok.
+- [x] Requirement coverage görünümü (FR-022, akış 5.1 adım 3). _(Requirement listesinde testsiz etiketi ve son sonuç şeridi.)_
+- [ ] Case değişiklik geçmişi (FR-015) — API var, UI yok.
+- [x] Arayüz dili İngilizce. _(2 Ekim 2026: tüm arayüz metinleri, API hata mesajları, seed ve başlatma script çıktıları İngilizce; kod yorumları Türkçe kaldı. Tarihler `en-US`; aramada i/ı/İ farkı yok sayılıyor. Çoklu dil (i18n) altyapısı yok — ikinci bir dil gerekirse metinler bir sözlüğe taşınmalı.)_
+- [x] Açık/koyu tema. _(Sistem / Açık / Koyu seçimi üst barda ve giriş ekranında; tercih tarayıcıda saklanır, sekmeler arası eşitlenir; `public/theme-init.js` ilk çizimden önce uygular (CSP satır içi script'e izin vermediği için ayrı dosya). İki temada 11 sayfanın axe taraması temiz.)_
 
 ## 4. Yayın — container registry publish
 

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -23,7 +24,7 @@ export class WorkspacesService {
       where: { slug: dto.slug },
     });
     if (existing) {
-      throw new ConflictException("Bu slug zaten kullanılıyor");
+      throw new ConflictException("This slug is already in use");
     }
     return this.prisma.workspace.create({
       data: {
@@ -44,12 +45,17 @@ export class WorkspacesService {
   }
 
   async getOne(userId: string, workspaceId: string) {
-    await this.accessControl.requireWorkspaceMembership(userId, workspaceId);
+    const member = await this.accessControl.requireWorkspaceMembership(
+      userId,
+      workspaceId,
+    );
     const workspace = await this.prisma.workspace.findUnique({
       where: { id: workspaceId },
     });
-    if (!workspace) throw new NotFoundException("Workspace bulunamadı");
-    return workspace;
+    if (!workspace) throw new NotFoundException("Workspace not found");
+    // Arayüz, kullanıcının yetkisi olmayan eylemleri göstermemek için rolü kullanır;
+    // yetki kontrolü yine her endpoint'te sunucuda yapılır.
+    return { ...workspace, currentUserRole: member.role };
   }
 
   async update(userId: string, workspaceId: string, name: string) {
@@ -82,22 +88,28 @@ export class WorkspacesService {
       WorkspaceRole.ADMIN,
     ]);
 
-    let targetUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    let targetUser = await this.authService.findUserByEmail(dto.email);
     if (!targetUser) {
       if (!dto.displayName || !dto.password) {
         throw new ConflictException(
-          "Kullanıcı mevcut değil; yeni hesap için displayName ve password gereklidir",
+          "No account exists for this email; displayName and password are required to create one",
         );
       }
       targetUser = await this.prisma.user.create({
         data: {
-          email: dto.email,
+          email: dto.email.trim().toLowerCase(),
           displayName: dto.displayName,
           passwordHash: await this.authService.hashPassword(dto.password),
         },
       });
+    }
+
+    // Var olan üyeyi tekrar eklemek rolünü günceller; son admin bu yoldan da düşürülemez.
+    const existing = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: targetUser.id } },
+    });
+    if (existing && dto.role !== WorkspaceRole.ADMIN) {
+      await this.assertNotLastAdmin(workspaceId, existing.id);
     }
 
     return this.prisma.workspaceMember.upsert({
@@ -119,6 +131,9 @@ export class WorkspacesService {
       WorkspaceRole.ADMIN,
     ]);
     await this.accessControl.assertWorkspaceMemberRecord(workspaceId, memberId);
+    if (role !== WorkspaceRole.ADMIN) {
+      await this.assertNotLastAdmin(workspaceId, memberId);
+    }
     return this.prisma.workspaceMember.update({
       where: { id: memberId },
       data: { role },
@@ -130,6 +145,34 @@ export class WorkspacesService {
       WorkspaceRole.ADMIN,
     ]);
     await this.accessControl.assertWorkspaceMemberRecord(workspaceId, memberId);
-    await this.prisma.workspaceMember.delete({ where: { id: memberId } });
+    await this.assertNotLastAdmin(workspaceId, memberId);
+    const member = await this.prisma.workspaceMember.findUniqueOrThrow({
+      where: { id: memberId },
+    });
+    // Proje erişimi proje üyeliğiyle kontrol edildiği için workspace'ten çıkarılan
+    // kişinin o workspace'teki proje üyelikleri de silinir; aksi halde projelere
+    // erişmeye devam ederdi.
+    await this.prisma.$transaction([
+      this.prisma.projectMember.deleteMany({
+        where: { userId: member.userId, project: { workspaceId } },
+      }),
+      this.prisma.workspaceMember.delete({ where: { id: memberId } }),
+    ]);
+  }
+
+  /** Workspace yönetilemez kalmasın: son admin silinemez veya rolü düşürülemez. */
+  private async assertNotLastAdmin(workspaceId: string, memberId: string) {
+    const member = await this.prisma.workspaceMember.findUniqueOrThrow({
+      where: { id: memberId },
+    });
+    if (member.role !== WorkspaceRole.ADMIN) return;
+    const adminCount = await this.prisma.workspaceMember.count({
+      where: { workspaceId, role: WorkspaceRole.ADMIN },
+    });
+    if (adminCount <= 1) {
+      throw new BadRequestException(
+        "The last workspace admin can't be removed or demoted. Make another member an admin first.",
+      );
+    }
   }
 }

@@ -18,8 +18,8 @@ export const MIN_JWT_SECRET_LENGTH = 32;
 
 const DEV_FALLBACK_SECRET = "dev-only-insecure-jwt-secret";
 const HOW_TO_FIX =
-  "En az 32 karakterlik rastgele bir değer verin (ör. `openssl rand -hex 32`) " +
-  "veya `scripts/start.sh` ile otomatik üretin.";
+  "Provide a random value of at least 32 characters (e.g. `openssl rand -hex 32`) " +
+  "or let `scripts/start.sh` generate one.";
 
 /**
  * JWT imzalama secret'ını ortamdan okur ve doğrular.
@@ -33,21 +33,21 @@ export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
   if (!isProduction) {
     if (!secret || PLACEHOLDER_SECRETS.has(secret)) {
       new Logger("Config").warn(
-        "JWT_SECRET tanımsız veya örnek değerde; yalnızca geliştirme için kabul ediliyor.",
+        "JWT_SECRET is missing or a placeholder; accepted for development only.",
       );
     }
     return secret || DEV_FALLBACK_SECRET;
   }
 
   if (!secret) {
-    throw new Error(`JWT_SECRET tanımlı değil. ${HOW_TO_FIX}`);
+    throw new Error(`JWT_SECRET is not set. ${HOW_TO_FIX}`);
   }
   if (PLACEHOLDER_SECRETS.has(secret)) {
-    throw new Error(`JWT_SECRET örnek değerde ("${secret}"). ${HOW_TO_FIX}`);
+    throw new Error(`JWT_SECRET is a placeholder value ("${secret}"). ${HOW_TO_FIX}`);
   }
   if (secret.length < MIN_JWT_SECRET_LENGTH) {
     throw new Error(
-      `JWT_SECRET çok kısa (${secret.length} karakter). ${HOW_TO_FIX}`,
+      `JWT_SECRET is too short (${secret.length} characters). ${HOW_TO_FIX}`,
     );
   }
   return secret;

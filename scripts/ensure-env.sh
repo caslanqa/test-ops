@@ -30,4 +30,4 @@ if grep -qE '^JWT_SECRET=' .env; then
 else
   printf '\nJWT_SECRET=%s\n' "$secret" >> .env
 fi
-echo ".env: rastgele JWT_SECRET üretildi (mevcut oturumlar geçersiz olur, yeniden giriş gerekir)."
+echo ".env: generated a random JWT_SECRET (existing sessions are invalidated; sign in again)."

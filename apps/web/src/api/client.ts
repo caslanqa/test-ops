@@ -44,8 +44,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       Array.isArray(message) ? message.join(", ") : message,
     );
   }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  // DELETE gibi uç noktalar gövdesiz 200/204 dönebilir; boş gövde JSON değildir.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {

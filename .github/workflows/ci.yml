@@ -75,6 +75,7 @@ jobs:
       - name: Smoke tests
         run: |
           node tests/smoke/scope.mjs
+          node tests/smoke/users.mjs
           bash tests/smoke/attachments.sh
 
       - name: Show logs on failure

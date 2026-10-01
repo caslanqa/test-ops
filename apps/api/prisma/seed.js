@@ -41,7 +41,7 @@ async function main() {
     },
   });
 
-  console.log(`Seed tamamlandı. Giriş bilgileri: ${email} / ${password}`);
+  console.log(`Seed complete. Sign in with: ${email} / ${password}`);
 }
 
 main()

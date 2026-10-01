@@ -1,15 +1,23 @@
-import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useId, useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
+import { AuthLayout } from '../components/AuthLayout';
+import { useAuthConfig } from '../lib/authConfig';
+import { FormError } from '../components/Page';
+import { usePageTitle } from '../lib/useResource';
 
 export function LoginPage() {
+  usePageTitle('Sign in');
   const { login } = useAuth();
   const navigate = useNavigate();
+  const { data: config } = useAuthConfig();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const emailId = useId();
+  const passwordId = useId();
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -19,39 +27,57 @@ export function LoginPage() {
       await login(email, password);
       navigate('/workspaces');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Giriş başarısız');
+      setError(
+        err instanceof ApiError && err.status === 401
+          ? 'Incorrect email or password. Check your details and try again.'
+          : "Couldn't reach the server. Check your connection and try again.",
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="centered-page">
-      <form className="card" onSubmit={onSubmit}>
-        <h1>TestOps</h1>
-        <label>
-          E-posta
+    <AuthLayout>
+      <form className="login-form" onSubmit={onSubmit}>
+        <h1>Sign in</h1>
+        <p className="login-hint">
+          {config?.selfRegistration
+            ? 'Sign in with your TestOps account.'
+            : 'Sign in with the account your workspace admin created for you.'}
+        </p>
+        <div className="field">
+          <label htmlFor={emailId} className="field-label">Email</label>
           <input
+            id={emailId}
             type="email"
+            autoComplete="username"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-        </label>
-        <label>
-          Parola
+        </div>
+        <div className="field">
+          <label htmlFor={passwordId} className="field-label">Password</label>
           <input
+            id={passwordId}
             type="password"
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={submitting}>
-          Giriş yap
+        </div>
+        <FormError message={error} />
+        <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+          {submitting ? 'Signing in…' : 'Sign in'}
         </button>
+        {config?.selfRegistration && (
+          <p className="auth-switch">
+            Don't have an account? <Link to="/register">Create one</Link>
+          </p>
+        )}
       </form>
-    </div>
+    </AuthLayout>
   );
 }
