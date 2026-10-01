@@ -1,0 +1,83 @@
+name: CI
+
+# master'a push, her PR ve docker-publish.yml'den çağrı (workflow_call) ile çalışır;
+# imaj yalnızca bu workflow geçerse yayınlanır.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build ve typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # pnpm sürümü package.json'daki `packageManager` alanından okunur (Dockerfile ile aynı).
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      # Node sürümü Dockerfile'daki base imajla aynı tutulur.
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @testops/api run prisma:generate
+
+      - name: API typecheck
+        run: pnpm --filter @testops/api exec tsc --noEmit
+
+      - name: API build
+        run: pnpm --filter @testops/api run build
+
+      # API lint (eslint) henüz kurulu/yapılandırılmış değil; bkz. PLAN.md 0.1.
+      - name: Web lint
+        run: pnpm --filter @testops/web run lint
+
+      - name: Web build (tsc -b dahil)
+        run: pnpm --filter @testops/web run build
+
+  smoke:
+    name: Docker smoke testleri
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      # Uygulama varsayılan/kısa JWT_SECRET ile başlamaz; script rastgele üretir.
+      - name: Prepare .env
+        run: bash scripts/ensure-env.sh
+
+      # Yayınlanacak Dockerfile ile aynı imaj; app healthcheck'i (/ready) geçene kadar beklenir.
+      - name: Start stack
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Seed demo data
+        run: docker compose exec -T app node prisma/seed.js
+
+      - name: Smoke tests
+        run: |
+          node tests/smoke/scope.mjs
+          bash tests/smoke/attachments.sh
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color app postgres

@@ -1,49 +1,69 @@
 name: Publish Docker image
 
 on:
-    push:
-        tags:
-            - "v*.*.*"
-    workflow_dispatch: {}
-
-permissions:
-    contents: read
-    packages: write
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
 
 jobs:
-    build-and-push:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
+  ci:
+    name: CI
+    # Yayın yalnızca build, typecheck ve Docker smoke testleri geçerse yapılır.
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
-            - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
+  build-and-push:
+    name: Build and push (GHCR)
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
-            - name: Log in to GitHub Container Registry
-              uses: docker/login-action@v3
-              with:
-                  registry: ghcr.io
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
+      # amd64 runner üzerinde linux/arm64 imajını emülasyonla derlemek için
+      # (Apple Silicon ve ARM sunucularda imaj native çalışsın diye).
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
 
-            - name: Extract image metadata (tags/labels)
-              id: meta
-              uses: docker/metadata-action@v5
-              with:
-                  images: ghcr.io/${{ github.repository_owner }}/testops
-                  tags: |
-                      type=semver,pattern={{version}}
-                      type=sha
-                      type=raw,value=latest,enable={{is_default_branch}}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
-            - name: Build and push
-              uses: docker/build-push-action@v6
-              with:
-                  context: .
-                  file: ./Dockerfile
-                  push: true
-                  tags: ${{ steps.meta.outputs.tags }}
-                  labels: ${{ steps.meta.outputs.labels }}
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata (tags/labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        env:
+          # Multi-arch imajlarda GHCR açıklama/kaynak bilgisini index'ten okur.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/testops
+          # `latest` yalnızca sürüm tag'lerinde (flavor latest=auto, prerelease hariç)
+          # üretilir; manuel tetikleme yalnızca sha tag'i alır.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
