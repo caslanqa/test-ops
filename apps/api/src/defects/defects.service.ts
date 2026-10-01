@@ -42,7 +42,7 @@ export class DefectsService {
       },
     });
     if (!defect || defect.projectId !== projectId) {
-      throw new NotFoundException("Defect bulunamadı");
+      throw new NotFoundException("Defect not found");
     }
     return defect;
   }
@@ -130,7 +130,7 @@ export class DefectsService {
       where: { defectId, resultId },
     });
     if (count === 0) {
-      throw new NotFoundException("Defect–sonuç bağlantısı bulunamadı");
+      throw new NotFoundException("Defect is not linked to this result");
     }
   }
 }

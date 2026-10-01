@@ -8,7 +8,7 @@ export class CreateWorkspaceDto {
 
   @IsString()
   @Matches(/^[a-z0-9-]+$/, {
-    message: "slug sadece küçük harf, rakam ve tire içerebilir",
+    message: "slug may only contain lowercase letters, digits and hyphens",
   })
   slug!: string;
 }

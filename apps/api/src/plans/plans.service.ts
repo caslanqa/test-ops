@@ -36,7 +36,7 @@ export class PlansService {
       include: { items: { include: { testCase: true } } },
     });
     if (!plan || plan.projectId !== projectId) {
-      throw new NotFoundException("Plan bulunamadı");
+      throw new NotFoundException("Plan not found");
     }
     return plan;
   }
@@ -145,7 +145,7 @@ export class PlansService {
       where: { planId, testCaseId },
     });
     if (count === 0) {
-      throw new NotFoundException("Plan–case bağlantısı bulunamadı");
+      throw new NotFoundException("Test case is not in this plan");
     }
   }
 
@@ -161,7 +161,7 @@ export class PlansService {
       select: { projectId: true, items: { select: { testCaseId: true } } },
     });
     if (!plan || plan.projectId !== projectId) {
-      throw new NotFoundException("Plan bulunamadı");
+      throw new NotFoundException("Plan not found");
     }
     return { testCaseIds: plan.items.map((i) => i.testCaseId) };
   }

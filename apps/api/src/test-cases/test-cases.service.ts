@@ -47,7 +47,7 @@ export class TestCasesService {
       },
     });
     if (!testCase || testCase.projectId !== projectId) {
-      throw new NotFoundException("Test case bulunamadı");
+      throw new NotFoundException("Test case not found");
     }
     return testCase;
   }

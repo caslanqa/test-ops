@@ -18,7 +18,7 @@ export class PrismaHealthIndicator extends HealthIndicator {
       return this.getStatus(key, true);
     } catch (error) {
       throw new HealthCheckError(
-        "PostgreSQL bağlantısı kurulamadı",
+        "Cannot connect to PostgreSQL",
         this.getStatus(key, false, { error: (error as Error).message }),
       );
     }

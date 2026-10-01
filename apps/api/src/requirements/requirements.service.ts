@@ -36,7 +36,7 @@ export class RequirementsService {
       include: { cases: { include: { testCase: true } } },
     });
     if (!requirement || requirement.projectId !== projectId) {
-      throw new NotFoundException("Requirement bulunamadı");
+      throw new NotFoundException("Requirement not found");
     }
     return requirement;
   }
@@ -117,7 +117,7 @@ export class RequirementsService {
       where: { requirementId, testCaseId },
     });
     if (count === 0) {
-      throw new NotFoundException("Requirement–case bağlantısı bulunamadı");
+      throw new NotFoundException("Test case is not linked to this requirement");
     }
   }
 

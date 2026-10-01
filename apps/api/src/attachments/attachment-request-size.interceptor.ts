@@ -33,7 +33,7 @@ export class AttachmentRequestSizeInterceptor implements NestInterceptor {
       declaredLength > maxRequestSize + MULTIPART_OVERHEAD_BYTES
     ) {
       throw new PayloadTooLargeException(
-        `İstek başına toplam dosya boyutu ${maxRequestSize} baytı aşıyor`,
+        `Total upload size exceeds ${maxRequestSize} bytes per request`,
       );
     }
     return next.handle();

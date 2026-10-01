@@ -13,7 +13,7 @@ APP_URL="http://localhost:${APP_PORT}"
 
 docker compose up -d --build
 
-echo "Uygulama hazır olana kadar bekleniyor..."
+echo "Waiting for the app to become ready..."
 ready=false
 for _ in $(seq 1 60); do
   if curl -sf "${APP_URL}/ready" > /dev/null 2>&1; then
@@ -25,14 +25,14 @@ done
 
 # Uygulama başlamayı reddettiyse (ör. geçersiz JWT_SECRET) sebebi görünür olsun.
 if [ "$ready" != true ]; then
-  echo "Uygulama 120 sn içinde hazır olmadı. Son loglar:" >&2
+  echo "The app did not become ready within 120 s. Latest logs:" >&2
   docker compose logs --tail 40 app >&2
   exit 1
 fi
 
 docker compose exec -T app node prisma/seed.js || true
 
-echo "Hazır: $APP_URL (admin@testops.local / ChangeMe123!)"
+echo "Ready: $APP_URL (admin@testops.local / ChangeMe123!)"
 
 if command -v open > /dev/null 2>&1; then
   open "$APP_URL"

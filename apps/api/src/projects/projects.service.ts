@@ -27,7 +27,7 @@ export class ProjectsService {
     });
     if (existing) {
       throw new ConflictException(
-        "Bu workspace içinde aynı key ile bir proje zaten var",
+        "A project with this key already exists in this workspace",
       );
     }
     return this.prisma.project.create({
@@ -42,23 +42,36 @@ export class ProjectsService {
   }
 
   async listForWorkspace(userId: string, workspaceId: string) {
-    await this.accessControl.requireWorkspaceMembership(userId, workspaceId);
+    const member = await this.accessControl.requireWorkspaceMembership(
+      userId,
+      workspaceId,
+    );
+    // Workspace admin'i tüm projeleri görür; diğer üyeler yalnızca üyesi oldukları
+    // projeleri görür (erişemeyecekleri projelerin adları bile listelenmez).
     return this.prisma.project.findMany({
-      where: { workspaceId, archivedAt: null },
+      where: {
+        workspaceId,
+        archivedAt: null,
+        ...(member.role === WorkspaceRole.ADMIN
+          ? {}
+          : { members: { some: { userId } } }),
+      },
       orderBy: { createdAt: "asc" },
     });
   }
 
   async getOne(userId: string, projectId: string) {
-    await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
+    const access = await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
     });
-    if (!project) throw new NotFoundException("Proje bulunamadı");
-    return project;
+    if (!project) throw new NotFoundException("Project not found");
+    // Workspace admin'leri projede ADMIN sayılır. Arayüz bu rolle eylemleri gösterir
+    // veya gizler; yetki kontrolü yine her endpoint'te sunucuda yapılır.
+    return { ...project, currentUserRole: access.role };
   }
 
   async update(userId: string, projectId: string, dto: UpdateProjectDto) {
@@ -102,12 +115,28 @@ export class ProjectsService {
       projectId,
       [ProjectRole.ADMIN],
     );
-    const targetUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    const project = await this.prisma.project.findUniqueOrThrow({
+      where: { id: projectId },
+      select: { workspaceId: true },
     });
-    if (!targetUser) {
+    const targetUser = await this.prisma.user.findFirst({
+      where: { email: { equals: dto.email.trim(), mode: "insensitive" } },
+    });
+    // Proje üyeleri workspace üyeleri arasından seçilir; böylece workspace'ten
+    // çıkarma tüm projelerden erişimi kaldırır.
+    const workspaceMember = targetUser
+      ? await this.prisma.workspaceMember.findUnique({
+          where: {
+            workspaceId_userId: {
+              workspaceId: project.workspaceId,
+              userId: targetUser.id,
+            },
+          },
+        })
+      : null;
+    if (!targetUser || !workspaceMember) {
       throw new BadRequestException(
-        "Kullanıcı bulunamadı; önce workspace üyesi olarak eklenmelidir",
+        "This person is not a workspace member; add them to the workspace first.",
       );
     }
     return this.prisma.projectMember.upsert({

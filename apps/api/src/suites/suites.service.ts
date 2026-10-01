@@ -81,7 +81,7 @@ export class SuitesService {
     while (current) {
       if (current === suiteId) {
         throw new BadRequestException(
-          "Suite kendisinin veya alt suite'inin altına taşınamaz",
+          "A suite can't be moved under itself or one of its child suites",
         );
       }
       const parent: { parentId: string | null } | null =
@@ -98,7 +98,7 @@ export class SuitesService {
       where: { id: suiteId },
     });
     if (!suite || suite.projectId !== projectId) {
-      throw new NotFoundException("Suite bulunamadı");
+      throw new NotFoundException("Suite not found");
     }
     return suite;
   }

@@ -9,7 +9,7 @@ import {
 export class CreateProjectDto {
   @IsString()
   @Matches(/^[A-Z0-9_-]{2,20}$/, {
-    message: "key 2-20 karakter, büyük harf/rakam/tire/alt çizgi olmalı",
+    message: "key must be 2–20 characters: uppercase letters, digits, hyphens or underscores",
   })
   key!: string;
 

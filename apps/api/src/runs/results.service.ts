@@ -53,7 +53,7 @@ export class ResultsService {
       include: { stepResults: true, attachments: true, runCase: true },
     });
     if (!result || result.runCase.runId !== runId) {
-      throw new NotFoundException("Sonuç bulunamadı");
+      throw new NotFoundException("Result not found");
     }
     return result;
   }
@@ -197,7 +197,7 @@ export class ResultsService {
       include: { steps: { orderBy: { position: "asc" } } },
     });
     if (!testCase || testCase.projectId !== projectId) {
-      throw new NotFoundException("Test case bulunamadı");
+      throw new NotFoundException("Test case not found");
     }
     const lastPosition = await this.prisma.runCase.count({ where: { runId } });
     return this.prisma.runCase.create({
@@ -222,7 +222,7 @@ export class ResultsService {
   private async ensureRunInProject(projectId: string, runId: string) {
     const run = await this.prisma.testRun.findUnique({ where: { id: runId } });
     if (!run || run.projectId !== projectId) {
-      throw new NotFoundException("Run bulunamadı");
+      throw new NotFoundException("Run not found");
     }
     return run;
   }

@@ -130,7 +130,7 @@ export class AttachmentsService {
       where: { id: attachmentId },
     });
     if (!attachment) {
-      throw new NotFoundException("Ek bulunamadı");
+      throw new NotFoundException("Attachment not found");
     }
     await this.assertTargetBelongsToProject(projectId, {
       resultId: attachment.resultId ?? undefined,
@@ -142,7 +142,7 @@ export class AttachmentsService {
     try {
       await fs.access(filePath);
     } catch {
-      throw new NotFoundException("Ek dosyası depoda bulunamadı");
+      throw new NotFoundException("Attachment file is missing from storage");
     }
     // Eski kayıtlar istemcinin bildirdiği MIME tipini taşıyabilir; bu yüzden
     // sunulacak tip her indirmede uzantıdan yeniden türetilir.
@@ -167,30 +167,30 @@ export class AttachmentsService {
     );
 
     if (files.length === 0) {
-      throw new BadRequestException("En az bir dosya gerekli");
+      throw new BadRequestException("At least one file is required");
     }
     if (files.length > maxFiles) {
       throw new BadRequestException(
-        `İstek başına en fazla ${maxFiles} dosya yüklenebilir`,
+        `At most ${maxFiles} files can be uploaded per request`,
       );
     }
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     if (totalSize > maxRequestSize) {
       throw new BadRequestException(
-        `İstek başına toplam dosya boyutu ${maxRequestSize} baytı aşıyor`,
+        `Total upload size exceeds ${maxRequestSize} bytes per request`,
       );
     }
     for (const file of files) {
       if (file.size > maxFileSize) {
         throw new BadRequestException(
-          `${file.originalname} dosya başına izin verilen ${maxFileSize} bayt sınırını aşıyor`,
+          `${file.originalname} exceeds the ${maxFileSize}-byte per-file limit`,
         );
       }
       const extension = attachmentExtension(file.originalname);
       if (!allowedExtensions.has(extension)) {
         throw new UnsupportedMediaTypeException(
-          `${file.originalname}: izin verilmeyen dosya türü (${extension ? `.${extension}` : "uzantısız"}). ` +
-            `İzin verilenler: ${[...allowedExtensions].join(", ")}`,
+          `${file.originalname}: file type not allowed (${extension ? `.${extension}` : "no extension"}). ` +
+            `Allowed: ${[...allowedExtensions].join(", ")}`,
         );
       }
     }
@@ -206,7 +206,7 @@ export class AttachmentsService {
         include: { runCase: { include: { run: true } } },
       });
       if (!result || result.runCase.run.projectId !== projectId) {
-        throw new NotFoundException("Sonuç bulunamadı");
+        throw new NotFoundException("Result not found");
       }
     }
     if (target.stepResultId) {
@@ -220,7 +220,7 @@ export class AttachmentsService {
         !stepResult ||
         stepResult.result.runCase.run.projectId !== projectId
       ) {
-        throw new NotFoundException("Step sonucu bulunamadı");
+        throw new NotFoundException("Step result not found");
       }
     }
     if (target.defectId) {
@@ -228,7 +228,7 @@ export class AttachmentsService {
         where: { id: target.defectId },
       });
       if (!defect || defect.projectId !== projectId) {
-        throw new NotFoundException("Defect bulunamadı");
+        throw new NotFoundException("Defect not found");
       }
     }
   }

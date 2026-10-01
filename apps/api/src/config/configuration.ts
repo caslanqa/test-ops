@@ -25,13 +25,17 @@ function intFromEnv(name: string, fallback: number): number {
   if (!raw) return fallback;
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${name} pozitif bir tam sayı olmalı (verilen: "${raw}")`);
+    throw new Error(`${name} must be a positive integer (got "${raw}")`);
   }
   return value;
 }
 
 export default () => ({
   port: parseInt(process.env.PORT ?? "3000", 10),
+  auth: {
+    // Kendi kendine kayıt; kapalı kurulumlarda hesapları yalnızca workspace admin'leri oluşturur.
+    selfRegistration: process.env.SELF_REGISTRATION?.trim().toLowerCase() !== "false",
+  },
   jwt: {
     secret: resolveJwtSecret(),
     expiresIn: process.env.JWT_EXPIRES_IN ?? "8h",
