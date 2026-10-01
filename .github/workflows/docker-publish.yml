@@ -1,26 +1,23 @@
 name: Publish Docker image
 
+# Yalnızca release.yml'den çağrılır; sürümü o hesaplar (bkz. scripts/next-version.sh).
 on:
-  push:
-    tags:
-      - "v*.*.*"
-  workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      version:
+        description: Yayınlanacak semver, "v" öneki olmadan (ör. 0.1.3)
+        required: true
+        type: string
 
 jobs:
-  ci:
-    name: CI
-    # Yayın yalnızca build, typecheck ve Docker smoke testleri geçerse yapılır.
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-
   build-and-push:
     name: Build and push (GHCR)
-    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/testops
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -47,12 +44,12 @@ jobs:
           # Multi-arch imajlarda GHCR açıklama/kaynak bilgisini index'ten okur.
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
-          images: ghcr.io/${{ github.repository_owner }}/testops
-          # `latest` yalnızca sürüm tag'lerinde (flavor latest=auto, prerelease hariç)
-          # üretilir; manuel tetikleme yalnızca sha tag'i alır.
+          images: ${{ env.IMAGE }}
+          # Sürüm git ref'inden değil input'tan gelir; `latest` prerelease olmayan
+          # semver'de flavor latest=auto ile eklenir.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ inputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
             type=sha
 
       - name: Build and push
@@ -67,3 +64,16 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # GITHUB_TOKEN ile yayınlanan paket repo'nun görünürlüğünü devralır (public repo →
+      # public paket). Self-hosted kullanıcılar auth'suz çekebilsin diye anonim olarak doğrulanır.
+      - name: Verify anonymous pull
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker logout ghcr.io
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" > /dev/null; then
+            echo "Anonim çekilebiliyor: $IMAGE:$VERSION"
+          else
+            echo "::warning::$IMAGE:$VERSION anonim çekilemiyor; GitHub'da paket görünürlüğünü Public yapın."
+          fi

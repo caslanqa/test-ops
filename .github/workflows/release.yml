@@ -1,0 +1,79 @@
+name: Release
+
+# master'a her push/merge'de (yalnızca Markdown değişiklikleri hariç) elle adım
+# gerektirmeden: CI → sürüm hesapla → imajı GHCR'ye yayınla → tag + GitHub Release.
+# Sürüm kuralları için bkz. scripts/next-version.sh.
+#
+# Tag GITHUB_TOKEN ile oluşturulduğundan GitHub başka bir workflow tetiklemez;
+# yayın bu yüzden tag'e tepki veren ayrı bir workflow'da değil, bu run içinde yapılır.
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch: {}
+
+# Art arda gelen iki push aynı sürümü hesaplayıp çakışmasın diye run'lar sıralanır.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  version:
+    name: Compute version
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      skip: ${{ steps.next.outputs.skip }}
+    steps:
+      - name: Checkout (tags + history)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: next
+        run: bash scripts/next-version.sh | tee -a "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish image
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
+
+  release:
+    name: Tag and GitHub Release
+    # Tag ve release yalnızca imaj başarıyla yayınlandıktan sonra oluşturulur.
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.version.outputs.version }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/testops:${{ needs.version.outputs.version }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes "Docker image: \`$IMAGE\` (linux/amd64, linux/arm64)" \
+            --generate-notes

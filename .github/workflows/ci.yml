@@ -1,10 +1,9 @@
 name: CI
 
-# master'a push, her PR ve docker-publish.yml'den çağrı (workflow_call) ile çalışır;
+# Her PR'da ve release.yml'den çağrı (workflow_call) ile çalışır. master push'larında
+# release.yml bu workflow'u zaten çağırdığı için ayrıca `push` tetikleyicisi yoktur;
 # imaj yalnızca bu workflow geçerse yayınlanır.
 on:
-  push:
-    branches: [master]
   pull_request:
   workflow_call: {}
 
