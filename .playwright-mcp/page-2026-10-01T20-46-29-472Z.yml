@@ -1,9 +1,0 @@
-- generic [ref=e4]:
-  - heading "TestOps" [level=1] [ref=e5]
-  - generic [ref=e6]:
-    - text: E-posta
-    - textbox "E-posta" [ref=e7]
-  - generic [ref=e8]:
-    - text: Parola
-    - textbox "Parola" [ref=e9]
-  - button "Giriş yap" [ref=e10] [cursor=pointer]

@@ -9,3 +9,4 @@ coverage/
 data/
 generated/
 .pnpm-store/
+.playwright-mcp/

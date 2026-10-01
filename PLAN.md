@@ -39,7 +39,8 @@
 **Araç zinciri**
 
 - [ ] **API lint kırık.** `pnpm lint` → `eslint: command not found`; eslint ne kurulu ne yapılandırılmış.
-- [ ] **CI kapısı yok.** Tek workflow tag'de Docker publish; PR/push'ta build + typecheck + test yok.
+- [x] **CI kapısı yok.** Tek workflow tag'de Docker publish; PR/push'ta build + typecheck + test yok. _(2 Ekim 2026: `ci.yml` — PR ve master push'unda build, typecheck, web lint ve Docker stack'ine karşı smoke testler (`tests/smoke/`); publish bu workflow'a `needs:` ile bağlı. API lint hâlâ dışarıda.)_
+- [ ] **Node 20 EOL.** Node 20'nin desteği 30 Nisan 2026'da bitti; Dockerfile (`node:20-bookworm-slim`) ve CI Node 22 LTS'e taşınmalı (Prisma 5 uyumluluğu doğrulanarak).
 
 ## 1. Faz 2 — Otomasyon ve kanıt
 
@@ -73,14 +74,17 @@
 
 ## 4. Yayın — container registry publish
 
-**Mevcut durum:** `.github/workflows/docker-publish.yml`, `v*.*.*` tag push'unda ve manuel tetiklemede imajı GHCR'ye (`ghcr.io/<owner>/testops`) semver + `sha` + `latest` tag'leriyle yayınlıyor. Docker Hub desteği yok.
+**Tekrarlanabilir build:** `package.json` `packageManager: pnpm@12.8.1` — Docker (corepack), CI (`pnpm/action-setup`) ve yerel pnpm aynı sürümü kullanır; sürüm lockfile'da integrity ile kayıtlı.
 
-- [ ] **Repo henüz git/GitHub'da değil** — workflow hiç çalışamaz. `git init` + GitHub repo + ilk `v0.1.0` tag'i gerekli.
-- [ ] **Publish öncesi kalite kapısı yok.** Build/typecheck/test geçmeden imaj yayınlanıyor → ayrı CI job'u ve publish'te `needs:`.
-- [ ] **Yalnızca linux/amd64.** Apple Silicon / ARM sunucularda emülasyonla çalışır → `setup-qemu-action` + `platforms: linux/amd64,linux/arm64`.
-- [ ] **Sürümsüz build `latest` oluyor.** `type=raw,value=latest,enable={{is_default_branch}}` manuel tetiklemede main'i `latest` yapıyor; semver tag'lerinde `latest` zaten `flavor: latest=auto` ile üretildiği için bu satır kaldırılmalı.
-- [ ] **Docker Hub (opsiyonel).** `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secret'ları tanımlıysa aynı imajı `docker.io/<kullanıcı>/testops`'a da push eden adım; tanımlı değilse atlanır.
-- [ ] **GHCR paket görünürlüğü.** Yeni GHCR paketleri private açılır; self-hosted kullanıcıların auth'suz çekebilmesi için paket bir kez public yapılmalı (GitHub UI).
+**Mevcut durum (2 Ekim 2026):** Elle adım yok. `release.yml` master'a her push/merge'de (yalnızca `.md` değişiklikleri hariç) CI'ı çalıştırır, `scripts/next-version.sh` ile sürümü hesaplar (ilk sürüm `package.json`'dan; sonra `feat:` → minor, `type!:` / `BREAKING CHANGE:` → major, diğerleri → patch), imajı `ghcr.io/caslanqa/testops`'a yayınlar, anonim çekilebildiğini doğrular ve ardından `vX.Y.Z` tag'i + GitHub Release (otomatik notlar) oluşturur. Tag `GITHUB_TOKEN` ile oluşturulduğu için başka workflow tetiklemez; yayın aynı run içindedir.
+
+- [x] **Repo henüz git/GitHub'da değil** — workflow hiç çalışamaz. _(2 Ekim 2026: `github.com/caslanqa/test-ops`; ilk `v0.1.0` master'a ilk merge'de otomatik çıkar.)_
+- [x] **Publish öncesi kalite kapısı yok.** _(`ci.yml` reusable workflow olarak çağrılıyor.)_ Build/typecheck/test geçmeden imaj yayınlanıyor → ayrı CI job'u ve publish'te `needs:`.
+- [x] **Yalnızca linux/amd64.** _(QEMU + `linux/amd64,linux/arm64`; GHCR için index annotation'ları.)_ Apple Silicon / ARM sunucularda emülasyonla çalışır → `setup-qemu-action` + `platforms: linux/amd64,linux/arm64`.
+- [x] **Sürümsüz build `latest` oluyor.** _(raw satırı kaldırıldı; `{{major}}.{{minor}}` tag'i eklendi.)_ `type=raw,value=latest,enable={{is_default_branch}}` manuel tetiklemede main'i `latest` yapıyor; semver tag'lerinde `latest` zaten `flavor: latest=auto` ile üretildiği için bu satır kaldırılmalı.
+- [x] **Docker Hub (opsiyonel).** _(Karar, 2 Ekim 2026: yalnızca GHCR; Docker Hub eklenmeyecek.)_
+- [x] **GHCR paket görünürlüğü.** _(`GITHUB_TOKEN` ile yayınlanan paket public repo'nun görünürlüğünü devralır; publish job'ı anonim `imagetools inspect` ile doğrular, çekilemezse uyarı verir.)_
+- [x] **Otomatik sürümleme ve release.** _(Elle tag yok; bkz. yukarıdaki akış ve `scripts/next-version.sh`.)_
 - [ ] **Pull tabanlı kurulum.** Mevcut `docker-compose.yml` `build:` içeriyor; yalnızca `image:` kullanan bir release compose dosyası + kurulum/upgrade/yedekleme README'si (bölüm 0'daki backup maddesiyle birlikte).
 - [ ] **İmaj sertleştirme.** Non-root kullanıcı (mevcut root-sahipli volume'lar için geçiş adımıyla), SBOM/provenance (`sbom: true`), opsiyonel cosign imzası.
 

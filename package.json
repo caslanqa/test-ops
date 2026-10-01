@@ -2,6 +2,7 @@
   "name": "testops",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@12.8.1",
   "engines": {
     "node": ">=20"
   },
@@ -10,6 +11,7 @@
     "dev:api": "pnpm --filter @testops/api dev",
     "dev:web": "pnpm --filter @testops/web dev",
     "build": "pnpm -r build",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "test:smoke": "node tests/smoke/scope.mjs && bash tests/smoke/attachments.sh"
   }
 }
