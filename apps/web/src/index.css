@@ -1,0 +1,140 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: #f5f6f8;
+  color: #1a1a1a;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.5rem;
+  background: #1f2937;
+  color: white;
+}
+
+.app-header .brand {
+  color: white;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.app-header-user {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.project-nav {
+  display: flex;
+  gap: 1rem;
+  padding: 0.5rem 1.5rem;
+  background: white;
+  border-bottom: 1px solid #e2e2e2;
+}
+
+.project-nav a {
+  text-decoration: none;
+  color: #374151;
+  padding: 0.25rem 0;
+}
+
+.project-nav a.active {
+  color: #2563eb;
+  border-bottom: 2px solid #2563eb;
+}
+
+.page {
+  max-width: 960px;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+}
+
+.centered-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.card {
+  background: white;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 420px;
+}
+
+.card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+}
+
+.list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.list button {
+  background: none;
+  border: none;
+  padding: 0.2rem 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.list button.active {
+  font-weight: 700;
+  color: #2563eb;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1.5rem;
+}
+
+.badge {
+  display: inline-block;
+  background: #e5e7eb;
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  margin-right: 0.25rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.4rem;
+  border-bottom: 1px solid #eee;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+button {
+  cursor: pointer;
+}

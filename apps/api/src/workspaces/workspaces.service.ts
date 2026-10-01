@@ -1,0 +1,135 @@
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { WorkspaceRole } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { AccessControlService } from "../common/access-control.service";
+import { AuthService } from "../auth/auth.service";
+import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
+import { AddWorkspaceMemberDto } from "./dto/add-workspace-member.dto";
+
+@Injectable()
+export class WorkspacesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly accessControl: AccessControlService,
+    private readonly authService: AuthService,
+  ) {}
+
+  async create(userId: string, dto: CreateWorkspaceDto) {
+    const existing = await this.prisma.workspace.findUnique({
+      where: { slug: dto.slug },
+    });
+    if (existing) {
+      throw new ConflictException("Bu slug zaten kullanılıyor");
+    }
+    return this.prisma.workspace.create({
+      data: {
+        name: dto.name,
+        slug: dto.slug,
+        members: {
+          create: { userId, role: WorkspaceRole.ADMIN },
+        },
+      },
+    });
+  }
+
+  async listForUser(userId: string) {
+    return this.prisma.workspace.findMany({
+      where: { members: { some: { userId } } },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  async getOne(userId: string, workspaceId: string) {
+    await this.accessControl.requireWorkspaceMembership(userId, workspaceId);
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+    });
+    if (!workspace) throw new NotFoundException("Workspace bulunamadı");
+    return workspace;
+  }
+
+  async update(userId: string, workspaceId: string, name: string) {
+    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+    return this.prisma.workspace.update({
+      where: { id: workspaceId },
+      data: { name },
+    });
+  }
+
+  async listMembers(userId: string, workspaceId: string) {
+    await this.accessControl.requireWorkspaceMembership(userId, workspaceId);
+    return this.prisma.workspaceMember.findMany({
+      where: { workspaceId },
+      include: {
+        user: { select: { id: true, email: true, displayName: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  async addMember(
+    userId: string,
+    workspaceId: string,
+    dto: AddWorkspaceMemberDto,
+  ) {
+    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+
+    let targetUser = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (!targetUser) {
+      if (!dto.displayName || !dto.password) {
+        throw new ConflictException(
+          "Kullanıcı mevcut değil; yeni hesap için displayName ve password gereklidir",
+        );
+      }
+      targetUser = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          displayName: dto.displayName,
+          passwordHash: await this.authService.hashPassword(dto.password),
+        },
+      });
+    }
+
+    return this.prisma.workspaceMember.upsert({
+      where: {
+        workspaceId_userId: { workspaceId, userId: targetUser.id },
+      },
+      create: { workspaceId, userId: targetUser.id, role: dto.role },
+      update: { role: dto.role },
+    });
+  }
+
+  async updateMemberRole(
+    userId: string,
+    workspaceId: string,
+    memberId: string,
+    role: WorkspaceRole,
+  ) {
+    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+    await this.accessControl.assertWorkspaceMemberRecord(workspaceId, memberId);
+    return this.prisma.workspaceMember.update({
+      where: { id: memberId },
+      data: { role },
+    });
+  }
+
+  async removeMember(userId: string, workspaceId: string, memberId: string) {
+    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+    await this.accessControl.assertWorkspaceMemberRecord(workspaceId, memberId);
+    await this.prisma.workspaceMember.delete({ where: { id: memberId } });
+  }
+}

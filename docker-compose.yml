@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-testops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-testops}
+      POSTGRES_DB: ${POSTGRES_DB:-testops}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-testops}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Yalnızca host'un loopback arayüzüne açılır (ör. host'tan `prisma migrate dev`);
+    # ağdaki diğer makineler DB'ye erişemez. Uygulama compose ağı üzerinden bağlanır.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+  # Tek imaj: API + web UI aynı container'dan, tek porttan servis edilir.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-testops:local}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-testops}:${POSTGRES_PASSWORD:-testops}@postgres:5432/${POSTGRES_DB:-testops}?schema=public
+      # Varsayılan yok: boşsa compose durur; örnek/kısa değerde uygulama başlamaz.
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET tanımlı değil; .env dosyasına ekleyin (scripts/start.sh otomatik üretir)}"
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      ATTACHMENTS_DIR: /data/attachments
+      # FR-045: boş bırakılırsa uygulama varsayılanları kullanılır (32 MB / 128 MB / 20 dosya)
+      ATTACHMENT_MAX_FILE_SIZE_BYTES: ${ATTACHMENT_MAX_FILE_SIZE_BYTES:-}
+      ATTACHMENT_MAX_REQUEST_SIZE_BYTES: ${ATTACHMENT_MAX_REQUEST_SIZE_BYTES:-}
+      ATTACHMENT_MAX_FILES_PER_REQUEST: ${ATTACHMENT_MAX_FILES_PER_REQUEST:-}
+      ATTACHMENT_ALLOWED_EXTENSIONS: ${ATTACHMENT_ALLOWED_EXTENSIONS:-}
+      PORT: "3000"
+    volumes:
+      - attachments:/data/attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Host tarafında istediğiniz portu kullanın: APP_PORT=9090 docker compose up
+    ports:
+      - "${APP_PORT:-8080}:3000"
+
+volumes:
+  pgdata:
+  attachments:

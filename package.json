@@ -1,0 +1,15 @@
+{
+  "name": "testops",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "bash scripts/start.sh",
+    "dev:api": "pnpm --filter @testops/api dev",
+    "dev:web": "pnpm --filter @testops/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  }
+}

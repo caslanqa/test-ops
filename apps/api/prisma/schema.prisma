@@ -1,0 +1,562 @@
+// TestOps - Prisma schema (Faz 1 çekirdek domain modeli)
+// bkz. design-doc.md bölüm 4 (Alan modeli) ve 6 (Fonksiyonel gereksinimler)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Workspace / Project / Membership (FR-001..FR-003)
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspaceMemberships WorkspaceMember[]
+  projectMemberships   ProjectMember[]
+  apiTokens            ApiToken[]
+  createdCases         TestCase[]        @relation("TestCaseCreatedBy")
+  createdPlans         TestPlan[]        @relation("TestPlanCreatedBy")
+  createdRuns          TestRun[]         @relation("TestRunCreatedBy")
+  createdDefects       Defect[]          @relation("DefectCreatedBy")
+  resultsAuthored      Result[]          @relation("ResultAuthor")
+  attachmentsUploaded  Attachment[]      @relation("AttachmentUploader")
+  auditLogEntries      AuditLog[]
+  testCaseHistory      TestCaseHistory[]
+
+  @@map("users")
+}
+
+enum WorkspaceRole {
+  ADMIN
+  MEMBER
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members  WorkspaceMember[]
+  projects Project[]
+  auditLog AuditLog[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+enum ProjectRole {
+  ADMIN // Project Admin / QA Lead
+  TESTER
+  AUTOMATION // Developer/Automation (token-based)
+  VIEWER
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  workspaceId String
+  key         String // benzersiz proje kodu (workspace içinde)
+  name        String
+  description String?
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members      ProjectMember[]
+  suites       Suite[]
+  testCases    TestCase[]
+  requirements Requirement[]
+  milestones   Milestone[]
+  plans        TestPlan[]
+  runs         TestRun[]
+  defects      Defect[]
+  auditLog     AuditLog[]
+
+  @@unique([workspaceId, key])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String      @id @default(uuid())
+  projectId String
+  userId    String
+  role      ProjectRole @default(VIEWER)
+  createdAt DateTime    @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+// ---------------------------------------------------------------------------
+// Test repository: Suite / TestCase / Steps (FR-010..FR-017)
+// ---------------------------------------------------------------------------
+
+model Suite {
+  id          String   @id @default(uuid())
+  projectId   String
+  parentId    String?
+  name        String
+  description String?
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent    Suite?     @relation("SuiteHierarchy", fields: [parentId], references: [id])
+  children  Suite[]    @relation("SuiteHierarchy")
+  testCases TestCase[]
+
+  @@map("suites")
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum CaseSeverity {
+  MINOR
+  NORMAL
+  MAJOR
+  BLOCKER
+}
+
+enum CaseType {
+  FUNCTIONAL
+  SMOKE
+  REGRESSION
+  SECURITY
+  PERFORMANCE
+  OTHER
+}
+
+enum AutomationStatus {
+  MANUAL
+  TO_BE_AUTOMATED
+  AUTOMATED
+}
+
+model TestCase {
+  id               String           @id @default(uuid())
+  projectId        String
+  suiteId          String?
+  title            String
+  preconditions    String?
+  description      String?
+  priority         CasePriority     @default(MEDIUM)
+  severity         CaseSeverity     @default(NORMAL)
+  type             CaseType         @default(FUNCTIONAL)
+  automationStatus AutomationStatus @default(MANUAL)
+  tags             String[]        @default([])
+  customFields     Json?
+  isAutoCreated    Boolean          @default(false) // otomasyon sonucundan otomatik oluşturuldu mu (FR-017)
+  archivedAt       DateTime?
+  createdById      String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  suite        Suite?            @relation(fields: [suiteId], references: [id])
+  createdBy    User              @relation("TestCaseCreatedBy", fields: [createdById], references: [id])
+  steps        TestCaseStep[]
+  history      TestCaseHistory[]
+  requirements RequirementCase[]
+  planItems    PlanCase[]
+  runCases     RunCase[]
+
+  @@index([projectId])
+  @@map("test_cases")
+}
+
+model TestCaseStep {
+  id             String  @id @default(uuid())
+  testCaseId     String
+  position       Int
+  action         String
+  expectedResult String?
+
+  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@index([testCaseId])
+  @@map("test_case_steps")
+}
+
+// FR-015: temel audit/değişiklik geçmişi
+model TestCaseHistory {
+  id         String   @id @default(uuid())
+  testCaseId String
+  changedById String
+  changedAt  DateTime @default(now())
+  summary    Json // değişen alanların önce/sonra özeti
+
+  testCase  TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  changedBy User     @relation(fields: [changedById], references: [id])
+
+  @@index([testCaseId])
+  @@map("test_case_history")
+}
+
+// ---------------------------------------------------------------------------
+// Requirements traceability (FR-020..FR-023)
+// ---------------------------------------------------------------------------
+
+enum RequirementStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+model Requirement {
+  id          String            @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  externalRef String? // dış sistem referansı (ID/URL) - içerik senkronizasyonu MVP dışı
+  status      RequirementStatus @default(ACTIVE)
+  archivedAt  DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cases   RequirementCase[]
+
+  @@index([projectId])
+  @@map("requirements")
+}
+
+model RequirementCase {
+  requirementId String
+  testCaseId    String
+  createdAt     DateTime @default(now())
+
+  requirement Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  testCase    TestCase    @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@id([requirementId, testCaseId])
+  @@map("requirement_cases")
+}
+
+// ---------------------------------------------------------------------------
+// Milestones / Plans / Runs / Results (FR-030..FR-036, FR-040..FR-046)
+// ---------------------------------------------------------------------------
+
+model Milestone {
+  id        String    @id @default(uuid())
+  projectId String
+  name      String
+  dueDate   DateTime?
+  createdAt DateTime  @default(now())
+
+  project Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  plans   TestPlan[]
+  runs    TestRun[]
+
+  @@map("milestones")
+}
+
+model TestPlan {
+  id            String    @id @default(uuid())
+  projectId     String
+  title         String
+  description   String?
+  milestoneId   String?
+  environment   String?
+  configuration String?
+  createdById   String
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+  createdBy User       @relation("TestPlanCreatedBy", fields: [createdById], references: [id])
+  items     PlanCase[]
+  runs      TestRun[]
+
+  @@map("test_plans")
+}
+
+model PlanCase {
+  id         String  @id @default(uuid())
+  planId     String
+  testCaseId String
+  assigneeId String?
+  position   Int     @default(0)
+
+  plan     TestPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, testCaseId])
+  @@map("plan_cases")
+}
+
+enum RunSource {
+  MANUAL
+  CI
+}
+
+enum RunStatus {
+  OPEN
+  COMPLETED
+}
+
+model TestRun {
+  id                   String    @id @default(uuid())
+  projectId            String
+  planId               String?
+  milestoneId          String?
+  title                String
+  description          String?
+  tags                 String[]  @default([])
+  environment          String?
+  build                String? // CI build/commit/sürüm bilgisi
+  configuration        String?
+  source               RunSource @default(MANUAL)
+  status               RunStatus @default(OPEN)
+  externalLinkType     String? // ör. JiraCloud, GitHub, GitLab, Linear, CustomField
+  externalLinkRef      String?
+  publicShareEnabled   Boolean   @default(false)
+  publicShareToken     String?   @unique
+  createdById          String
+  createdAt            DateTime  @default(now())
+  completedAt          DateTime?
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  plan      TestPlan?  @relation(fields: [planId], references: [id])
+  milestone Milestone? @relation(fields: [milestoneId], references: [id])
+  createdBy User       @relation("TestRunCreatedBy", fields: [createdById], references: [id])
+  runCases  RunCase[]
+
+  @@index([projectId])
+  @@map("test_runs")
+}
+
+enum RunCaseStatus {
+  UNTESTED
+  PASSED
+  FAILED
+  BLOCKED
+  SKIPPED
+}
+
+// Run başlatıldığında case'in snapshot'ı alınır (FR: case sürümü korunur)
+model RunCase {
+  id           String        @id @default(uuid())
+  runId        String
+  testCaseId   String
+  assigneeId   String?
+  status       RunCaseStatus @default(UNTESTED)
+  caseSnapshot Json // run başlangıcındaki case title/steps/preconditions snapshot'ı
+  position     Int           @default(0)
+
+  run      TestRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  testCase TestCase   @relation(fields: [testCaseId], references: [id])
+  results  Result[]
+
+  @@unique([runId, testCaseId])
+  @@map("run_cases")
+}
+
+enum ResultStatus {
+  PASSED
+  FAILED
+  BLOCKED
+  SKIPPED
+  UNTESTED
+}
+
+enum ResultSource {
+  MANUAL
+  AUTOMATION
+}
+
+model Result {
+  id                    String       @id @default(uuid())
+  runCaseId             String
+  status                ResultStatus
+  comment               String?
+  source                ResultSource @default(MANUAL)
+  authorUserId          String?
+  automationSourceLabel String? // ör. CI job adı / framework
+  startedAt             DateTime?
+  endedAt               DateTime?
+  durationMs            Int?
+  attemptNumber         Int          @default(1) // tekrar denemeler (FR-043)
+  isLatest              Boolean      @default(true)
+  externalTestId        String? // idempotency için dış test kimliği (FR-075)
+  createdAt             DateTime     @default(now())
+
+  runCase     RunCase       @relation(fields: [runCaseId], references: [id], onDelete: Cascade)
+  author      User?         @relation("ResultAuthor", fields: [authorUserId], references: [id])
+  stepResults StepResult[]
+  attachments Attachment[]
+  defects     DefectResult[]
+
+  @@index([runCaseId])
+  @@index([externalTestId])
+  @@map("results")
+}
+
+model StepResult {
+  id           String       @id @default(uuid())
+  resultId     String
+  stepPosition Int
+  status       ResultStatus
+  comment      String?
+
+  result      Result       @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+
+  @@index([resultId])
+  @@map("step_results")
+}
+
+// ---------------------------------------------------------------------------
+// Attachments: içerik kalıcı volume'da, burada sadece metadata (FR-045..FR-046)
+// ---------------------------------------------------------------------------
+
+model Attachment {
+  id              String   @id @default(uuid())
+  uploaderUserId  String?
+  resultId        String?
+  stepResultId    String?
+  defectId        String?
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  checksumSha256  String
+  storageKey      String // kalıcı volume içindeki göreli yol
+  createdAt       DateTime @default(now())
+
+  uploader   User?       @relation("AttachmentUploader", fields: [uploaderUserId], references: [id])
+  result     Result?     @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  stepResult StepResult? @relation(fields: [stepResultId], references: [id], onDelete: Cascade)
+  defect     Defect?     @relation(fields: [defectId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Defects (FR-050..FR-053)
+// ---------------------------------------------------------------------------
+
+enum DefectSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DefectStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model Defect {
+  id               String         @id @default(uuid())
+  projectId        String
+  title            String
+  description      String?
+  severity         DefectSeverity @default(MEDIUM)
+  status           DefectStatus   @default(OPEN)
+  assigneeId       String?
+  tags             String[]       @default([])
+  externalProvider String? // ör. Jira, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, custom
+  externalIssueId  String?
+  externalUrl      String?
+  createdById      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy   User           @relation("DefectCreatedBy", fields: [createdById], references: [id])
+  results     DefectResult[]
+  attachments Attachment[]
+
+  @@index([projectId])
+  @@map("defects")
+}
+
+model DefectResult {
+  defectId  String
+  resultId  String
+  createdAt DateTime @default(now())
+
+  defect Defect @relation(fields: [defectId], references: [id], onDelete: Cascade)
+  result Result @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@id([defectId, resultId])
+  @@map("defect_results")
+}
+
+// ---------------------------------------------------------------------------
+// API tokens & audit log (FR-073, Bölüm 8)
+// ---------------------------------------------------------------------------
+
+model ApiToken {
+  id         String    @id @default(uuid())
+  userId     String
+  name       String
+  tokenHash  String    @unique
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_tokens")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  workspaceId String?
+  projectId   String?
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id])
+  project   Project?   @relation(fields: [projectId], references: [id])
+  user      User?      @relation(fields: [userId], references: [id])
+
+  @@index([workspaceId])
+  @@index([projectId])
+  @@map("audit_log")
+}
