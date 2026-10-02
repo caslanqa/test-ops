@@ -11,3 +11,19 @@ allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
   prisma: true
+
+# Güvenlik: @nestjs/platform-express 10.x multer'ı tam olarak 2.0.2'ye sabitliyor ve
+# dosya yüklemelerini bu kopya işliyor. 2.3.0 altındaki sürümlerde birden fazla DoS
+# açığı var (GHSA-wc9g-mqfw-jrwm, GHSA-535w-7cp7-47q4, GHSA-72gw-mp4g-v24j vb.);
+# override, bağımlılık ağacının tamamında düzeltilmiş sürümü zorlar.
+overrides:
+  multer: ^2.4.0
+  # Aynı major sürüm içinde kalan, düşük riskli güvenlik yamaları (pnpm audit):
+  # lodash GHSA-r5fr-rjxr-66jc/-f23m-r3pf-42rh/-xxjr-mmjv-4gpg, js-yaml GHSA-52cp-r559-cp3m vb.,
+  # qs GHSA-4mjr-xmp4-gh2g/-x5fp-wj9c-mxmx/-q8mj-m7cp-5q26, body-parser GHSA-v422-hmwv-36x6.
+  # file-type, path-to-regexp (serve-static) ve @nestjs/core yamaları major sürüm
+  # gerektiriyor; Nest 11 geçişinde ele alınacak (bkz. PLAN.md).
+  "lodash@4": ^4.18.1
+  "js-yaml@4": ^4.3.2
+  "qs@6": ^6.16.0
+  "body-parser@1": ^1.20.8
