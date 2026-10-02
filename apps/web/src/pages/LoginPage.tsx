@@ -28,9 +28,12 @@ export function LoginPage() {
       navigate('/workspaces');
     } catch (err) {
       setError(
-        err instanceof ApiError && err.status === 401
-          ? 'Incorrect email or password. Check your details and try again.'
-          : "Couldn't reach the server. Check your connection and try again.",
+        !(err instanceof ApiError)
+          ? "Couldn't reach the server. Check your connection and try again."
+          : err.status === 401
+            ? 'Incorrect email or password. Check your details and try again.'
+            : // 429 dahil diğer durumlarda sunucu mesajı (ör. "Try again in 42 seconds.") yeterince açık.
+              err.message,
       );
     } finally {
       setSubmitting(false);

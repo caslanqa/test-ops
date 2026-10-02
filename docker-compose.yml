@@ -32,6 +32,10 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       # Giriş ekranında "Kayıt ol"; false ise hesapları yalnızca workspace admin'leri oluşturur.
       SELF_REGISTRATION: ${SELF_REGISTRATION:-true}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}
+      AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       ATTACHMENTS_DIR: /data/attachments
       # FR-045: boş bırakılırsa uygulama varsayılanları kullanılır (32 MB / 128 MB / 20 dosya)
       ATTACHMENT_MAX_FILE_SIZE_BYTES: ${ATTACHMENT_MAX_FILE_SIZE_BYTES:-}

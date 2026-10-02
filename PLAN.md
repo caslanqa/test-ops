@@ -5,7 +5,7 @@
 ## 0. Öncelikli teknik borç (fazlardan bağımsız, önce ele alınmalı)
 
 - [ ] **Audit log hiç yazılmıyor.** `AuditLog` Prisma modeli var ama hiçbir serviste insert çağrısı yok. Design-doc bölüm 8: "Kritik kullanıcı işlemleri audit log'a yazılmalı" — şu an karşılanmıyor. Öneri: `AccessControlService` veya ayrı bir `AuditService` ile write/delete/role-değişikliği gibi kritik aksiyonlarda kayıt at.
-- [ ] **Rate limiting gerçekte uygulanmıyor.** FR-077 header formatını belgeliyoruz ama `@nestjs/throttler` gibi bir guard yok; istemci istediği kadar istek atabilir.
+- [x] **Rate limiting gerçekte uygulanmıyor.** _(2 Ekim 2026: `@nestjs/throttler` 6 + `common/rate-limit.ts` `AppThrottlerGuard`. Genel limit kullanıcı/anonim IP başına dakikada 600 (route başına değil, tüm API için tek sayaç); giriş/kayıt/parola değişikliğinde ek olarak hesap+IP başına 10 ve IP başına 60. 429'da standart `Retry-After` ve `Too many attempts. Try again in N seconds.` mesajı; `X-RateLimit-Limit/-Remaining/-Reset` başlıkları; `/health` ve `/ready` limit dışı. `RATE_LIMIT_PER_MINUTE`, `AUTH_RATE_LIMIT_PER_MINUTE`, `AUTH_IP_RATE_LIMIT_PER_MINUTE` (0 = kapalı) ve ters proxy için `TRUST_PROXY`. Giriş ekranı 429 mesajını gösteriyor. `tests/smoke/ratelimit.mjs` CI'da. Kalan: sayaçlar bellekte (çok replikada Redis storage gerekir); tek hesaba farklı IP'lerden dağıtık deneme için hesap kilitleme yok; `RateLimit-Policy` başlığı yok, `X-RateLimit-*` eşdeğeri kullanılıyor.)_ FR-077 header formatını belgeliyoruz ama `@nestjs/throttler` gibi bir guard yok; istemci istediği kadar istek atabilir.
 - [ ] **Otomatik test yok.** Ne API (Jest/e2e) ne web (component/e2e) tarafında test var. En azından auth + access-control + run/result akışı için smoke-level e2e testler eklenmeli.
 - [ ] **Backup/restore prosedürü yazılı değil.** Design-doc bölüm 8 ve MVP kabul kriteri 7: PostgreSQL + attachment volume yedekleme/geri yükleme adımları dokümante edilmemiş.
 - [ ] **FR-017 (otomasyon sonucu auto-case-creation) backend'de henüz yok.** Şu an `results.service.ts` sadece var olan `testCaseId` ile eşleşmezse 404 atıyor; isim/suite bazlı fallback eşleştirme veya otomatik case oluşturma yok.
@@ -56,7 +56,7 @@
 - [ ] **Attachment upload/download UI.** API tarafı tam (`attachments.controller.ts`), ama web'de dosya yükleme/indirme ekranı yok — sadece backend REST ile mümkün.
 - [ ] **Run geçmişi / dashboard.** Şu an sadece tek run'ın progress'i gösteriliyor; proje genelinde geçmiş runlar, pass-rate trendi, son failed testler yok (FR-060, FR-061).
 - [ ] **Gelişmiş filtreleme/arama.** FR-061: case/requirement/run/tarih/status/kullanıcı/tag/milestone'a göre filtre — şu an yok.
-- [ ] **API rate limit + idempotency iyileştirmeleri.** (0. madde ile birlikte ele alınabilir.)
+- [ ] **API rate limit + idempotency iyileştirmeleri.** (0. madde ile birlikte ele alınabilir.) _(Rate limit kısmı 2 Ekim 2026'da yapıldı; idempotency yarışı bölüm 0'da açık.)_
 
 ## 2. Faz 3 — Entegrasyon ve ekip ölçeği
 
@@ -78,7 +78,7 @@
 - [x] Kullanıcı kaydı ve hesap ayarları. _(Kayıt ekranı (`SELF_REGISTRATION`, varsayılan açık), profil ve parola değiştirme; e-posta eşleşmesi büyük/küçük harf duyarsız.)_
 - [x] Üyelik güvenliği. _(Projeye yalnızca workspace üyeleri eklenebilir; workspace'ten çıkarılan kişinin o workspace'teki proje üyelikleri de silinir (önceden projelere erişmeye devam ediyordu); workspace'in son admin'i çıkarılamaz/düşürülemez; üyeler yalnızca üyesi oldukları projelerin adlarını görür. `tests/smoke/users.mjs`: 33 senaryo.)_
 - [ ] Parola sıfırlama ve e-posta daveti — SMTP altyapısı yok; şu an admin yeni hesabı geçici parolayla oluşturuyor, unutulan parolayı sıfırlamanın yolu yok (admin'in başka kullanıcının parolasını sıfırlaması da yok).
-- [ ] Giriş/kayıt için rate limit — kayıt endpoint'i herkese açık; bölüm 0'daki rate limiting maddesi artık daha öncelikli.
+- [x] Giriş/kayıt için rate limit — kayıt endpoint'i herkese açık; bölüm 0'daki rate limiting maddesi artık daha öncelikli. _(2 Ekim 2026: bölüm 0'daki rate limiting ile birlikte yapıldı.)_
 - [x] Suite hiyerarşisi (alt suite/klasör ağacı) — şu an tek seviye liste. _(2 Ekim 2026: Repository'de iç içe suite ağacı, alt suite'ler dahil sayaçlar ve ağaç sırasıyla gruplanmış case listesi.)_
 - [ ] Adım bazlı (step-level) sonuç girme — şu an case bazlı tek durum.
 - [ ] Düzenleme/arşivleme/silme — web hiçbir yerde `PATCH`/`DELETE` çağırmıyor; case, requirement, plan, run, defect yalnızca oluşturulabiliyor (FR-011).

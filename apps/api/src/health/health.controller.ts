@@ -1,9 +1,13 @@
 import { Controller, Get } from "@nestjs/common";
 import { HealthCheck, HealthCheckService } from "@nestjs/terminus";
 import { ApiTags } from "@nestjs/swagger";
+import { SkipThrottle } from "@nestjs/throttler";
 import { PrismaHealthIndicator } from "./prisma-health.indicator";
 import { Public } from "../common/decorators/public.decorator";
 
+// Orkestratör/izleme yoklamaları sık ve tek IP'den gelir; rate limit onları
+// "unhealthy" gösterip container'ı yeniden başlatmamalı.
+@SkipThrottle()
 @ApiTags("health")
 @Controller()
 export class HealthController {
