@@ -1,3 +1,6 @@
+# Kurulum dosyası: GHCR'deki hazır imajla çalışır, kaynak kod gerekmez (bkz. README.md).
+# Repo içinde `docker compose` komutları docker-compose.override.yml'i de otomatik
+# yükler; o dosya imajı kaynaktan build eder ve Postgres'i host'a açar (geliştirme).
 services:
   postgres:
     image: postgres:16-alpine
@@ -13,17 +16,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    # Yalnızca host'un loopback arayüzüne açılır (ör. host'tan `prisma migrate dev`);
-    # ağdaki diğer makineler DB'ye erişemez. Uygulama compose ağı üzerinden bağlanır.
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    # Port bilerek host'a açılmaz: uygulama compose ağı üzerinden bağlanır, host'taki
+    # başka bir Postgres ile 5432 çakışması da olmaz.
 
   # Tek imaj: API + web UI aynı container'dan, tek porttan servis edilir.
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ${APP_IMAGE:-testops:local}
+    # Sürüm sabitlemek için .env'de ör. APP_IMAGE=ghcr.io/caslanqa/testops:0.2.0
+    image: ${APP_IMAGE:-ghcr.io/caslanqa/testops:latest}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-testops}:${POSTGRES_PASSWORD:-testops}@postgres:5432/${POSTGRES_DB:-testops}?schema=public

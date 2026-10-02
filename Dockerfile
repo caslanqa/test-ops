@@ -33,6 +33,7 @@ COPY --from=build /app/apps/api/prisma /app/apps/api/prisma
 COPY --from=build /app/apps/api/package.json /app/apps/api/package.json
 # SPA dosyaları dist'in yanına (ServeStaticModule rootPath = dist/../web) kopyalanır
 COPY --from=build /app/apps/web/dist /app/apps/api/web
+COPY --chmod=0755 apps/api/docker-entrypoint.sh /app/apps/api/docker-entrypoint.sh
 WORKDIR /app/apps/api
 
 # Container içeride bu portu dinler (PORT env ile değiştirilebilir); dışa açılan
@@ -40,5 +41,6 @@ WORKDIR /app/apps/api
 ENV PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=5s --retries=10 CMD curl -f http://localhost:${PORT}/health || exit 1
-# DB hazır olana kadar migrate deploy bekler, sonra tek process API+UI'ı başlatır
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/main.js"]
+# DATABASE_URL'i kontrol eder, DB hazır olana kadar migrate deploy'u yeniden dener,
+# sonra tek process API+UI'ı başlatır (bkz. apps/api/docker-entrypoint.sh)
+CMD ["./docker-entrypoint.sh"]

@@ -1,0 +1,15 @@
+# Geliştirme eki: repo içindeki `docker compose` komutları bu dosyayı otomatik olarak
+# docker-compose.yml ile birleştirir. Kurulum için gerekmez (bkz. README.md).
+services:
+  postgres:
+    # Yalnızca host'un loopback arayüzüne açılır (ör. host'tan `prisma migrate dev`);
+    # ağdaki diğer makineler DB'ye erişemez.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+  app:
+    # Registry yerine çalışma kopyasından build edilir; `docker compose up --build`.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-testops:local}

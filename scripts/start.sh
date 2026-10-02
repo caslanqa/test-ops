@@ -32,7 +32,8 @@ fi
 
 docker compose exec -T app node prisma/seed.js || true
 
-echo "Ready: $APP_URL (admin@testops.local / ChangeMe123!)"
+# Giriş bilgisini seed yazdırır (kullanıcı önceden varsa parolasının değişmediğini söyler).
+echo "Ready: $APP_URL"
 
 if command -v open > /dev/null 2>&1; then
   open "$APP_URL"

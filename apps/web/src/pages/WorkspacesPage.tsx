@@ -70,7 +70,8 @@ function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
         <input
           id={slugId}
           value={slug}
-          pattern="[a-z0-9-]+"
+          // pattern tarayıcıda `v` bayrağıyla derlenir; sınıf içindeki `-` kaçışsız geçersiz sayılır.
+          pattern="[a-z0-9\-]+"
           required
           aria-describedby={slugHintId}
           onChange={(e) => {
