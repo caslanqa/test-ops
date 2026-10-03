@@ -18,6 +18,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # install.sh runs on users' machines via `curl | bash`; it and the image's entrypoint
+      # must stay lint-clean. ShellCheck is preinstalled on GitHub's Ubuntu runners.
+      - name: Lint shell scripts
+        run: shellcheck install.sh scripts/*.sh apps/api/docker-entrypoint.sh
+
       # The pnpm version is read from the `packageManager` field in package.json (same as the Dockerfile).
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
