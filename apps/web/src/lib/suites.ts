@@ -10,7 +10,7 @@ export interface SuiteNode extends Suite {
   depth: number;
 }
 
-/** Düz suite listesinden parentId'ye göre ağaç kurar; ebeveyni bulunamayanlar köke alınır. */
+/** Builds a tree from the flat suite list by parentId; suites whose parent is missing go to the root. */
 export function buildSuiteTree(suites: Suite[]): SuiteNode[] {
   const nodes = new Map<string, SuiteNode>(
     suites.map((s) => [s.id, { ...s, children: [], depth: 0 }]),
@@ -31,12 +31,12 @@ export function buildSuiteTree(suites: Suite[]): SuiteNode[] {
   return roots;
 }
 
-/** Ağacı derinlik öncelikli düz listeye çevirir (select seçenekleri için). */
+/** Flattens the tree into a depth-first list (for select options). */
 export function flattenTree(roots: SuiteNode[]): SuiteNode[] {
   return roots.flatMap((node) => [node, ...flattenTree(node.children)]);
 }
 
-/** Bir suite ve tüm alt suite'lerinin id'leri. */
+/** Ids of a suite and all of its descendant suites. */
 export function descendantIds(node: SuiteNode): Set<string> {
   const ids = new Set<string>([node.id]);
   for (const child of node.children) {
@@ -45,13 +45,13 @@ export function descendantIds(node: SuiteNode): Set<string> {
   return ids;
 }
 
-/** "Ödeme / Kart / 3D Secure" biçiminde suite yolu. */
+/** Suite path in the form "Payments / Card / 3D Secure". */
 export function suitePath(suites: Suite[], suiteId: string | null): string {
   if (!suiteId) return 'No suite';
   const byId = new Map(suites.map((s) => [s.id, s]));
   const names: string[] = [];
   let current = byId.get(suiteId);
-  // Döngü koruması: API döngüyü engelliyor, yine de bozuk veride sonsuz döngüye girme.
+  // Cycle guard: the API prevents cycles, but never loop forever on corrupt data anyway.
   while (current && names.length < 20) {
     names.unshift(current.name);
     current = current.parentId ? byId.get(current.parentId) : undefined;

@@ -39,9 +39,9 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'COMPLETED', label: 'Completed' },
 ];
 
-/** Run oluşturma: plandan veya ad hoc case seçimiyle (FR-032). */
-// Form yalnızca dialog açıkken mount olur: her açılışta state temiz başlar ve
-// form'un ihtiyaç duyduğu veriler sayfa açılırken değil, dialog açılınca istenir.
+/** Creating a run: from a plan or with an ad hoc case selection (FR-032). */
+// The form mounts only while the dialog is open: state starts clean on every open, and
+// the data the form needs is requested when the dialog opens, not when the page loads.
 function CreateRunDialog({ open, ...props }: Parameters<typeof CreateRunForm>[0] & { open: boolean }) {
   return (
     <Dialog

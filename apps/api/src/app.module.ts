@@ -22,8 +22,8 @@ import { ApiTokensModule } from "./api-tokens/api-tokens.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
-    // Tek imajda bırlikte yayınlanan React SPA; derlenmiş dosyalar
-    // Dockerfile tarafından dist'in yanına (apps/api/web) kopyalanır.
+    // React SPA shipped together in the same image; the built files are
+    // copied next to dist (apps/api/web) by the Dockerfile.
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, "..", "web"),
       exclude: ["/api", "/health", "/ready"],

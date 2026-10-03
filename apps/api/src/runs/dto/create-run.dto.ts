@@ -21,7 +21,7 @@ export class CreateRunDto {
   @IsString()
   environment?: string;
 
-  // CI build/commit/sürüm bilgisi (design-doc.md FR-033)
+  // CI build/commit/version info (design-doc.md FR-033)
   @IsOptional()
   @IsString()
   build?: string;
@@ -39,7 +39,7 @@ export class CreateRunDto {
   @IsEnum(RunSource)
   source?: RunSource;
 
-  // planId verilmezse ad hoc case seçimi (FR-032)
+  // ad hoc test case selection when no planId is given (FR-032)
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

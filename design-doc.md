@@ -1,209 +1,209 @@
-# TestOps - Ürün Tasarım ve Gereksinim Dokümanı
+# TestOps - Product Design and Requirements Document
 
-**Sürüm:** 0.2 (taslak)  
-**Tarih:** 1 Ekim 2026  
-**Ürün yaklaşımı:** Qase benzeri iş akışları; bağımsız ürün, self-hosted dağıtım  
-**Dağıtım:** Docker image + Docker Compose  
-**Veritabanı:** PostgreSQL
+**Version:** 0.2 (draft)  
+**Date:** 1 October 2026  
+**Product approach:** Qase-like workflows; independent product, self-hosted deployment  
+**Deployment:** Docker image + Docker Compose  
+**Database:** PostgreSQL
 
-## 1. Amaç ve vizyon
+## 1. Purpose and vision
 
-TestOps; test case’lerin yönetildiği, gereksinimlerle ilişkilendirildiği, manuel ve otomatik testlerin ortak plan/run modeliyle yürütüldüğü ve sonuçların dış sistemlere açıldığı bir test yönetim platformudur.
+TestOps is a test management platform in which test cases are managed and linked to requirements, manual and automated tests are executed through a shared plan/run model, and results are exposed to external systems.
 
-Ürün yalnızca test case deposu değildir. Web arayüzü, public REST API, CI/test framework reporter’ları ve issue tracker entegrasyonları aynı test verisini kullanır. Test planı manuel QA ile otomasyon arasındaki bağı kurar; her sonuç ilgili case, gereksinim, run ve kanıt dosyalarıyla izlenebilir olur.
+The product is not just a test case repository. The web interface, the public REST API, CI/test framework reporters and issue tracker integrations all use the same test data. The test plan bridges manual QA and automation; every result becomes traceable to its related case, requirement, run and evidence files.
 
-Qase’in ürün kapsamı ve public dokümantasyonu işlevsel referans olarak alınır; marka, görsel tasarım veya tescilli kod kopyalanmaz.
+Qase's product scope and public documentation are used as a functional reference; its brand, visual design and proprietary code are not copied.
 
-## 2. Kapsam ve temel kararlar
+## 2. Scope and key decisions
 
-- Uygulama self-hosted Docker dağıtımını destekler.
-- PostgreSQL tek desteklenen veritabanıdır.
-- ZIP, JPEG ve benzeri ek dosyaların içeriği PostgreSQL'e yazılmaz; PostgreSQL ek metadata'sını tutar, dosyalar kalıcı Docker volume'unda saklanır.
-- Uygulama, API ve arka plan işleri modüler monolith olarak başlar; ilk aşamada mikroservis hedeflenmez.
-- Her kurulum bir veya daha fazla workspace ve workspace içinde birden fazla project barındırabilir.
-- Issue alanı test kaynaklı defect takibine odaklanır; Jira benzeri genel amaçlı issue tracker yapılmaz.
-- Public API ve otomatik test sonuçlarının alınması ilk sürümün temel yeteneklerindendir.
+- The application supports self-hosted Docker deployment.
+- PostgreSQL is the only supported database.
+- The contents of ZIP, JPEG and similar attachment files are not written to PostgreSQL; PostgreSQL holds the attachment metadata, and the files are stored in a persistent Docker volume.
+- The application, API and background jobs start out as a modular monolith; microservices are not a goal in the first phase.
+- Each installation can host one or more workspaces, with multiple projects within each workspace.
+- The issue area focuses on test-driven defect tracking; a Jira-like general-purpose issue tracker will not be built.
+- The public API and ingestion of automated test results are among the core capabilities of the first release.
 
-## 3. Kullanıcılar ve yetkiler
+## 3. Users and permissions
 
-| Rol | Temel yetkiler |
+| Role | Core permissions |
 | --- | --- |
-| Workspace Admin | Üyeleri, workspace ayarlarını ve projeleri yönetir. |
-| Project Admin / QA Lead | Repository, requirement, plan, run, alanlar ve proje ayarlarını yönetir. |
-| Tester | Atandığı run’ları yürütür; sonuç, yorum ve kanıt ekler. |
-| Developer / Automation | API token’ı ile test sonuçları gönderir ve izin verilen verileri okur. |
-| Viewer | Proje verilerini ve raporları salt okunur görüntüler. |
+| Workspace Admin | Manages members, workspace settings and projects. |
+| Project Admin / QA Lead | Manages the repository, requirements, plans, runs, fields and project settings. |
+| Tester | Executes the runs assigned to them; adds results, comments and evidence. |
+| Developer / Automation | Submits test results with an API token and reads permitted data. |
+| Viewer | Views project data and reports in read-only mode. |
 
-Yetkiler workspace ve project sınırlarında kontrol edilir. API işlemleri de kullanıcı rolü ve token izinlerine tabidir. Hassas API token’ları sadece sunucu/CI tarafında tutulmalıdır.
+Permissions are enforced at workspace and project boundaries. API operations are also subject to the user's role and the token's permissions. Sensitive API tokens should be kept only on the server/CI side.
 
-## 4. Alan modeli ve kavramlar
+## 4. Domain model and concepts
 
-- **Workspace:** Kullanıcıların ve projelerin yönetildiği üst seviye alan.
-- **Project:** Test repository’si, requirements, plans, runs ve raporların sınırı.
-- **Suite:** Test case’leri hiyerarşik olarak düzenleyen klasör/kategori.
-- **Test case:** Kalıcı ve dışarıdan referans verilebilir benzersiz kimliği olan test tanımı. Başlık, önkoşul, adımlar, beklenen sonuç, öncelik, severity, test tipi, otomasyon durumu, etiketler ve özel alanlar içerebilir.
-- **Requirement:** Test kapsamı izlenen iş/ürün gereksinimi. Test case’lerle çoktan çoğa bağlanır.
-- **Test plan:** Bir hedef, sürüm veya milestone için seçilmiş test case’leri ve isteğe bağlı atamaları içeren küratörlü liste.
-- **Test run:** Bir planın veya ad hoc seçimin belirli ortam/konfigürasyondaki yürütme örneği. Bir run manuel ve otomatik sonuçları birlikte taşıyabilir.
-- **Result:** Bir run içindeki test case yürütme sonucu; status, tester/automation kaynağı, zaman, süre, yorum, step sonuçları ve ekleri tutar.
-- **Defect:** Test sırasında bulunan hata kaydı. Bir veya daha fazla failed result ile ilişkilendirilebilir ve dış issue bağlantısı taşıyabilir.
-- **Milestone, environment, configuration:** Sürüm/teslimat hedefini ve yürütme koşullarını sınıflandırır.
-- **Attachment:** Sonuç veya adımla ilişkilendirilmiş screenshot, log, video veya rapor gibi kanıt. Dosyanın kendisi kalıcı dosya deposunda; adı, MIME tipi, boyutu, checksum'u ve storage key'i PostgreSQL'de tutulur.
+- **Workspace:** The top-level area in which users and projects are managed.
+- **Project:** The boundary for the test repository, requirements, plans, runs and reports.
+- **Suite:** A folder/category that organizes test cases hierarchically.
+- **Test case:** A test definition with a persistent, unique identifier that can be referenced externally. It can include a title, preconditions, steps, expected result, priority, severity, test type, automation status, tags and custom fields.
+- **Requirement:** A business/product requirement whose test coverage is tracked. It is linked to test cases in a many-to-many relationship.
+- **Test plan:** A curated list of test cases selected for a goal, release or milestone, with optional assignments.
+- **Test run:** An execution instance of a plan or an ad hoc selection in a specific environment/configuration. A single run can carry both manual and automated results.
+- **Result:** The execution result of a test case within a run; it holds the status, tester/automation source, time, duration, comment, step results and attachments.
+- **Defect:** A record of a bug found during testing. It can be linked to one or more failed results and can carry a link to an external issue.
+- **Milestone, environment, configuration:** Classify the release/delivery target and the execution conditions.
+- **Attachment:** Evidence such as a screenshot, log, video or report linked to a result or step. The file itself is kept in the persistent file store; its name, MIME type, size, checksum and storage key are kept in PostgreSQL.
 
-Plan ve run ayrımı korunur: plan tekrar kullanılabilir test kapsamıdır; run belirli bir zamandaki gerçek yürütmedir. Run başlatıldığında case kimliği ve ilgili case sürümü/snapshot’ı kaydedilir; böylece repository sonradan değişse de geçmiş sonuçların bağlamı korunur.
+The distinction between plan and run is preserved: a plan is reusable test scope; a run is an actual execution at a specific point in time. When a run is started, the case ID and the corresponding case version/snapshot are recorded, so the context of historical results is preserved even if the repository changes later.
 
-## 5. Ana kullanıcı akışları
+## 5. Main user flows
 
-### 5.1 Gereksinimden kapsama
+### 5.1 From requirement to coverage
 
-1. Kullanıcı project içinde requirement oluşturur veya içe aktarır.
-2. Requirement bir ya da daha fazla test case’e bağlanır.
-3. Coverage görünümü hangi requirement’ların testsiz, bağlı veya son yürütmede başarısız olduğunu gösterir.
+1. The user creates or imports a requirement within a project.
+2. The requirement is linked to one or more test cases.
+3. The coverage view shows which requirements are untested, linked, or failed in the latest execution.
 
-### 5.2 Plan üzerinden manuel ve otomatik yürütme
+### 5.2 Manual and automated execution through a plan
 
-1. QA Lead plan oluşturur; case’leri, milestone’u, environment/configuration’ı ve isteğe bağlı tester atamalarını seçer.
-2. Plan üzerinden run başlatılır; run seçilmiş case’lerin snapshot’ıyla oluşur.
-3. Tester’lar web arayüzünden sonuç girer. CI reporter’ları aynı run ID’ye API ile sonuç yollar.
-4. Run; kalan, geçen, başarısız ve bloklanan testleri, son aktiviteleri ve tamamlanma oranını gösterir.
-5. Tüm sonuçlar hazır olduğunda yetkili kullanıcı veya CI run’ı tamamlar.
+1. The QA Lead creates a plan and selects the cases, milestone, environment/configuration and optional tester assignments.
+2. A run is started from the plan; the run is created with a snapshot of the selected cases.
+3. Testers enter results through the web interface. CI reporters send results to the same run ID via the API.
+4. The run shows remaining, passed, failed and blocked tests, recent activity and the completion rate.
+5. Once all results are in, an authorized user or CI completes the run.
 
-### 5.3 Başarısız sonuçtan defect
+### 5.3 From failed result to defect
 
-Tester veya entegrasyon failed result içinden defect oluşturur; adımlar, beklenen/gerçek sonuç, kanıtlar ve ilgili case/run otomatik bağlanır. Defect iç sistemde izlenebilir; daha sonra Jira/GitHub gibi sistemlere referansla bağlanabilir.
+A tester or an integration creates a defect from a failed result; the steps, expected/actual result, evidence and the related case/run are linked automatically. The defect can be tracked in the internal system and later linked by reference to systems such as Jira/GitHub.
 
-## 6. Fonksiyonel gereksinimler
+## 6. Functional requirements
 
-### 6.1 Workspace ve project
+### 6.1 Workspace and project
 
-- **FR-001:** Kullanıcı workspace ve project oluşturabilmeli; project’ler benzersiz kodla tanımlanmalı.
-- **FR-002:** Workspace/project üyeleri ve roller yönetilebilmeli.
-- **FR-003:** Her veri sorgusu kullanıcının yetkili olduğu workspace/project ile sınırlandırılmalı.
+- **FR-001:** Users must be able to create workspaces and projects; projects must be identified by a unique code.
+- **FR-002:** Workspace/project members and roles must be manageable.
+- **FR-003:** Every data query must be restricted to the workspaces/projects the user is authorized to access.
 
 ### 6.2 Test repository
 
-- **FR-010:** Kullanıcı suite hiyerarşisi oluşturup yeniden düzenleyebilmeli.
-- **FR-011:** Test case oluşturma, görüntüleme, düzenleme, arşivleme ve silme desteklenmeli.
-- **FR-012:** Case adımları eylem/beklenen sonuç çiftleri halinde tutulmalı; önkoşullar ve açıklama desteklenmeli.
-- **FR-013:** Öncelik, severity, type, automation status, etiket ve özel alanlar tanımlanabilmeli.
-- **FR-014:** Case ID değişmeden kalmalı; case adı veya suite’i değişse de otomasyon sonuçlarının bağlantısı korunmalı.
-- **FR-015:** Değişiklik geçmişi ve temel audit kaydı görüntülenebilmeli.
-- **FR-016:** Ortak adımlar (shared steps) ve parametrik test verisi sonraki faz için veri modelinde genişletilebilir olmalı.
-- **FR-017:** Otomasyon sonucu case eşleştirmesi önce case ID’si, bulunamazsa isim/suite yolu ile yapılmalı. Hiçbiri eşleşmezse sistem yeni case’i otomatik oluşturup otomasyon kaynaklı olarak işaretlemeli; hangi sonuç durumlarından (ör. yalnızca passed veya tüm durumlar) otomatik case oluşturulacağı proje ayarından yapılandırılabilir olmalı.
+- **FR-010:** Users must be able to create and reorganize a suite hierarchy.
+- **FR-011:** Creating, viewing, editing, archiving and deleting test cases must be supported.
+- **FR-012:** Case steps must be stored as action/expected result pairs; preconditions and a description must be supported.
+- **FR-013:** Priority, severity, type, automation status, tags and custom fields must be definable.
+- **FR-014:** The case ID must remain unchanged; the link to automation results must be preserved even if the case's name or suite changes.
+- **FR-015:** Change history and a basic audit log must be viewable.
+- **FR-016:** Shared steps and parameterized test data must remain extensible in the data model for a later phase.
+- **FR-017:** Automation results must be matched to cases first by case ID and, if no match is found, by name/suite path. If neither matches, the system must automatically create a new case and mark it as automation-sourced; which result statuses (e.g. only passed, or all statuses) trigger automatic case creation must be configurable in the project settings.
 
 ### 6.3 Requirements traceability
 
-- **FR-020:** Requirement oluşturma, düzenleme, arşivleme ve dış referans saklama desteklenmeli.
-- **FR-021:** Requirement–case ilişkisi çoktan çoğa olmalı.
-- **FR-022:** Coverage raporu testsiz requirement’ları ve son test durumlarını göstermeli.
-- **FR-023:** Requirement’a bağlı case’lerin değişiklik ve yürütme geçmişi izlenebilmeli.
+- **FR-020:** Creating, editing and archiving requirements and storing external references must be supported.
+- **FR-021:** The requirement–case relationship must be many-to-many.
+- **FR-022:** The coverage report must show untested requirements and the latest test statuses.
+- **FR-023:** The change and execution history of the cases linked to a requirement must be traceable.
 
-### 6.4 Plans ve runs
+### 6.4 Plans and runs
 
-- **FR-030:** Planlar case koleksiyonu, açıklama, milestone, environment/configuration ve atama içerebilmeli.
-- **FR-031:** Aynı plan birden fazla run üretmek üzere tekrar kullanılabilmeli.
-- **FR-032:** Run plan üzerinden veya ad hoc case seçimiyle başlatılabilmeli.
-- **FR-033:** Run başlığı, açıklaması, etiketleri, environment’ı, build/sürüm bilgisini, milestone’u, kaynağı (manual/CI) ve dış bağlantıları tutmalı.
-- **FR-034:** Bir run hem manuel hem otomatik sonuç kabul edebilmeli; birden fazla CI job aynı run’a sonuç ekleyebilmeli.
-- **FR-035:** Run açık/tamamlandı durumlarını desteklemeli. Tamamlanan run’a yeni sonuç ekleme davranışı yetki ve ayarla kontrol edilmeli.
-- **FR-036:** API, bir plana bağlı case ID listesini döndüren bir endpoint sunmalı; otomasyon istemcileri bu listeyi kullanarak yalnızca plandaki testleri çalıştırabilmeli (seçici çalıştırma / selective execution).
+- **FR-030:** Plans must be able to contain a collection of cases, a description, a milestone, an environment/configuration and assignments.
+- **FR-031:** The same plan must be reusable to produce multiple runs.
+- **FR-032:** It must be possible to start a run from a plan or from an ad hoc selection of cases.
+- **FR-033:** A run must hold its title, description, tags, environment, build/version information, milestone, source (manual/CI) and external links.
+- **FR-034:** A run must be able to accept both manual and automated results; multiple CI jobs must be able to add results to the same run.
+- **FR-035:** Runs must support open/completed states. Whether new results can be added to a completed run must be controlled by permissions and settings.
+- **FR-036:** The API must provide an endpoint that returns the list of case IDs linked to a plan; automation clients must be able to use this list to run only the tests in the plan (selective execution).
 
-### 6.5 Execution ve sonuçlar
+### 6.5 Execution and results
 
-- **FR-040:** Test sonucu en az Passed, Failed, Blocked, Skipped ve Untested durumlarını desteklemeli.
-- **FR-041:** Manuel yürütmede her case ve adım için sonuç, yorum ve kanıt kaydedilebilmeli.
-- **FR-042:** Sonuç; run, case, kullanıcı/automation kaynağı, başlangıç/bitiş zamanı ve süre ile ilişkilendirilmeli.
-- **FR-043:** Tekrar denemeler geçmişi kaybetmeden görülebilmeli; güncel durum ile önceki denemeler ayırt edilmeli.
-- **FR-044:** Failed sonuçtan defect açılabilmeli.
-- **FR-045:** Eklere dosya boyutu/türü sınırları ve yetkili erişim uygulanmalı (başlangıç referansı: dosya başına ~32 MB, istek başına toplam ~128 MB, istek başına en fazla ~20 dosya; kesin değerler yapılandırılabilir olmalı).
-- **FR-046:** Ek dosya içeriği kalıcı dosya deposuna yazılmalı; metadata ve test sonucu ilişkisi PostgreSQL'de saklanmalı.
+- **FR-040:** Test results must support at least the Passed, Failed, Blocked, Skipped and Untested statuses.
+- **FR-041:** In manual execution, a result, comment and evidence must be recordable for each case and step.
+- **FR-042:** A result must be associated with the run, case, user/automation source, start/end time and duration.
+- **FR-043:** Retries must be viewable without losing history; the current status must be distinguishable from previous attempts.
+- **FR-044:** It must be possible to open a defect from a failed result.
+- **FR-045:** File size/type limits and authorized access must be enforced for attachments (initial reference: ~32 MB per file, ~128 MB total per request, at most ~20 files per request; the exact values must be configurable).
+- **FR-046:** Attachment file contents must be written to the persistent file store; the metadata and the link to the test result must be stored in PostgreSQL.
 
-### 6.6 Defect ve issue bağlantıları
+### 6.6 Defect and issue links
 
-- **FR-050:** İç defect kaydı başlık, açıklama, severity, durum, sorumlu, etiket ve ilişkilendirilmiş sonuçları tutmalı.
-- **FR-051:** Aynı defect birden fazla test sonucuna bağlanabilmeli.
-- **FR-052:** Dış sistem linki için provider, dış issue ID ve URL saklanmalı. Provider alanı genişleyebilir bir liste olmalı (ör. Jira, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, özel/custom).
-- **FR-053:** Entegrasyonlar geldiğinde dış issue oluşturma ve durum eşitleme adapter üzerinden yapılmalı; çekirdek domain provider’a bağımlı olmamalı.
+- **FR-050:** An internal defect record must hold a title, description, severity, status, assignee, tags and linked results.
+- **FR-051:** The same defect must be linkable to multiple test results.
+- **FR-052:** For links to external systems, the provider, external issue ID and URL must be stored. The provider field must be an extensible list (e.g. Jira, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, custom).
+- **FR-053:** Once integrations are added, external issue creation and status synchronization must go through an adapter; the core domain must not depend on any provider.
 
-### 6.7 Dashboard, rapor ve arama
+### 6.7 Dashboard, reports and search
 
-- **FR-060:** Proje dashboard’u run ilerlemesi, sonuç dağılımı, son failed testler ve requirement coverage göstermeli.
-- **FR-061:** Test geçmişi case, requirement, run, tarih, status, kullanıcı, tag ve milestone’a göre filtrelenebilmeli.
-- **FR-062:** CSV içe/dışa aktarma ve run raporunu paylaşma sonraki fazda genişletilebilmeli.
-- **FR-063:** Public run paylaşım linki ayrıcalıklı ve kapatılabilir olmalı; tahmin edilemeyen token kullanmalı.
+- **FR-060:** The project dashboard must show run progress, result distribution, recent failed tests and requirement coverage.
+- **FR-061:** Test history must be filterable by case, requirement, run, date, status, user, tag and milestone.
+- **FR-062:** CSV import/export and run report sharing must be extensible in a later phase.
+- **FR-063:** The public run sharing link is an auth-exempt exception; it must be revocable and must use an unguessable token.
 
-### 6.8 Public API ve otomasyon
+### 6.8 Public API and automation
 
-- **FR-070:** `/api/v1` altında belgelenmiş REST API sunulmalı; OpenAPI şeması üretilmeli.
-- **FR-071:** API en az project, suites, cases, requirements, plans, runs, results, defects ve attachments kaynaklarını desteklemeli.
-- **FR-072:** Listeleme endpoint’leri sayfalama, filtreleme ve sıralama sağlamalı.
-- **FR-073:** API token’ları iptal edilebilir olmalı; token oluşturma/son kullanım audit edilmelidir.
-- **FR-074:** Sonuçlar tekil ve toplu gönderilebilmeli; toplu istek boyutu sınırlandırılmalı.
-- **FR-075:** Sonuç gönderimi idempotent olmalı veya dış test kimliği/run kimliği üzerinden yinelenen kayıtları saptayabilmeli.
-- **FR-076:** Otomasyon, var olan run’a sonuç gönderebilmeli; plan kimliği üzerinden run oluşturma akışı desteklenmeli.
-- **FR-077:** Hata gövdeleri, HTTP kodları, rate limit ve `Retry-After` davranışı dokümante edilmeli; rate limit durumu `RateLimit-Policy`/`RateLimit` (veya eşdeğer `X-RateLimit-*`) header’larıyla istemciye bildirilmeli, limit aşımında HTTP 429 ve `Retry-After` döndürülmeli.
-- **FR-078:** İlk otomasyon girişi generic REST API ve JUnit XML içe alımıdır. Framework’e özel reporter paketleri sonraki fazlarda eklenir.
-- **FR-079:** Run tamamlanma, sonuç oluşturma ve defect değişikliği gibi olaylar için webhook altyapısı sonraki fazda eklenebilir; retry ve başarısız teslimat görünürlüğü gerekir.
+- **FR-070:** A documented REST API must be provided under `/api/v1`; an OpenAPI schema must be generated.
+- **FR-071:** The API must support at least the project, suites, cases, requirements, plans, runs, results, defects and attachments resources.
+- **FR-072:** List endpoints must provide pagination, filtering and sorting.
+- **FR-073:** API tokens must be revocable; token creation/last use must be audited.
+- **FR-074:** Results must be submittable individually and in bulk; the size of bulk requests must be limited.
+- **FR-075:** Result submission must be idempotent or able to detect duplicate records via the external test ID/run ID.
+- **FR-076:** Automation must be able to submit results to an existing run; a flow for creating a run from a plan ID must be supported.
+- **FR-077:** Error bodies, HTTP codes, rate limit and `Retry-After` behavior must be documented; the rate limit status must be communicated to the client through `RateLimit-Policy`/`RateLimit` (or the equivalent `X-RateLimit-*`) headers, and HTTP 429 with `Retry-After` must be returned when the limit is exceeded.
+- **FR-078:** The initial automation inputs are the generic REST API and JUnit XML import. Framework-specific reporter packages will be added in later phases.
+- **FR-079:** Webhook infrastructure for events such as run completion, result creation and defect changes may be added in a later phase; retries and visibility into failed deliveries are required.
 
-## 7. Mimari ve dağıtım gereksinimleri
+## 7. Architecture and deployment requirements
 
-- Uygulama tek versiyonlu OCI/Docker image olarak yayımlanır; container stateless çalışır.
-- Docker Compose başlangıç dağıtımı uygulama, PostgreSQL ve kalıcı volume’ları içerir. Worker gerekirse aynı image’ın ayrı process/servisi olarak çalışır.
-- PostgreSQL verisi named volume’da tutulur; yeniden başlatma/upgrade sırasında silinmez.
-- İlk sürümde ek dosyaları uygulamanın container dosya sistemine değil, uygulamaya bağlanan kalıcı Docker volume'una yazılmalı (ör. `/data/attachments`). PostgreSQL yalnızca dosya metadata'sını ve storage key'i tutmalı; ekler veritabanına BLOB olarak yazılmamalı.
-- İlk sürüm için ayrı bir object-storage servisi zorunlu değildir. İleride aynı storage arayüzünün S3-uyumlu depoya yönlendirilmesi mümkün olmalı.
-- Yapılandırma environment variable/secret üzerinden verilir; DB parola ve API token’ları image’a gömülmez.
-- Uygulama DB hazır olana kadar kontrollü bekler; schema migration’ları versiyonlu ve yedekleme/upgrade yönergesiyle yayımlanır.
-- Health/readiness endpoint’leri ve yapılandırılabilir log seviyesi bulunur.
-- İlk sürüm yatay ölçeklemeyi zorunlu kılmaz; API ve worker’ın aynı PostgreSQL verisini güvenli kullanması gerekir.
+- The application is published as a single-versioned OCI/Docker image; the container runs stateless.
+- The initial Docker Compose deployment includes the application, PostgreSQL and persistent volumes. If needed, a worker runs as a separate process/service from the same image.
+- PostgreSQL data is kept in a named volume; it is not deleted during restarts/upgrades.
+- In the first release, attachment files must be written not to the application container's file system but to a persistent Docker volume mounted into the application (e.g. `/data/attachments`). PostgreSQL must hold only the file metadata and the storage key; attachments must not be written to the database as BLOBs.
+- A separate object storage service is not required for the first release. In the future, it must be possible to point the same storage interface at S3-compatible storage.
+- Configuration is supplied via environment variables/secrets; DB passwords and API tokens are not baked into the image.
+- The application waits in a controlled manner until the DB is ready; schema migrations are versioned and published together with backup/upgrade guidelines.
+- Health/readiness endpoints and a configurable log level are provided.
+- The first release does not require horizontal scaling; the API and the worker must be able to use the same PostgreSQL data safely.
 
-## 8. Güvenlik, güvenilirlik ve kalite
+## 8. Security, reliability and quality
 
-- Kimlik doğrulama ve RBAC web ve API’de aynı domain izinlerini kullanmalı.
-- Her sorgu workspace/project erişimini kontrol etmeli; nesne ID tahmini veri sızıntısına yol açmamalı.
-- Parolalar güvenli password hashing ile saklanmalı; token’lar oluşturulduktan sonra tekrar gösterilmemeli veya hash’lenmiş saklanmalı.
-- Dosya yüklemeleri boyut, uzantı/MIME ve erişim kontrolünden geçmeli.
-- Kritik kullanıcı işlemleri audit log’a yazılmalı.
-- PostgreSQL ile attachment volume'unun yedekleme ve geri yükleme prosedürü dokümante edilmeli; upgrade öncesi ikisi de yedeklenebilmeli.
-- API cevapları, migration ve entegrasyon hataları gözlemlenebilir olmalı; sessizce kaybolan test sonuçları kabul edilmez.
+- Authentication and RBAC must use the same domain permissions in both the web UI and the API.
+- Every query must check workspace/project access; guessing object IDs must not lead to data leakage.
+- Passwords must be stored using secure password hashing; tokens must not be shown again after they are created, or must be stored hashed.
+- File uploads must pass size, extension/MIME and access checks.
+- Critical user actions must be written to the audit log.
+- The backup and restore procedure for PostgreSQL and the attachment volume must be documented; it must be possible to back up both before an upgrade.
+- API responses, migration errors and integration errors must be observable; silently lost test results are not acceptable.
 
-## 9. MVP kabul ölçütleri
+## 9. MVP acceptance criteria
 
-1. Admin workspace/project oluşturup kullanıcıya rol atayabilir.
-2. QA Lead suite, test case ve requirement oluşturup requirement’ı case’e bağlayabilir.
-3. Kullanıcı plan oluşturabilir, case seçebilir ve plan üzerinden run başlatabilir.
-4. Tester run içindeki case’i Passed/Failed/Blocked/Skipped olarak tamamlayıp yorum/ek ekleyebilir.
-5. Failed sonuçtan iç defect oluşturulabilir; defect test sonucu ve case’e geri bağlanır.
-6. REST API ile case/plan/run okunup yönetilebilir ve otomasyon sonucu run’a gönderilebilir.
-7. Docker Compose kurulumu PostgreSQL verisini ve attachment volume'undaki dosyaları restart sonrasında korur; yedekleme yönergesi ikisini de kapsar.
-8. Run görünümü manuel ve API’den gelen sonuçları aynı ilerleme/rapor içinde gösterir.
+1. An admin can create a workspace/project and assign roles to users.
+2. A QA Lead can create suites, test cases and requirements and link a requirement to a case.
+3. A user can create a plan, select cases and start a run from the plan.
+4. A tester can complete a case within a run as Passed/Failed/Blocked/Skipped and add a comment/attachment.
+5. An internal defect can be created from a failed result; the defect is linked back to the test result and the case.
+6. Cases/plans/runs can be read and managed through the REST API, and automation results can be submitted to a run.
+7. The Docker Compose installation preserves the PostgreSQL data and the files in the attachment volume across restarts; the backup guidelines cover both.
+8. The run view shows manual results and results submitted via the API within the same progress view/report.
 
-## 10. Önerilen teslimat fazları
+## 10. Proposed delivery phases
 
-**Faz 1 - Çalışan çekirdek:** Workspace/project ve roller, test repository, requirements traceability, plans, manuel runs, sonuçlar, iç defect, PostgreSQL/Docker, API token ve temel REST API.
+**Phase 1 - Working core:** Workspace/project and roles, test repository, requirements traceability, plans, manual runs, results, internal defects, PostgreSQL/Docker, API tokens and the basic REST API.
 
-**Faz 2 - Otomasyon ve kanıt:** Bulk result ingestion, JUnit XML, attachment depolaması, Playwright veya pytest için ilk reporter, run geçmişi/dashboard, API rate limit ve idempotency iyileştirmeleri.
+**Phase 2 - Automation and evidence:** Bulk result ingestion, JUnit XML, attachment storage, a first reporter for Playwright or pytest, run history/dashboard, API rate limit and idempotency improvements.
 
-**Faz 3 - Entegrasyon ve ekip ölçeği:** Jira/GitHub issue bağlantıları, webhook’lar (ör. Slack/Microsoft Teams/Discord/Mattermost gibi kanallara run tamamlanma ve defect bildirimleri), gelişmiş filtreleme/arama, özel alanlar, case review, rapor paylaşımı ve ek reporter’lar.
+**Phase 3 - Integrations and team scale:** Jira/GitHub issue links, webhooks (e.g. run completion and defect notifications to channels such as Slack/Microsoft Teams/Discord/Mattermost), advanced filtering/search, custom fields, case review, report sharing and additional reporters.
 
-**MVP dışında:** Genel amaçlı issue tracker, test framework’ü/runner’ı barındırma, çok sayıda çift yönlü entegrasyon, AI ile case üretimi ve gelişmiş kurumsal analiz. Bunlar çekirdek akışlar doğrulandıktan sonra değerlendirilir.
+**Outside the MVP:** A general-purpose issue tracker, hosting test frameworks/runners, numerous bidirectional integrations, AI-based case generation and advanced enterprise analytics. These will be evaluated once the core flows have been validated.
 
-## 11. Varsayımlar ve açık kararlar
+## 11. Assumptions and open decisions
 
-- İlk dağıtım bir kuruluşun kendi sunucusunda çalışır; workspace/project ayrımı korunur.
-- MVP’de yerel kullanıcı/parola ile kimlik doğrulama varsayılır; OIDC/LDAP kurumsal faza bırakılır.
-- İç defect takibi MVP’de vardır; ilk dış tracker entegrasyonu için Jira veya GitHub daha sonra seçilecektir.
-- İlk framework reporter’ı kullanıcıların otomasyon yığınına göre seçilmelidir; bu dokümanda JUnit XML genel başlangıç kabul edilmiştir.
-- Başlangıç performans hedefleri gerçek kullanım ve yük testiyle belirlenecektir.
-- Requirement içeriğinin Jira/GitHub gibi dış sistemlerden otomatik senkronizasyonu MVP dışıdır; MVP’de yalnızca dış referans (ID/URL) saklanır, içerik elle veya içe aktarmayla girilir.
+- The initial deployment runs on an organization's own server; the workspace/project separation is preserved.
+- Authentication with local username/password is assumed for the MVP; OIDC/LDAP is deferred to the enterprise phase.
+- Internal defect tracking is part of the MVP; either Jira or GitHub will be chosen later for the first external tracker integration.
+- The first framework reporter should be chosen based on users' automation stacks; this document takes JUnit XML as the general starting point.
+- Initial performance targets will be determined through real-world usage and load testing.
+- Automatic synchronization of requirement content from external systems such as Jira/GitHub is outside the MVP; in the MVP only the external reference (ID/URL) is stored, and the content is entered manually or via import.
 
-## 12. Referanslar
+## 12. References
 
-- [Qase ürün sayfası](https://www.qase.io/product/)
-- [Qase entegrasyonları](https://www.qase.io/integrations/)
-- [Qase API giriş ve kimlik doğrulama](https://developers.qase.io/reference/introduction-to-the-qase-api)
-- [Test planları ve manuel/otomatik sonuçların birleştirilmesi](https://developers.qase.io/docs/test-plans)
-- [Reporter’ların çalışma biçimi](https://developers.qase.io/docs/start-here)
-- [Test case kimliğiyle otomasyon eşleştirme](https://developers.qase.io/docs/linking-tests)
-- [Run yapılandırması ve mevcut run’a sonuç gönderimi](https://developers.qase.io/docs/test-runs)
-- [Test sonuçlarına attachment ekleme](https://developers.qase.io/docs/attachments)
+- [Qase product page](https://www.qase.io/product/)
+- [Qase integrations](https://www.qase.io/integrations/)
+- [Qase API introduction and authentication](https://developers.qase.io/reference/introduction-to-the-qase-api)
+- [Test plans and combining manual/automated results](https://developers.qase.io/docs/test-plans)
+- [How reporters work](https://developers.qase.io/docs/start-here)
+- [Matching automation to tests by test case ID](https://developers.qase.io/docs/linking-tests)
+- [Run configuration and submitting results to an existing run](https://developers.qase.io/docs/test-runs)
+- [Adding attachments to test results](https://developers.qase.io/docs/attachments)

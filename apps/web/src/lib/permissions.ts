@@ -3,18 +3,18 @@ import { useProjectInfo } from './projectInfo';
 
 export interface ProjectPermissions {
   role: ProjectRole | undefined;
-  /** Case, suite, requirement ve plan oluşturma/düzenleme. */
+  /** Creating/editing cases, suites, requirements and plans. */
   editRepository: boolean;
-  /** Run başlatma, sonuç girme, defect açma. */
+  /** Starting runs, entering results, filing defects. */
   execute: boolean;
-  /** Proje üyelerini ve rollerini yönetme. */
+  /** Managing project members and their roles. */
   manageMembers: boolean;
 }
 
 /**
- * Sunucudaki WRITE_ROLES kurallarının arayüzdeki karşılığı: kullanıcının yapamayacağı
- * eylemler gösterilmez. Yetki kontrolü her zaman sunucuda da yapılır; bu yalnızca
- * kullanıcının 403 alacağı butonlarla karşılaşmamasını sağlar.
+ * UI counterpart of the server's WRITE_ROLES rules: actions the user can't perform
+ * are hidden. Permissions are always checked on the server as well; this only keeps
+ * users from running into buttons that would get them a 403.
  */
 export function projectPermissions(role: ProjectRole | undefined): ProjectPermissions {
   return {

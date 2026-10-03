@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { STATUS_META, isResultStatus } from '../lib/status';
 import { PRIORITY_LABEL, PRIORITY_LEVEL, type CasePriority } from '../lib/labels';
 
-/** Test sonucu etiketi: ikon + metin + durum rengi. */
+/** Test result label: icon + text + status color. */
 export function StatusChip({ status }: { status: string }) {
   if (!isResultStatus(status)) return <span className="chip">{status}</span>;
   const { label, icon: Icon } = STATUS_META[status];
@@ -14,7 +14,7 @@ export function StatusChip({ status }: { status: string }) {
   );
 }
 
-/** Durum dışı nötr etiket (run durumu, kaynak, defect durumu vb.). */
+/** Neutral non-result label (run status, source, defect status, etc.). */
 export function Tag({
   children,
   tone = 'neutral',
@@ -25,7 +25,7 @@ export function Tag({
   return <span className={`tag tag--${tone}`}>{children}</span>;
 }
 
-/** Öncelik: dört çubuklu gösterge + metin etiketi. */
+/** Priority: four-bar indicator + text label. */
 export function PriorityMark({ priority }: { priority: string }) {
   const level = PRIORITY_LEVEL[priority as CasePriority] ?? 0;
   return (

@@ -1,5 +1,5 @@
-// TestOps - Prisma schema (Faz 1 çekirdek domain modeli)
-// bkz. design-doc.md bölüm 4 (Alan modeli) ve 6 (Fonksiyonel gereksinimler)
+// TestOps - Prisma schema (Phase 1 core domain model)
+// see design-doc.md section 4 (Domain model) and 6 (Functional requirements)
 
 generator client {
   provider = "prisma-client-js"
@@ -81,7 +81,7 @@ enum ProjectRole {
 model Project {
   id          String    @id @default(uuid())
   workspaceId String
-  key         String // benzersiz proje kodu (workspace içinde)
+  key         String // unique project key (within the workspace)
   name        String
   description String?
   archivedAt  DateTime?
@@ -181,7 +181,7 @@ model TestCase {
   automationStatus AutomationStatus @default(MANUAL)
   tags             String[]        @default([])
   customFields     Json?
-  isAutoCreated    Boolean          @default(false) // otomasyon sonucundan otomatik oluşturuldu mu (FR-017)
+  isAutoCreated    Boolean          @default(false) // auto-created from an automation result? (FR-017)
   archivedAt       DateTime?
   createdById      String
   createdAt        DateTime         @default(now())
@@ -213,13 +213,13 @@ model TestCaseStep {
   @@map("test_case_steps")
 }
 
-// FR-015: temel audit/değişiklik geçmişi
+// FR-015: basic audit/change history
 model TestCaseHistory {
   id         String   @id @default(uuid())
   testCaseId String
   changedById String
   changedAt  DateTime @default(now())
-  summary    Json // değişen alanların önce/sonra özeti
+  summary    Json // before/after summary of the changed fields
 
   testCase  TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
   changedBy User     @relation(fields: [changedById], references: [id])
@@ -243,7 +243,7 @@ model Requirement {
   projectId   String
   title       String
   description String?
-  externalRef String? // dış sistem referansı (ID/URL) - içerik senkronizasyonu MVP dışı
+  externalRef String? // external system reference (ID/URL) - content sync is out of MVP scope
   status      RequirementStatus @default(ACTIVE)
   archivedAt  DateTime?
   createdAt   DateTime          @default(now())
@@ -341,11 +341,11 @@ model TestRun {
   description          String?
   tags                 String[]  @default([])
   environment          String?
-  build                String? // CI build/commit/sürüm bilgisi
+  build                String? // CI build/commit/version info
   configuration        String?
   source               RunSource @default(MANUAL)
   status               RunStatus @default(OPEN)
-  externalLinkType     String? // ör. JiraCloud, GitHub, GitLab, Linear, CustomField
+  externalLinkType     String? // e.g. JiraCloud, GitHub, GitLab, Linear, CustomField
   externalLinkRef      String?
   publicShareEnabled   Boolean   @default(false)
   publicShareToken     String?   @unique
@@ -371,14 +371,14 @@ enum RunCaseStatus {
   SKIPPED
 }
 
-// Run başlatıldığında case'in snapshot'ı alınır (FR: case sürümü korunur)
+// A snapshot of the test case is taken when the run starts (FR: case version is preserved)
 model RunCase {
   id           String        @id @default(uuid())
   runId        String
   testCaseId   String
   assigneeId   String?
   status       RunCaseStatus @default(UNTESTED)
-  caseSnapshot Json // run başlangıcındaki case title/steps/preconditions snapshot'ı
+  caseSnapshot Json // snapshot of the case title/steps/preconditions at run start
   position     Int           @default(0)
 
   run      TestRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -409,13 +409,13 @@ model Result {
   comment               String?
   source                ResultSource @default(MANUAL)
   authorUserId          String?
-  automationSourceLabel String? // ör. CI job adı / framework
+  automationSourceLabel String? // e.g. CI job name / framework
   startedAt             DateTime?
   endedAt               DateTime?
   durationMs            Int?
-  attemptNumber         Int          @default(1) // tekrar denemeler (FR-043)
+  attemptNumber         Int          @default(1) // retry attempts (FR-043)
   isLatest              Boolean      @default(true)
-  externalTestId        String? // idempotency için dış test kimliği (FR-075)
+  externalTestId        String? // external test ID for idempotency (FR-075)
   createdAt             DateTime     @default(now())
 
   runCase     RunCase       @relation(fields: [runCaseId], references: [id], onDelete: Cascade)
@@ -444,7 +444,7 @@ model StepResult {
 }
 
 // ---------------------------------------------------------------------------
-// Attachments: içerik kalıcı volume'da, burada sadece metadata (FR-045..FR-046)
+// Attachments: content lives on the persistent volume, only metadata here (FR-045..FR-046)
 // ---------------------------------------------------------------------------
 
 model Attachment {
@@ -457,7 +457,7 @@ model Attachment {
   mimeType        String
   sizeBytes       Int
   checksumSha256  String
-  storageKey      String // kalıcı volume içindeki göreli yol
+  storageKey      String // relative path inside the persistent volume
   createdAt       DateTime @default(now())
 
   uploader   User?       @relation("AttachmentUploader", fields: [uploaderUserId], references: [id])
@@ -495,7 +495,7 @@ model Defect {
   status           DefectStatus   @default(OPEN)
   assigneeId       String?
   tags             String[]       @default([])
-  externalProvider String? // ör. Jira, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, custom
+  externalProvider String? // e.g. Jira, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, custom
   externalIssueId  String?
   externalUrl      String?
   createdById      String
@@ -524,7 +524,7 @@ model DefectResult {
 }
 
 // ---------------------------------------------------------------------------
-// API tokens & audit log (FR-073, Bölüm 8)
+// API tokens & audit log (FR-073, Section 8)
 // ---------------------------------------------------------------------------
 
 model ApiToken {

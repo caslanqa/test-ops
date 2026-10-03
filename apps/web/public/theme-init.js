@@ -1,7 +1,7 @@
-// Kayıtlı tema tercihini sayfa çizilmeden önce uygular; koyu temada açılışta beyaz
-// flaş olmasın diye <head> içinde, CSS'ten önce ve senkron yüklenir. Helmet'in
-// CSP'si satır içi script'e izin vermediği için ayrı dosyadır. "Sistem" tercihinde
-// data-theme konmaz; CSS prefers-color-scheme ile karar verir.
+// Applies the saved theme preference before the page is painted; it is loaded
+// synchronously in <head>, before the CSS, so the dark theme doesn't flash white on
+// load. It is a separate file because Helmet's CSP doesn't allow inline scripts. For
+// the "System" preference no data-theme is set; CSS prefers-color-scheme decides.
 (function () {
   try {
     var preference = localStorage.getItem('testops.theme');
@@ -9,6 +9,6 @@
       document.documentElement.setAttribute('data-theme', preference);
     }
   } catch {
-    // Depolama erişimi engelliyse (gizli mod, kapalı site verisi) sistem teması kullanılır.
+    // If storage access is blocked (private mode, site data disabled) the system theme is used.
   }
 })();

@@ -12,10 +12,10 @@ import { ATTACHMENT_TMP_DIRNAME } from "./attachments.constants";
 
 @Module({
   imports: [
-    // Yüklemeler RAM yerine attachment volume'u içindeki geçici dizine yazılır;
-    // böylece büyük istekler belleği tüketmez ve dosya son konumuna aynı dosya
-    // sisteminde atomik rename ile taşınır. Limitler FilesInterceptor'a modül
-    // seçeneği olarak geçer, yani tek kaynak ATTACHMENT_* env değerleridir.
+    // Uploads are written to a temp directory inside the attachment volume instead of RAM;
+    // that way large requests do not exhaust memory and the file is moved into place
+    // with an atomic rename on the same filesystem. Limits reach FilesInterceptor as
+    // module options, so the single source of truth is the ATTACHMENT_* env values.
     MulterModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {

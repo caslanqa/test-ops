@@ -46,8 +46,8 @@ export class ProjectsService {
       userId,
       workspaceId,
     );
-    // Workspace admin'i tüm projeleri görür; diğer üyeler yalnızca üyesi oldukları
-    // projeleri görür (erişemeyecekleri projelerin adları bile listelenmez).
+    // A workspace admin sees all projects; other members see only the projects they
+    // belong to (not even the names of projects they cannot access are listed).
     return this.prisma.project.findMany({
       where: {
         workspaceId,
@@ -69,8 +69,8 @@ export class ProjectsService {
       where: { id: projectId },
     });
     if (!project) throw new NotFoundException("Project not found");
-    // Workspace admin'leri projede ADMIN sayılır. Arayüz bu rolle eylemleri gösterir
-    // veya gizler; yetki kontrolü yine her endpoint'te sunucuda yapılır.
+    // Workspace admins count as ADMIN in the project. The UI uses this role to show or
+    // hide actions; authorization is still enforced on the server at every endpoint.
     return { ...project, currentUserRole: access.role };
   }
 
@@ -122,8 +122,8 @@ export class ProjectsService {
     const targetUser = await this.prisma.user.findFirst({
       where: { email: { equals: dto.email.trim(), mode: "insensitive" } },
     });
-    // Proje üyeleri workspace üyeleri arasından seçilir; böylece workspace'ten
-    // çıkarma tüm projelerden erişimi kaldırır.
+    // Project members are chosen from the workspace members; that way removal from
+    // the workspace revokes access to all of its projects.
     const workspaceMember = targetUser
       ? await this.prisma.workspaceMember.findUnique({
           where: {

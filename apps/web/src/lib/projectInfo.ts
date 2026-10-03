@@ -5,7 +5,7 @@ export interface Workspace {
   id: string;
   name: string;
   slug: string;
-  /** Yalnızca tekil workspace yanıtında gelir. */
+  /** Only present in the single-workspace response. */
   currentUserRole?: 'ADMIN' | 'MEMBER';
 }
 
@@ -14,7 +14,7 @@ export interface Project {
   key: string;
   name: string;
   workspaceId: string;
-  /** Yalnızca tekil proje yanıtında gelir; workspace admin'leri ADMIN görünür. */
+  /** Only present in the single-project response; workspace admins appear as ADMIN. */
   currentUserRole?: 'ADMIN' | 'TESTER' | 'AUTOMATION' | 'VIEWER';
 }
 
@@ -23,20 +23,20 @@ export interface ProjectInfo {
   workspace: Workspace;
 }
 
-// Sidebar, üst bar ve sayfalar aynı kaydı ayrı ayrı istemesin diye oturum boyunca önbellek.
+// Session-long cache so the sidebar, top bar and pages don't each request the same record.
 const cache = new Map<string, Promise<ProjectInfo>>();
 const workspaceCache = new Map<string, Promise<Workspace>>();
 
 /**
- * Oturum değişince (giriş, çıkış, kayıt) çağrılır: önbellekteki roller bir önceki
- * kullanıcıya aittir ve yeni kullanıcıya gösterilmemelidir.
+ * Called when the session changes (sign-in, sign-out, registration): cached roles belong
+ * to the previous user and must not be shown to the new one.
  */
 export function clearProjectInfoCache() {
   cache.clear();
   workspaceCache.clear();
 }
 
-/** Workspace'i getirir; başarısız istekler önbellekte tutulmaz. */
+/** Fetches a workspace; failed requests are not cached. */
 export function fetchWorkspace(workspaceId: string): Promise<Workspace> {
   let pending = workspaceCache.get(workspaceId);
   if (!pending) {
@@ -47,7 +47,7 @@ export function fetchWorkspace(workspaceId: string): Promise<Workspace> {
   return pending;
 }
 
-/** Proje ve bağlı workspace'i getirir; başarısız istekler önbellekte tutulmaz. */
+/** Fetches a project and its workspace; failed requests are not cached. */
 export function fetchProjectInfo(projectId: string): Promise<ProjectInfo> {
   let pending = cache.get(projectId);
   if (!pending) {

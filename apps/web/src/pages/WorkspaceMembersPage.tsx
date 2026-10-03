@@ -16,7 +16,7 @@ const ROLE_OPTIONS = (Object.keys(WORKSPACE_ROLE_LABEL) as WorkspaceRole[]).map(
   description: WORKSPACE_ROLE_DESCRIPTION[role],
 }));
 
-/** Workspace sayfasının bölümleri: projeler ve üyeler. */
+/** Sections of the workspace page: projects and members. */
 export function WorkspaceTabs({ workspaceId }: { workspaceId: string }) {
   return (
     <nav className="tabs" aria-label="Workspace sections">

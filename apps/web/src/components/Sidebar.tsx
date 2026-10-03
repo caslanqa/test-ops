@@ -23,22 +23,22 @@ function initials(name: string): string {
 }
 
 /**
- * Sol navigasyon: proje içindeyken proje bölümlerini, dışındayken
- * workspace listesini gösterir. Masaüstünde sabit, mobilde çekmece içinde
- * aynı bileşen kullanılır; `onNavigate` çekmeceyi kapatmak içindir.
+ * Left navigation: shows the project sections inside a project and the
+ * workspace list outside one. The same component is used, fixed on desktop and
+ * inside a drawer on mobile; `onNavigate` is for closing the drawer.
  */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth();
   const { pathname } = useLocation();
   const projectId = useMatch('/projects/:projectId/*')?.params.projectId;
   const { data: info } = useProjectInfo(projectId);
-  // Yeni workspace oluşturulunca sayfa ona yönlendiği için rota değişiminde yenilemek yeterli.
+  // Creating a workspace redirects to it, so refreshing on route change is enough.
   const { data: workspaces } = useResource(
     () => (projectId ? Promise.resolve([]) : api.get<Workspace[]>('/workspaces')),
     [projectId, pathname],
   );
 
-  // Tüm sidebar içeriği (marka, proje bağlamı, kullanıcı) tek bir landmark içinde.
+  // All sidebar content (brand, project context, user) sits inside a single landmark.
   return (
     <aside className="sidebar-inner" aria-label="App menu">
       <div className="sidebar-brand">
@@ -62,7 +62,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   <span className="project-key">{info.project.key}</span>
                   <span className="project-name">{info.project.name}</span>
                 </p>
-                {/* Kullanıcı neden bazı eylemleri göremediğini anlasın diye rolü görünür. */}
+                {/* The role is shown so users understand why some actions aren't available to them. */}
                 <p className="context-role">
                   Your role: {labelOf(PROJECT_ROLE_LABEL, info.project.currentUserRole)}
                 </p>

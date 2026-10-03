@@ -1,11 +1,11 @@
 import { Logger } from "@nestjs/common";
 
-// design-doc.md bölüm 7-8: secret'lar image'a gömülmez. Varsayılan veya zayıf bir
-// JWT secret ile herkes geçerli oturum token'ı üretip istediği kullanıcı olarak
-// giriş yapabilir; bu yüzden production'da uygulama böyle bir secret ile hiç
-// başlamaz. Geliştirme ortamında akışı bozmamak için yalnızca uyarı verilir.
+// design-doc.md section 7-8: secrets are not baked into the image. With a default or
+// weak JWT secret anyone can mint a valid session token and sign in as any user
+// they like; so in production the app never starts with such a secret.
+// In development only a warning is logged, so as not to break the workflow.
 
-/** Repo'daki örnek dosyalarda geçen yer tutucu değerler; production'da kabul edilmez. */
+/** Placeholder values that appear in the repo's example files; rejected in production. */
 const PLACEHOLDER_SECRETS = new Set([
   "change-me-in-production",
   "change-me",
@@ -13,7 +13,7 @@ const PLACEHOLDER_SECRETS = new Set([
   "secret",
 ]);
 
-/** HS256 için önerilen asgari anahtar uzunluğu (256 bit). */
+/** Recommended minimum key length for HS256 (256 bits). */
 export const MIN_JWT_SECRET_LENGTH = 32;
 
 const DEV_FALLBACK_SECRET = "dev-only-insecure-jwt-secret";
@@ -22,9 +22,9 @@ const HOW_TO_FIX =
   "or let `scripts/start.sh` generate one.";
 
 /**
- * JWT imzalama secret'ını ortamdan okur ve doğrular.
- * `NODE_ENV=production` iken eksik, yer tutucu veya kısa secret'ta hata fırlatır;
- * hata config yüklenirken oluştuğu için uygulama bootstrap edilmez.
+ * Reads the JWT signing secret from the environment and validates it.
+ * With `NODE_ENV=production` it throws on a missing, placeholder or short secret;
+ * since the error happens while config is loading, the app never bootstraps.
  */
 export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
   const secret = env.JWT_SECRET?.trim() ?? "";

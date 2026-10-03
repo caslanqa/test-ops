@@ -2,6 +2,8 @@ import "reflect-metadata";
 import { existsSync } from "fs";
 import { join } from "path";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
+import { ConfigService } from "@nestjs/config";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
@@ -9,8 +11,12 @@ import type { Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const logger = new Logger("Bootstrap");
+
+  // The rate limit identifies the client by req.ip; behind a reverse proxy the real
+  // client address is read from X-Forwarded-For only if the proxy is declared trusted.
+  app.set("trust proxy", app.get(ConfigService).get("rateLimit.trustProxy"));
 
   app.use(helmet());
   app.enableCors();
@@ -23,7 +29,7 @@ async function bootstrap() {
     }),
   );
 
-  // FR-070: /api/v1 altında belgelenmiş REST API + OpenAPI şeması
+  // FR-070: documented REST API under /api/v1 + OpenAPI schema
   const swaggerConfig = new DocumentBuilder()
     .setTitle("TestOps API")
     .setDescription("TestOps public REST API (v1)")
@@ -33,8 +39,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup("api/docs", app, document);
 
-  // SPA fallback: statik dosya eşleşmeyen /api, /health, /ready dışındaki
-  // GET isteklerini index.html'e yönlendirir (React Router client-side routing).
+  // SPA fallback: routes GET requests outside /api, /health, /ready that match no
+  // static file to index.html (React Router client-side routing).
   const webIndex = join(__dirname, "..", "web", "index.html");
   if (existsSync(webIndex)) {
     app.use((req: Request, res: Response, next: NextFunction) => {

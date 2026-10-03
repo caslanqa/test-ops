@@ -29,7 +29,7 @@ interface CoverageRow {
   lastResultStatusBreakdown: Record<string, number>;
 }
 
-/** Hiç koşulmamış bağlı case'ler "test edilmedi" sayılır; şerit kapsamın tamamını gösterir. */
+/** Linked cases that were never run count as "untested"; the ribbon shows the full coverage. */
 function coverageCounts(row: CoverageRow | undefined) {
   const counts = normalizeCounts(row?.lastResultStatusBreakdown);
   const executed = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -37,8 +37,8 @@ function coverageCounts(row: CoverageRow | undefined) {
   return counts;
 }
 
-// Form yalnızca dialog açıkken mount olur: her açılışta state temiz başlar ve
-// form'un ihtiyaç duyduğu veriler sayfa açılırken değil, dialog açılınca istenir.
+// The form mounts only while the dialog is open: state starts clean on every open, and
+// the data the form needs is requested when the dialog opens, not when the page loads.
 function CreateRequirementDialog({ open, ...props }: Parameters<typeof CreateRequirementForm>[0] & { open: boolean }) {
   return (
     <Dialog open={open} onClose={props.onClose} title="New requirement">

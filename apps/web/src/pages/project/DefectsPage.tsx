@@ -21,7 +21,7 @@ interface Defect {
   _count: { results: number };
 }
 
-/** Yalnızca http(s) adresleri link olarak açılır; serbest metin alanından gelen başka şemalar (javascript: vb.) engellenir. */
+/** Only http(s) URLs open as links; other schemes from the free-text field (javascript: etc.) are blocked. */
 function safeUrl(url: string | null): string | null {
   if (!url) return null;
   try {

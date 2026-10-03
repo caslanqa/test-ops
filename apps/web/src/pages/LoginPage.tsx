@@ -28,9 +28,12 @@ export function LoginPage() {
       navigate('/workspaces');
     } catch (err) {
       setError(
-        err instanceof ApiError && err.status === 401
-          ? 'Incorrect email or password. Check your details and try again.'
-          : "Couldn't reach the server. Check your connection and try again.",
+        !(err instanceof ApiError)
+          ? "Couldn't reach the server. Check your connection and try again."
+          : err.status === 401
+            ? 'Incorrect email or password. Check your details and try again.'
+            : // In other cases, including 429, the server message (e.g. "Try again in 42 seconds.") is clear enough.
+              err.message,
       );
     } finally {
       setSubmitting(false);

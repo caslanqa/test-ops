@@ -11,7 +11,7 @@ import { useProjectInfo } from '../../lib/projectInfo';
 import type { Suite } from '../../lib/suites';
 import { usePageTitle, useResource } from '../../lib/useResource';
 
-/** Plandan başlatılan run'ın adı: plan adı + başlatılma zamanı (aynı plandan birden fazla run ayırt edilsin). */
+/** Name of a run started from a plan: plan name + start time (so several runs from the same plan can be told apart). */
 function runTitleFor(planTitle: string): string {
   return `${planTitle} – ${formatDateTime(new Date())}`;
 }
@@ -24,8 +24,8 @@ interface PlanRow {
   _count: { items: number; runs: number };
 }
 
-// Form yalnızca dialog açıkken mount olur: her açılışta state temiz başlar ve
-// form'un ihtiyaç duyduğu veriler sayfa açılırken değil, dialog açılınca istenir.
+// The form mounts only while the dialog is open: state starts clean on every open, and
+// the data the form needs is requested when the dialog opens, not when the page loads.
 function CreatePlanDialog({ open, ...props }: Parameters<typeof CreatePlanForm>[0] & { open: boolean }) {
   return (
     <Dialog

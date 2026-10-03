@@ -1,6 +1,6 @@
 import { Bug, ClipboardList, FolderTree, ListChecks, PlayCircle, Users } from 'lucide-react';
 
-/** Proje içi bölümler; sıra Qase'teki iş akışını izler: tasarla → planla → koş → takip et. */
+/** In-project sections; the order follows the Qase workflow: design → plan → run → track. */
 export const PROJECT_SECTIONS = [
   { path: 'cases', label: 'Test cases', icon: FolderTree },
   { path: 'requirements', label: 'Requirements', icon: ListChecks },

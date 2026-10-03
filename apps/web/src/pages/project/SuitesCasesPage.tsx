@@ -57,11 +57,11 @@ interface TestCase {
   steps: TestCaseStep[];
 }
 
-/** Ağaçta seçili düğüm: tüm case'ler, suite dışı case'ler veya bir suite. */
+/** Selected node in the tree: all cases, cases outside any suite, or a suite. */
 type Selection = { kind: 'all' } | { kind: 'unsorted' } | { kind: 'suite'; id: string };
 
 // ---------------------------------------------------------------------------
-// Suite ağacı
+// Suite tree
 // ---------------------------------------------------------------------------
 
 function SuiteTreeItem({
@@ -134,7 +134,7 @@ function SuiteTreeItem({
 }
 
 // ---------------------------------------------------------------------------
-// Case detay paneli
+// Case detail panel
 // ---------------------------------------------------------------------------
 
 function CaseDetail({
@@ -149,7 +149,7 @@ function CaseDetail({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
 
-  // Panel açılınca klavye kullanıcısı içeriğe taşınır.
+  // When the panel opens, keyboard users are moved into its content.
   useEffect(() => {
     headingRef.current?.focus();
   }, [testCase.id]);
@@ -231,7 +231,7 @@ function CaseDetail({
 }
 
 // ---------------------------------------------------------------------------
-// Dialoglar
+// Dialogs
 // ---------------------------------------------------------------------------
 
 function SuiteSelect({
@@ -261,8 +261,8 @@ function SuiteSelect({
   );
 }
 
-// Form yalnızca dialog açıkken mount olur: her açılışta state temiz başlar ve
-// form'un ihtiyaç duyduğu veriler sayfa açılırken değil, dialog açılınca istenir.
+// The form mounts only while the dialog is open: state starts clean on every open, and
+// the data the form needs is requested when the dialog opens, not when the page loads.
 function CreateSuiteDialog({ open, ...props }: Parameters<typeof CreateSuiteForm>[0] & { open: boolean }) {
   return (
     <Dialog open={open} onClose={props.onClose} title="New suite">
@@ -333,8 +333,8 @@ interface StepDraft {
   expectedResult: string;
 }
 
-// Form yalnızca dialog açıkken mount olur: her açılışta state temiz başlar ve
-// form'un ihtiyaç duyduğu veriler sayfa açılırken değil, dialog açılınca istenir.
+// The form mounts only while the dialog is open: state starts clean on every open, and
+// the data the form needs is requested when the dialog opens, not when the page loads.
 function CreateCaseDialog({ open, ...props }: Parameters<typeof CreateCaseForm>[0] & { open: boolean }) {
   return (
     <Dialog open={open} onClose={props.onClose} title="New test case" wide>
@@ -507,7 +507,7 @@ function CreateCaseForm({
 }
 
 // ---------------------------------------------------------------------------
-// Sayfa
+// Page
 // ---------------------------------------------------------------------------
 
 export function SuitesCasesPage() {
@@ -535,7 +535,7 @@ export function SuitesCasesPage() {
     [tree],
   );
 
-  // Suite başına (alt suite'ler dahil) case sayısı.
+  // Case count per suite (including sub-suites).
   const counts = useMemo(() => {
     const direct = new Map<string, number>();
     for (const c of cases) if (c.suiteId) direct.set(c.suiteId, (direct.get(c.suiteId) ?? 0) + 1);
@@ -563,8 +563,8 @@ export function SuitesCasesPage() {
     return list;
   }, [cases, selection, nodesById, query]);
 
-  // Qase'teki gibi case'ler suite ağacı sırasıyla, suite başlıkları altında listelenir;
-  // aynı suite içinde oluşturulma sırası korunur (API en yeniyi önce döndürür).
+  // As in Qase, cases are listed in suite tree order under suite headings; within the
+  // same suite creation order is kept (the API returns the newest first).
   const groups = useMemo(() => {
     const order = new Map(flattenTree(tree).map((node, i) => [node.id, i]));
     const rank = (c: TestCase) => (c.suiteId ? (order.get(c.suiteId) ?? Infinity) : Infinity);
@@ -592,7 +592,7 @@ export function SuitesCasesPage() {
   function closeDetail() {
     const id = openCaseId;
     setOpenCaseId(null);
-    // Odağı paneli açan satıra geri ver (a11y K7).
+    // Return focus to the row that opened the panel (a11y K7).
     if (id) requestAnimationFrame(() => document.getElementById(`case-${id}`)?.focus());
   }
 

@@ -1,18 +1,18 @@
-// FR-045 referans değerleri: dosya başına ~32 MB, istek başına toplam ~128 MB,
-// istek başına en fazla ~20 dosya. Çalışma zamanı değerleri ConfigService'ten
-// (ATTACHMENT_* env) okunur; bunlar env verilmediğindeki varsayılanlardır.
+// FR-045 reference values: ~32 MB per file, ~128 MB total per request,
+// at most ~20 files per request. Runtime values are read from ConfigService
+// (ATTACHMENT_* env); these are the defaults when no env is given.
 export const ATTACHMENT_DEFAULT_MAX_FILE_SIZE_BYTES = 32 * 1024 * 1024;
 export const ATTACHMENT_DEFAULT_MAX_REQUEST_SIZE_BYTES = 128 * 1024 * 1024;
 export const ATTACHMENT_DEFAULT_MAX_FILES_PER_REQUEST = 20;
 
-/** Yüklemelerin son konuma taşınmadan önce yazıldığı, attachment volume'u içindeki dizin. */
+/** Directory inside the attachment volume where uploads are written before being moved into place. */
 export const ATTACHMENT_TMP_DIRNAME = ".tmp";
 
-// Uzantı → sunulacak Content-Type. İstemcinin bildirdiği MIME tipine güvenilmez:
-// CI araçları çoğu zaman application/octet-stream gönderir, kötü niyetli bir
-// istemci ise .png için text/html bildirebilir. Tip bu yüzden sunucuda uzantıdan
-// türetilir. SVG bilerek yok (betik içerebilir); ATTACHMENT_ALLOWED_EXTENSIONS ile
-// eklenen ama burada olmayan uzantılar application/octet-stream olarak sunulur.
+// Extension → Content-Type to serve. The client-declared MIME type is not trusted:
+// CI tools often send application/octet-stream, while a malicious client may
+// declare text/html for a .png. The type is therefore derived from the extension
+// on the server. SVG is deliberately absent (it can contain script); extensions
+// added via ATTACHMENT_ALLOWED_EXTENSIONS but missing here are served as application/octet-stream.
 export const ATTACHMENT_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -39,18 +39,18 @@ export const ATTACHMENT_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   tar: "application/x-tar",
 };
 
-/** ATTACHMENT_ALLOWED_EXTENSIONS verilmediğinde kabul edilen uzantılar. */
+/** Extensions accepted when ATTACHMENT_ALLOWED_EXTENSIONS is not set. */
 export const ATTACHMENT_DEFAULT_ALLOWED_EXTENSIONS = Object.keys(
   ATTACHMENT_MIME_BY_EXTENSION,
 );
 
-/** Dosya adından küçük harfli uzantıyı döndürür ("trace.tar.gz" → "gz", uzantısız → ""). */
+/** Returns the lowercase extension from a file name ("trace.tar.gz" → "gz", no extension → ""). */
 export function attachmentExtension(fileName: string): string {
   const dot = fileName.lastIndexOf(".");
   return dot > 0 ? fileName.slice(dot + 1).toLowerCase() : "";
 }
 
-/** Dosyanın sunulacağı Content-Type; bilinmeyen uzantılar indirilebilir ikili veri olarak sunulur. */
+/** Content-Type to serve the file with; unknown extensions are served as downloadable binary data. */
 export function attachmentMimeType(fileName: string): string {
   return (
     ATTACHMENT_MIME_BY_EXTENSION[attachmentExtension(fileName)] ??
@@ -59,11 +59,11 @@ export function attachmentMimeType(fileName: string): string {
 }
 
 /**
- * Busboy, multipart `filename` parametresini varsayılan olarak latin1 olarak çözer
- * ve multer 2.x `defParamCharset` seçeneğini ona iletmez. Tarayıcılar ve curl ise
- * adı UTF-8 bayt olarak gönderdiği için "görüntü" → "gÃ¶rÃ¼ntÃ¼" olarak kaydedilir.
- * Ad latin1 baytlarına geri çevrilip geçerli UTF-8 olarak çözülebiliyorsa düzeltilir;
- * saf ASCII veya zaten doğru çözülmüş (ör. RFC 5987 `filename*`) adlara dokunulmaz.
+ * Busboy decodes the multipart `filename` parameter as latin1 by default, and
+ * multer 2.x does not pass its `defParamCharset` option through. Browsers and curl
+ * send the name as UTF-8 bytes, so "résumé" gets stored as "rÃ©sumÃ©".
+ * If the name can be turned back into latin1 bytes and decoded as valid UTF-8, it is
+ * fixed; pure ASCII or already correctly decoded (e.g. RFC 5987 `filename*`) names are left alone.
  */
 export function normalizeUploadedFileName(name: string): string {
   const hasLatin1High = /[\u0080-\u00ff]/.test(name);

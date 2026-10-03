@@ -1,0 +1,15 @@
+# Development overlay: `docker compose` commands inside the repo automatically merge this
+# file with docker-compose.yml. Not needed for installation (see README.md).
+services:
+  postgres:
+    # Exposed only on the host's loopback interface (e.g. for `prisma migrate dev` from the host);
+    # other machines on the network cannot reach the DB.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+  app:
+    # Built from the working copy instead of the registry; `docker compose up --build`.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-testops:local}

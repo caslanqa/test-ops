@@ -26,7 +26,7 @@ export class UpdateRunDto {
   @IsString()
   configuration?: string;
 
-  // ör. JiraCloud, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, CustomField
+  // e.g. JiraCloud, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, CustomField
   @IsOptional()
   @IsString()
   externalLinkType?: string;

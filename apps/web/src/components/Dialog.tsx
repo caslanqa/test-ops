@@ -7,14 +7,14 @@ interface DialogProps {
   title: string;
   description?: string;
   children: ReactNode;
-  /** Geniş içerik (ör. case seçimi) için daha geniş dialog. */
+  /** Wider dialog for wide content (e.g. case selection). */
   wide?: boolean;
 }
 
 /**
- * Native <dialog> + showModal(): odak tuzağı, Esc ile kapanma, arka planın
- * inert olması ve kapanınca odağın tetikleyen öğeye dönmesi tarayıcıdan gelir
- * (a11y K3/K7). Bu yüzden özel bir modal yerine native element kullanılır.
+ * Native <dialog> + showModal(): the focus trap, closing with Esc, an inert
+ * backdrop and focus returning to the trigger on close all come from the browser
+ * (a11y K3/K7). That is why a native element is used instead of a custom modal.
  */
 export function Dialog({
   open,
@@ -58,7 +58,7 @@ export function Dialog({
           type="button"
           className="icon-button"
           onClick={onClose}
-          aria-label="Kapat"
+          aria-label="Close"
         >
           <X size={18} aria-hidden="true" />
         </button>

@@ -75,7 +75,7 @@ export class SuitesService {
     await this.prisma.suite.delete({ where: { id: suiteId } });
   }
 
-  /** Suite'i kendisinin veya bir alt suite'inin altına taşımak hiyerarşide döngü yaratır. */
+  /** Moving a suite under itself or one of its child suites would create a cycle in the hierarchy. */
   private async assertNotDescendant(suiteId: string, newParentId: string) {
     let current: string | null = newParentId;
     while (current) {

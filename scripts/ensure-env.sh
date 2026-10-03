@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# .env yoksa .env.example'dan oluşturur; JWT_SECRET boş veya örnek değerdeyse
-# rastgele bir secret üretir. Uygulama production'da varsayılan/kısa secret ile
-# başlamayı reddettiği için (apps/api/src/config/jwt-secret.ts) start.sh bu adımı
-# her çalıştırmada uygular. Geçerli bir secret varsa dosyaya dokunmaz.
+# Creates .env from .env.example if it does not exist; if JWT_SECRET is empty or
+# still the example value, generates a random secret. Because the app refuses to
+# start in production with a default/short secret (apps/api/src/config/jwt-secret.ts),
+# start.sh runs this step on every invocation. Leaves the file untouched when a
+# valid secret is already set.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -23,7 +24,7 @@ else
 fi
 
 if grep -qE '^JWT_SECRET=' .env; then
-  # mktemp dosyası 600 izinle oluşur; .env secret içerdiği için bu istenen durum.
+  # mktemp creates the file with 600 permissions, which is what we want since .env holds a secret.
   tmp="$(mktemp .env.XXXXXX)"
   awk -v s="$secret" '/^JWT_SECRET=/ { print "JWT_SECRET=" s; next } { print }' .env > "$tmp"
   mv "$tmp" .env

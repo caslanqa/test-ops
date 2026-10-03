@@ -1,112 +1,118 @@
-# TestOps — Geliştirme Planı (Faz 1 sonrası)
+# TestOps — Development Plan (post-Phase 1)
 
-**Durum:** Faz 1 çekirdek uçtan uca çalışıyor ve doğrulandı (bkz. repo memory / önceki konuşma özeti). Bu doküman, design-doc.md'deki fazlara göre **kalan işleri** ve kod incelemesinden çıkan **bilinen eksikleri** tek yerde toplar.
+**Status:** The Phase 1 core works end to end and has been verified (see repo memory / previous conversation summary). This document collects in one place the **remaining work**, organized by the phases in design-doc.md, and the **known gaps** found in the code review.
 
-## 0. Öncelikli teknik borç (fazlardan bağımsız, önce ele alınmalı)
+## 0. Priority technical debt (independent of phases, to be addressed first)
 
-- [ ] **Audit log hiç yazılmıyor.** `AuditLog` Prisma modeli var ama hiçbir serviste insert çağrısı yok. Design-doc bölüm 8: "Kritik kullanıcı işlemleri audit log'a yazılmalı" — şu an karşılanmıyor. Öneri: `AccessControlService` veya ayrı bir `AuditService` ile write/delete/role-değişikliği gibi kritik aksiyonlarda kayıt at.
-- [ ] **Rate limiting gerçekte uygulanmıyor.** FR-077 header formatını belgeliyoruz ama `@nestjs/throttler` gibi bir guard yok; istemci istediği kadar istek atabilir.
-- [ ] **Otomatik test yok.** Ne API (Jest/e2e) ne web (component/e2e) tarafında test var. En azından auth + access-control + run/result akışı için smoke-level e2e testler eklenmeli.
-- [ ] **Backup/restore prosedürü yazılı değil.** Design-doc bölüm 8 ve MVP kabul kriteri 7: PostgreSQL + attachment volume yedekleme/geri yükleme adımları dokümante edilmemiş.
-- [ ] **FR-017 (otomasyon sonucu auto-case-creation) backend'de henüz yok.** Şu an `results.service.ts` sadece var olan `testCaseId` ile eşleşmezse 404 atıyor; isim/suite bazlı fallback eşleştirme veya otomatik case oluşturma yok.
+- [ ] **The audit log is never written.** The `AuditLog` Prisma model exists, but no service ever inserts into it. Design-doc section 8: "Critical user actions must be written to the audit log" — currently not met. Suggestion: record an entry for critical actions such as write/delete/role change via `AccessControlService` or a separate `AuditService`.
+- [x] **Rate limiting is not actually enforced.** _(2 October 2026: `@nestjs/throttler` 6 + `common/rate-limit.ts` `AppThrottlerGuard`. The general limit is 600 per minute per user/anonymous IP (a single counter for the whole API, not per route); sign-in/registration/password change additionally get 10 per account+IP and 60 per IP. On 429: the standard `Retry-After` header and the `Too many attempts. Try again in N seconds.` message; `X-RateLimit-Limit/-Remaining/-Reset` headers; `/health` and `/ready` are exempt from the limit. `RATE_LIMIT_PER_MINUTE`, `AUTH_RATE_LIMIT_PER_MINUTE`, `AUTH_IP_RATE_LIMIT_PER_MINUTE` (0 = off) and `TRUST_PROXY` for a reverse proxy. The sign-in screen shows the 429 message. `tests/smoke/ratelimit.mjs` runs in CI. Remaining: counters are kept in memory (multiple replicas need Redis storage); no account lockout against distributed attempts on a single account from different IPs; no `RateLimit-Policy` header, the `X-RateLimit-*` equivalent is used instead.)_ We document the FR-077 header format, but there is no guard such as `@nestjs/throttler`; a client can send as many requests as it wants.
+- [ ] **No automated tests.** There are no tests on either the API side (Jest/e2e) or the web side (component/e2e). At a minimum, smoke-level e2e tests should be added for auth + access control + the run/result flow.
+- [ ] **The backup/restore procedure is not written down.** _(2 October 2026: the backup commands are in the README (`pg_dump`, `docker compose cp`); the restore steps have not been written or tested yet.)_ Design-doc section 8 and MVP acceptance criterion 7: the backup/restore steps for PostgreSQL + the attachment volume are not documented.
+- [ ] **FR-017 (auto-case-creation from automation results) is not in the backend yet.** Currently `results.service.ts` simply returns 404 when a result does not match an existing `testCaseId`; there is no fallback matching by name/suite and no automatic case creation.
 
-### 0.1 Kod incelemesi bulguları (2 Ekim 2026)
+### 0.1 Code review findings (2 October 2026)
 
-**Güvenlik**
+**Security**
 
-- [x] **Projeler/workspace'ler arası ID doğrulaması yok (FR-003, bölüm 8).** _(2 Ekim 2026: `AccessControlService` kapsam doğrulamaları eklendi; aşağıdaki tüm noktalar düzeltildi ve çalışan stack'e karşı 34 senaryoluk smoke testle doğrulandı.)_ İstek gövdesindeki yabancı anahtarlar URL'deki projeye ait mi kontrol edilmiyor:
-  - `defects.service.ts` create/linkResults `resultIds`: başka projenin result'ı bağlanıp `getOne` ile `caseSnapshot` dahil okunabiliyor.
-  - `requirements.service.ts` linkCases, `plans.service.ts` create/addCases `testCaseIds`: başka projenin case'i bağlanıp tam içeriği okunabiliyor.
-  - `unlinkCase` / `removeCase` / `unlinkResult`: ebeveyn kaydın projeye aitliği kontrol edilmiyor → başka projedeki bağlantılar silinebiliyor.
-  - `suiteId`, `parentId`, `milestoneId`, `assigneeId` doğrulanmıyor; suite `parentId` döngü (kendi alt suite'ine taşıma) kontrolü yok.
-  - `workspaces.service.ts` / `projects.service.ts` `updateMemberRole` / `removeMember`: `memberId` URL'deki workspace/project'e ait mi kontrol edilmiyor → kendi workspace'inde admin olan herkes başka workspace'teki üyeliğini ADMIN yapabilir veya üye silebilir (**yetki yükseltme**).
-- [x] **Varsayılan JWT secret.** _(2 Ekim 2026: `config/jwt-secret.ts` production'da boş/örnek/32 karakterden kısa secret ile bootstrap'i durduruyor; compose `${JWT_SECRET:?}` ile boş değeri reddediyor; `scripts/ensure-env.sh` rastgele secret üretiyor; `start.sh` uygulama hazır olmazsa logları gösterip hata ile çıkıyor ve `.env`'de `APP_PORT` yokken sessizce çıkma hatası giderildi.)_ `configuration.ts` ve `docker-compose.yml` `change-me-in-production` kullanıyor; `start.sh` `.env.example`'ı kopyaladığı için varsayılan kurulumda JWT sahte üretilebilir. Production'da varsayılan/boş secret ile başlamayı reddetmeli.
-- [x] **Postgres host'a açık.** _(2 Ekim 2026: port yalnızca `127.0.0.1`'e bağlanıyor; host'tan `prisma migrate dev` çalışmaya devam ediyor. Varsayılan DB parolası hâlâ `.env`'den geliyor — mevcut volume ile uyumsuzluk riski nedeniyle otomatik üretilmiyor.)_ `docker-compose.yml` varsayılan parola ile 5432'yi dışa açıyor; varsayılan olarak kapalı olmalı (gerekirse override dosyası).
-- [x] **Attachment güvenliği.** _(2 Ekim 2026: uzantı allowlist'i (`ATTACHMENT_ALLOWED_EXTENSIONS`, varsayılanda svg yok) ve sunucuda uzantıdan türetilen Content-Type; `res.attachment` ile RFC 6266 `filename*`; multer disk storage (volume içi `.tmp` + atomik rename, akış ile checksum, reddedilende temizlik); `Content-Length` ile gövde okunmadan 413; ATTACHMENT_* limitleri compose'dan yapılandırılabilir ve geçersiz değerde uygulama başlamıyor. Ek olarak: Türkçe dosya adlarının DB'ye bozuk (`gÃ¶rÃ¼ntÃ¼`) kaydedilmesi düzeltildi, doğrudan `multer` bağımlılığı CVE'li 1.4.5-lts'ten Nest'in kullandığı 2.0.2'ye eşitlendi. 18 senaryolu smoke test geçti. İçerik/magic-byte doğrulaması yok.)_
-  - Bölüm 8'deki MIME/uzantı kontrolü yok (sadece boyut).
-  - `attachments.controller.ts` dosya adını `Content-Disposition`'a ham yazıyor; Latin-1 dışı karakterli adlar (ş, ğ, ı) indirmede 500 verir, `"` header'ı bozar → RFC 5987 `filename*=UTF-8''…`.
-  - `memoryStorage`: toplam 128 MB kontrolü dosyalar RAM'e alındıktan sonra yapılıyor (tek istek ~640 MB) → disk tabanlı storage veya stream.
-- [ ] **Küçükler.** Token iptal yanıtı `tokenHash` döndürüyor; container root olarak çalışıyor.
+- [x] **No cross-project/cross-workspace ID validation (FR-003, section 8).** _(2 October 2026: scope checks added to `AccessControlService`; all of the points below were fixed and verified with a 34-scenario smoke test against the running stack.)_ Foreign keys in the request body are not checked to belong to the project in the URL:
+  - `defects.service.ts` create/linkResults `resultIds`: another project's result can be linked and then read via `getOne`, including `caseSnapshot`.
+  - `requirements.service.ts` linkCases, `plans.service.ts` create/addCases `testCaseIds`: another project's case can be linked and its full content read.
+  - `unlinkCase` / `removeCase` / `unlinkResult`: the parent record is not checked to belong to the project → links in another project can be deleted.
+  - `suiteId`, `parentId`, `milestoneId`, `assigneeId` are not validated; there is no cycle check for suite `parentId` (moving a suite into its own child suite).
+  - `workspaces.service.ts` / `projects.service.ts` `updateMemberRole` / `removeMember`: `memberId` is not checked to belong to the workspace/project in the URL → anyone who is an admin in their own workspace can make their membership in another workspace ADMIN or remove members (**privilege escalation**).
+- [x] **Default JWT secret.** _(2 October 2026: `config/jwt-secret.ts` stops bootstrap in production when the secret is empty, the example value or shorter than 32 characters; compose rejects an empty value via `${JWT_SECRET:?}`; `scripts/ensure-env.sh` generates a random secret; `start.sh` shows the logs and exits with an error if the app does not become ready, and the bug where it exited silently when `APP_PORT` was missing from `.env` was fixed.)_ `configuration.ts` and `docker-compose.yml` use `change-me-in-production`; because `start.sh` copies `.env.example`, JWTs can be forged on a default installation. It should refuse to start in production with a default/empty secret.
+- [x] **Postgres is exposed to the host.** _(2 October 2026: the port is bound only to `127.0.0.1`; `prisma migrate dev` from the host keeps working. The default DB password still comes from `.env` — it is not generated automatically because of the risk of a mismatch with an existing volume.)_ `docker-compose.yml` exposes 5432 externally with the default password; it should be closed by default (with an override file if needed).
+- [x] **Attachment security.** _(2 October 2026: an extension allowlist (`ATTACHMENT_ALLOWED_EXTENSIONS`, no svg by default) and a Content-Type derived server-side from the extension; RFC 6266 `filename*` via `res.attachment`; multer disk storage (`.tmp` inside the volume + atomic rename, checksum computed while streaming, cleanup on rejection); 413 based on `Content-Length` before the body is read; the ATTACHMENT_* limits are configurable from compose and the app refuses to start on an invalid value. Additionally: Turkish file names being stored garbled in the DB (`gÃ¶rÃ¼ntÃ¼`) was fixed, and the direct `multer` dependency was upgraded from the CVE-affected 1.4.5-lts (later to 2.4.0; see Dependency vulnerabilities). The 18-scenario smoke test passed. No content/magic-byte validation.)_
+  - The MIME/extension check from section 8 is missing (size only).
+  - `attachments.controller.ts` writes the file name raw into `Content-Disposition`; names with non-Latin-1 characters (ş, ğ, ı) return 500 on download, and `"` breaks the header → RFC 5987 `filename*=UTF-8''…`.
+  - `memoryStorage`: the 128 MB total check happens after the files have been loaded into RAM (~640 MB for a single request) → disk-based storage or streaming.
+- [ ] **Minor items.** The token revocation response returns `tokenHash`; the container runs as root.
+- [x] **Dependency vulnerabilities.** _(2 October 2026: the direct `multer` dependency was upgraded to 2.4.0; because `@nestjs/platform-express` 10.x pins multer to exactly 2.0.2 and that copy is the one that handles uploads, 2.4.0 is forced across the whole tree via `pnpm-workspace.yaml` `overrides`. The same-major patches for lodash, js-yaml, qs and body-parser were also pulled in via overrides. `pnpm audit --prod` went down from 20+ warnings to 4; the remaining ones are in the Nest 11 item below.)_
+- [ ] **Nest 11 migration (remaining audit warnings).** `pnpm audit --prod` still reports the following; none of them were forced via overrides because they all require a major version:
+  - `@nestjs/core` GHSA-36xv-jgw5-4q75 (moderate) → 11.1.18+ only.
+  - `path-to-regexp` 0.2.5 (via `@nestjs/serve-static`) GHSA-9wv6-86v2-598j (high) → ≥1.9.0; comes with serve-static 5.x.
+  - `file-type` 20.4.1 (via `@nestjs/common`) GHSA-5v7r-6r5c-r473, GHSA-j47w-4g3g-c36v (moderate) → ≥21.3.2. Not currently reachable, since the code does not use `FileTypeValidator`/`ParseFilePipe`.
+  - Recommended to do together with the Node 22 migration (below); the Express 5 route syntax and the `ServeStaticModule` exclude patterns need to be reviewed.
 
-**Doğruluk / fonksiyonel**
+**Correctness / functional**
 
-- [ ] **FR-072 yok.** Hiçbir listeleme endpoint'inde sayfalama/sıralama yok.
-- [ ] **Coverage hatası.** `requirements.service.ts` `take: 200` tüm bağlı case'lerin sonuçlarını birlikte kesiyor; çok çalıştırılan case'lerde diğer case'lerin son durumu kayboluyor. Ayrıca requirement başına N+1 sorgu.
-- [ ] **Bulk submit atomik değil.** `results.service.ts` `bulkSubmit` sıralı ve transaction'sız; tek hatalı öğede 404 döner ama önceki sonuçlar yazılmış kalır, istemci hangilerinin kaydedildiğini bilemez.
-- [ ] **Idempotency yarışı.** `externalTestId` kontrolü transaction dışında; eşzamanlı CI job'ları çift kayıt üretebilir. Eski bir attempt'in `externalTestId`'si gelirse `RunCase.status` eski sonuca çekiliyor.
-- [x] **Silme/bağlantı kaldırma 500 dönüyor.** Prisma `delete` kayıt yoksa P2025 fırlatıyor, global exception filter yok → 404 yerine 500. _(Bağlantı silmeler `deleteMany` + 404'e çevrildi, diğer silmeler önce varlık kontrolü yapıyor. Genel bir Prisma exception filter hâlâ yok.)_
+- [ ] **FR-072 is missing.** No list endpoint has pagination/sorting.
+- [ ] **Coverage bug.** `requirements.service.ts` `take: 200` truncates the results of all linked cases together; with frequently run cases, the latest status of the other cases is lost. Also N+1 queries per requirement.
+- [ ] **Bulk submit is not atomic.** `results.service.ts` `bulkSubmit` is sequential and has no transaction; a single bad item returns 404 but the earlier results stay written, and the client cannot tell which ones were saved.
+- [ ] **Idempotency race.** The `externalTestId` check is outside the transaction; concurrent CI jobs can create duplicate records. If an old attempt's `externalTestId` comes in, `RunCase.status` is reverted to the old result.
+- [x] **Delete/unlink returns 500.** Prisma `delete` throws P2025 when the record does not exist, and there is no global exception filter → 500 instead of 404. _(Unlink operations were changed to `deleteMany` + 404, and the other deletes check for existence first. There is still no general Prisma exception filter.)_
 
-**Araç zinciri**
+**Toolchain**
 
-- [ ] **API lint kırık.** `pnpm lint` → `eslint: command not found`; eslint ne kurulu ne yapılandırılmış.
-- [x] **CI kapısı yok.** Tek workflow tag'de Docker publish; PR/push'ta build + typecheck + test yok. _(2 Ekim 2026: `ci.yml` — PR ve master push'unda build, typecheck, web lint ve Docker stack'ine karşı smoke testler (`tests/smoke/`); publish bu workflow'a `needs:` ile bağlı. API lint hâlâ dışarıda.)_
-- [ ] **Node 20 EOL.** Node 20'nin desteği 30 Nisan 2026'da bitti; Dockerfile (`node:20-bookworm-slim`) ve CI Node 22 LTS'e taşınmalı (Prisma 5 uyumluluğu doğrulanarak).
+- [ ] **API lint is broken.** `pnpm lint` → `eslint: command not found`; eslint is neither installed nor configured.
+- [x] **No CI gate.** The only workflow is a Docker publish on tag; no build + typecheck + test on PR/push. _(2 October 2026: `ci.yml` — on PRs and pushes to master: build, typecheck, web lint and smoke tests against the Docker stack (`tests/smoke/`); publish depends on this workflow via `needs:`. API lint is still left out.)_
+- [ ] **Node 20 EOL.** Node 20 support ended on 30 April 2026; the Dockerfile (`node:20-bookworm-slim`) and CI should move to Node 22 LTS (after verifying Prisma 5 compatibility).
 
-## 1. Faz 2 — Otomasyon ve kanıt
+## 1. Phase 2 — Automation and evidence
 
-- [ ] **Bulk result ingestion için web UI.** Backend'de `POST .../results/bulk` zaten var; arayüzde toplu görüntüleme/yükleme ekranı yok.
-- [ ] **JUnit XML içe aktarma.** FR-078: generic REST + JUnit XML ilk otomasyon girişi olarak tanımlanmış; JUnit XML parse edip `bulkSubmit`'e çeviren bir endpoint/CLI yok.
-- [ ] **İlk framework reporter'ı (Playwright veya pytest).** Henüz hiç reporter paketi yazılmadı.
-- [ ] **Attachment upload/download UI.** API tarafı tam (`attachments.controller.ts`), ama web'de dosya yükleme/indirme ekranı yok — sadece backend REST ile mümkün.
-- [ ] **Run geçmişi / dashboard.** Şu an sadece tek run'ın progress'i gösteriliyor; proje genelinde geçmiş runlar, pass-rate trendi, son failed testler yok (FR-060, FR-061).
-- [ ] **Gelişmiş filtreleme/arama.** FR-061: case/requirement/run/tarih/status/kullanıcı/tag/milestone'a göre filtre — şu an yok.
-- [ ] **API rate limit + idempotency iyileştirmeleri.** (0. madde ile birlikte ele alınabilir.)
+- [ ] **Web UI for bulk result ingestion.** The backend already has `POST .../results/bulk`; the UI has no screen for bulk viewing/uploading.
+- [ ] **JUnit XML import.** FR-078: generic REST + JUnit XML are defined as the first automation inputs; there is no endpoint/CLI that parses JUnit XML and turns it into a `bulkSubmit`.
+- [ ] **First framework reporter (Playwright or pytest).** No reporter package has been written yet.
+- [ ] **Attachment upload/download UI.** The API side is complete (`attachments.controller.ts`), but the web app has no file upload/download screen — it is only possible through the backend REST API.
+- [ ] **Run history / dashboard.** Currently only the progress of a single run is shown; there are no project-wide past runs, pass-rate trend or recent failed tests (FR-060, FR-061).
+- [ ] **Advanced filtering/search.** FR-061: filtering by case/requirement/run/date/status/user/tag/milestone — currently missing.
+- [ ] **API rate limit + idempotency improvements.** (Can be handled together with item 0.) _(The rate limit part was done on 2 October 2026; the idempotency race is still open in section 0.)_
 
-## 2. Faz 3 — Entegrasyon ve ekip ölçeği
+## 2. Phase 3 — Integration and team scale
 
-- [ ] **Jira/GitHub issue bağlantıları (gerçek adapter).** Şu an `Defect.externalProvider/externalIssueId/externalUrl` sadece serbest metin alanı; FR-053'teki adapter mimarisi (otomatik issue oluşturma, durum eşitleme) yok.
-- [ ] **Webhook altyapısı.** FR-079: run tamamlanma, sonuç oluşturma, defect değişikliği olaylarına abonelik + retry/başarısız teslimat görünürlüğü — yok.
-- [ ] **Chat bildirim entegrasyonları** (Slack/Teams/Discord/Mattermost) — webhook altyapısına bağımlı, henüz yok.
-- [ ] **Özel alanlar (custom fields) için UI.** Backend'de `TestCase.customFields` (Json) zaten var ama proje bazlı alan şeması tanımlama/gösterme arayüzü yok.
-- [ ] **Case review akışı, rapor paylaşımı, ek reporter'lar.**
-- [ ] **CSV içe/dışa aktarma.** FR-062.
+- [ ] **Jira/GitHub issue links (a real adapter).** Currently `Defect.externalProvider/externalIssueId/externalUrl` are just free-text fields; the adapter architecture from FR-053 (automatic issue creation, status sync) is missing.
+- [ ] **Webhook infrastructure.** FR-079: subscriptions to run completion, result creation and defect change events + retries/visibility of failed deliveries — missing.
+- [ ] **Chat notification integrations** (Slack/Teams/Discord/Mattermost) — depend on the webhook infrastructure, not available yet.
+- [ ] **UI for custom fields.** The backend already has `TestCase.customFields` (Json), but there is no UI for defining/displaying a per-project field schema.
+- [ ] **Case review flow, report sharing, additional reporters.**
+- [ ] **CSV import/export.** FR-062.
 
-## 3. Web arayüzünde eksik ekranlar (Faz 1 kapsamında backend hazır, UI minimal/yok)
+## 3. Missing screens in the web UI (backend ready within Phase 1 scope, UI minimal/missing)
 
-**Arayüz yenilendi (2 Ekim 2026):** Qase benzeri iş akışı (sol proje navigasyonu, suite ağacı + case tablosu + detay paneli, run ilerleme şeridi ve satır içi sonuç girişi, plan/run/requirement dialoglarında ortak case seçici) kendi görsel kimliğiyle; marka/görsel tasarım kopyalanmadı (design-doc bölüm 1). WCAG 2.2 AA: axe taramasında ihlal yok, 390 px'te yatay kaydırma yok. Planlar sayfasının ilk planla çökmesi giderildi.
+**UI redesigned (2 October 2026):** a Qase-like workflow (left-hand project navigation, suite tree + case table + detail panel, run progress bar and inline result entry, a shared case picker in the plan/run/requirement dialogs) with its own visual identity; no branding/visual design was copied (design-doc section 1). WCAG 2.2 AA: no violations in the axe scan, no horizontal scrolling at 390 px. Fixed the Plans page crashing with the first plan.
 
-- [ ] Milestone yönetimi ekranı (API'de yalnızca list/create var; update/delete yok, UI yok).
-- [x] API token oluşturma/iptal ekranı (API var, UI yok). _(2 Ekim 2026: Hesabım sayfasında; token yalnızca bir kez gösterilir, iptal onay ister. İptal yanıtı artık tokenHash döndürmüyor.)_
-- [ ] Run "public share" linkini açma/kapama ekranı (API var, UI yok).
-- [x] Workspace/project üye yönetimi ekranı — listeleme, ekleme, rol güncelleme ve çıkarma UI'ın hiçbiri yok (MVP kabul kriteri 1 şu an yalnızca API ile karşılanıyor). _(2 Ekim 2026: workspace "Üyeler" sekmesi ve proje "Üyeler" bölümü; açıklamalı rol seçimi; yeni hesap admin tarafından geçici parolayla oluşturulabilir. Arayüz kullanıcının rolüne göre eylemleri gizler, sidebar'da rol görünür.)_
-- [x] Kullanıcı kaydı ve hesap ayarları. _(Kayıt ekranı (`SELF_REGISTRATION`, varsayılan açık), profil ve parola değiştirme; e-posta eşleşmesi büyük/küçük harf duyarsız.)_
-- [x] Üyelik güvenliği. _(Projeye yalnızca workspace üyeleri eklenebilir; workspace'ten çıkarılan kişinin o workspace'teki proje üyelikleri de silinir (önceden projelere erişmeye devam ediyordu); workspace'in son admin'i çıkarılamaz/düşürülemez; üyeler yalnızca üyesi oldukları projelerin adlarını görür. `tests/smoke/users.mjs`: 33 senaryo.)_
-- [ ] Parola sıfırlama ve e-posta daveti — SMTP altyapısı yok; şu an admin yeni hesabı geçici parolayla oluşturuyor, unutulan parolayı sıfırlamanın yolu yok (admin'in başka kullanıcının parolasını sıfırlaması da yok).
-- [ ] Giriş/kayıt için rate limit — kayıt endpoint'i herkese açık; bölüm 0'daki rate limiting maddesi artık daha öncelikli.
-- [x] Suite hiyerarşisi (alt suite/klasör ağacı) — şu an tek seviye liste. _(2 Ekim 2026: Repository'de iç içe suite ağacı, alt suite'ler dahil sayaçlar ve ağaç sırasıyla gruplanmış case listesi.)_
-- [ ] Adım bazlı (step-level) sonuç girme — şu an case bazlı tek durum.
-- [ ] Düzenleme/arşivleme/silme — web hiçbir yerde `PATCH`/`DELETE` çağırmıyor; case, requirement, plan, run, defect yalnızca oluşturulabiliyor (FR-011).
-- [x] Requirement coverage görünümü (FR-022, akış 5.1 adım 3). _(Requirement listesinde testsiz etiketi ve son sonuç şeridi.)_
-- [ ] Case değişiklik geçmişi (FR-015) — API var, UI yok.
-- [x] Arayüz dili İngilizce. _(2 Ekim 2026: tüm arayüz metinleri, API hata mesajları, seed ve başlatma script çıktıları İngilizce; kod yorumları Türkçe kaldı. Tarihler `en-US`; aramada i/ı/İ farkı yok sayılıyor. Çoklu dil (i18n) altyapısı yok — ikinci bir dil gerekirse metinler bir sözlüğe taşınmalı.)_
-- [x] Açık/koyu tema. _(Sistem / Açık / Koyu seçimi üst barda ve giriş ekranında; tercih tarayıcıda saklanır, sekmeler arası eşitlenir; `public/theme-init.js` ilk çizimden önce uygular (CSP satır içi script'e izin vermediği için ayrı dosya). İki temada 11 sayfanın axe taraması temiz.)_
+- [ ] Milestone management screen (the API only has list/create; no update/delete, no UI).
+- [x] API token creation/revocation screen (API exists, no UI). _(2 October 2026: on the Account page; the token is shown only once, and revocation asks for confirmation. The revocation response no longer returns tokenHash.)_
+- [ ] Screen for enabling/disabling a run's "public share" link (API exists, no UI).
+- [x] Workspace/project member management screen — none of the UI for listing, adding, updating roles or removing exists (MVP acceptance criterion 1 is currently met only through the API). _(2 October 2026: a "Members" tab for workspaces and a "Members" section for projects; role selection with descriptions; an admin can create a new account with a temporary password. The UI hides actions based on the user's role, and the role is shown in the sidebar.)_
+- [x] User registration and account settings. _(Registration screen (`SELF_REGISTRATION`, on by default), profile and password change; email matching is case-insensitive.)_
+- [x] Membership security. _(Only workspace members can be added to a project; when someone is removed from a workspace, their project memberships in that workspace are removed too (previously they kept access to the projects); the last admin of a workspace cannot be removed/demoted; members only see the names of the projects they are members of. `tests/smoke/users.mjs`: 33 scenarios.)_
+- [ ] Password reset and email invitations — no SMTP infrastructure; currently an admin creates new accounts with a temporary password, and there is no way to reset a forgotten password (nor can an admin reset another user's password).
+- [x] Rate limit for sign-in/registration — the registration endpoint is public; the rate limiting item in section 0 is now a higher priority. _(2 October 2026: done together with the rate limiting in section 0.)_
+- [x] Suite hierarchy (child suite/folder tree) — currently a single-level list. _(2 October 2026: a nested suite tree in the Repository, counts that include child suites, and a case list grouped in tree order.)_
+- [ ] Step-level result entry — currently a single status per case.
+- [ ] Editing/archiving/deleting — the web app never calls `PATCH`/`DELETE`; cases, requirements, plans, runs and defects can only be created (FR-011).
+- [x] Requirement coverage view (FR-022, flow 5.1 step 3). _(A "no tests" label and a latest-results strip in the requirement list.)_
+- [ ] Case change history (FR-015) — API exists, no UI.
+- [x] The UI language is English. _(2 October 2026: all UI text, API error messages, and seed and startup script output are in English. 3 October 2026: the rest of the repository (code comments, docs, smoke tests, scripts, CI) was translated to English as well. Dates use `en-US`; search ignores the i/ı/İ distinction. There is no multi-language (i18n) infrastructure — if a second language is needed, the strings should be moved into a dictionary.)_
+- [x] Light/dark theme. _(System / Light / Dark choice in the top bar and on the sign-in screen; the preference is stored in the browser and synced across tabs; `public/theme-init.js` applies it before the first paint (a separate file because the CSP does not allow inline scripts). Axe scans of 11 pages are clean in both themes.)_
 
-## 4. Yayın — container registry publish
+## 4. Release — container registry publish
 
-**Tekrarlanabilir build:** `package.json` `packageManager: pnpm@12.8.1` — Docker (corepack), CI (`pnpm/action-setup`) ve yerel pnpm aynı sürümü kullanır; sürüm lockfile'da integrity ile kayıtlı.
+**Reproducible build:** `package.json` `packageManager: pnpm@12.8.1` — Docker (corepack), CI (`pnpm/action-setup`) and local pnpm all use the same version; the version is recorded in the lockfile with its integrity hash.
 
-**Mevcut durum (2 Ekim 2026):** Elle adım yok. `release.yml` master'a her push/merge'de (yalnızca `.md` değişiklikleri hariç) CI'ı çalıştırır, `scripts/next-version.sh` ile sürümü hesaplar (ilk sürüm `package.json`'dan; sonra `feat:` → minor, `type!:` / `BREAKING CHANGE:` → major, diğerleri → patch), imajı `ghcr.io/caslanqa/testops`'a yayınlar, anonim çekilebildiğini doğrular ve ardından `vX.Y.Z` tag'i + GitHub Release (otomatik notlar) oluşturur. Tag `GITHUB_TOKEN` ile oluşturulduğu için başka workflow tetiklemez; yayın aynı run içindedir.
+**Current state (2 October 2026):** No manual steps. On every push/merge to master (except when only `.md` files change), `release.yml` runs CI, computes the version with `scripts/next-version.sh` (the first version comes from `package.json`; after that `feat:` → minor, `type!:` / `BREAKING CHANGE:` → major, everything else → patch), publishes the image to `ghcr.io/caslanqa/testops`, verifies that it can be pulled anonymously, and then creates the `vX.Y.Z` tag + a GitHub Release (automatic notes). Because the tag is created with `GITHUB_TOKEN`, it does not trigger other workflows; the release happens within the same run.
 
-- [x] **Repo henüz git/GitHub'da değil** — workflow hiç çalışamaz. _(2 Ekim 2026: `github.com/caslanqa/test-ops`; ilk `v0.1.0` master'a ilk merge'de otomatik çıkar.)_
-- [x] **Publish öncesi kalite kapısı yok.** _(`ci.yml` reusable workflow olarak çağrılıyor.)_ Build/typecheck/test geçmeden imaj yayınlanıyor → ayrı CI job'u ve publish'te `needs:`.
-- [x] **Yalnızca linux/amd64.** _(QEMU + `linux/amd64,linux/arm64`; GHCR için index annotation'ları.)_ Apple Silicon / ARM sunucularda emülasyonla çalışır → `setup-qemu-action` + `platforms: linux/amd64,linux/arm64`.
-- [x] **Sürümsüz build `latest` oluyor.** _(raw satırı kaldırıldı; `{{major}}.{{minor}}` tag'i eklendi.)_ `type=raw,value=latest,enable={{is_default_branch}}` manuel tetiklemede main'i `latest` yapıyor; semver tag'lerinde `latest` zaten `flavor: latest=auto` ile üretildiği için bu satır kaldırılmalı.
-- [x] **Docker Hub (opsiyonel).** _(Karar, 2 Ekim 2026: yalnızca GHCR; Docker Hub eklenmeyecek.)_
-- [x] **GHCR paket görünürlüğü.** _(`GITHUB_TOKEN` ile yayınlanan paket public repo'nun görünürlüğünü devralır; publish job'ı anonim `imagetools inspect` ile doğrular, çekilemezse uyarı verir.)_
-- [x] **Otomatik sürümleme ve release.** _(Elle tag yok; bkz. yukarıdaki akış ve `scripts/next-version.sh`.)_
-- [ ] **Pull tabanlı kurulum.** Mevcut `docker-compose.yml` `build:` içeriyor; yalnızca `image:` kullanan bir release compose dosyası + kurulum/upgrade/yedekleme README'si (bölüm 0'daki backup maddesiyle birlikte).
-- [ ] **İmaj sertleştirme.** Non-root kullanıcı (mevcut root-sahipli volume'lar için geçiş adımıyla), SBOM/provenance (`sbom: true`), opsiyonel cosign imzası.
+- [x] **The repo is not on git/GitHub yet** — the workflow can never run. _(2 October 2026: `github.com/caslanqa/test-ops`; the first `v0.1.0` is released automatically on the first merge to master.)_
+- [x] **No quality gate before publish.** _(`ci.yml` is called as a reusable workflow.)_ The image is published without build/typecheck/test having passed → a separate CI job and `needs:` on publish.
+- [x] **linux/amd64 only.** _(QEMU + `linux/amd64,linux/arm64`; index annotations for GHCR.)_ Runs under emulation on Apple Silicon / ARM servers → `setup-qemu-action` + `platforms: linux/amd64,linux/arm64`.
+- [x] **An unversioned build becomes `latest`.** _(The raw line was removed; a `{{major}}.{{minor}}` tag was added.)_ `type=raw,value=latest,enable={{is_default_branch}}` makes main `latest` on a manual trigger; since `latest` is already produced for semver tags by `flavor: latest=auto`, this line should be removed.
+- [x] **Docker Hub (optional).** _(Decision, 2 October 2026: GHCR only; Docker Hub will not be added.)_
+- [x] **GHCR package visibility.** _(A package published with `GITHUB_TOKEN` inherits the public repo's visibility; the publish job verifies this with an anonymous `imagetools inspect` and warns if the image cannot be pulled.)_
+- [x] **Automatic versioning and release.** _(No manual tags; see the flow above and `scripts/next-version.sh`.)_
+- [x] **Pull-based installation.** _(2 October 2026: `docker-compose.yml` now uses only `image:` (default `ghcr.io/caslanqa/testops:latest`); the build and Postgres's host port are in `docker-compose.override.yml`, which is loaded automatically inside the repo. `README.md`: quick start, first sign-in, day-to-day commands, configuration table, reverse proxy, installation with `docker run`, troubleshooting. If `DATABASE_URL` is missing, the image exits with an explanatory message; it retries migrations until the DB is ready, and Node runs as PID 1. GHCR 0.2.0 and a candidate image were installed in a clean folder by following the README steps, and the smoke tests passed.)_ The current `docker-compose.yml` contains `build:`; a release compose file that uses only `image:` + an install/upgrade/backup README (together with the backup item in section 0).
+- [ ] **Image hardening.** Non-root user (with a migration step for existing root-owned volumes), SBOM/provenance (`sbom: true`), optional cosign signing.
 
-## Önerilen sıradaki adım
+## Recommended next step
 
-En yüksek değer/efor oranına göre önerilen sıra:
-1. Projeler/workspace'ler arası ID doğrulaması + JWT secret zorunluluğu (0.1 — aktif güvenlik açıkları, küçük efor).
-2. Attachment güvenliği + Postgres portu + audit log + rate limiting.
-3. Bulk submit atomikliği, idempotency yarışı, coverage hatası, FR-072 sayfalama.
-4. Lint/CI kapısı + smoke e2e testler + registry publish iyileştirmeleri (bölüm 4; CI kapısıyla aynı workflow işi).
-5. Attachment upload UI + milestone/API-token/share/üye yönetimi UI'ları (backend zaten hazır, sadece frontend işi).
-6. JUnit XML içe aktarma + ilk reporter (otomasyon değerini gösterir).
-7. Dashboard/geçmiş/filtreleme (kullanım arttıkça değeri artar).
-8. Jira/GitHub + webhook entegrasyonları (en yüksek efor, en dış bağımlılık).
+Recommended order, by highest value/effort ratio:
+1. Cross-project/cross-workspace ID validation + mandatory JWT secret (0.1 — active security vulnerabilities, small effort).
+2. Attachment security + Postgres port + audit log + rate limiting.
+3. Bulk submit atomicity, idempotency race, coverage bug, FR-072 pagination.
+4. Lint/CI gate + smoke e2e tests + registry publish improvements (section 4; the same workflow work as the CI gate).
+5. Attachment upload UI + milestone/API token/share/member management UIs (the backend is already ready, frontend work only).
+6. JUnit XML import + first reporter (demonstrates the value of automation).
+7. Dashboard/history/filtering (more valuable as usage grows).
+8. Jira/GitHub + webhook integrations (highest effort, most external dependencies).
 
-Hangi maddeyle devam edileceğini onaylayın, o maddeden başlanır.
+Confirm which item to continue with, and work will start from that item.

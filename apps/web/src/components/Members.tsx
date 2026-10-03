@@ -15,7 +15,7 @@ export interface RoleOption {
   description: string;
 }
 
-/** Rol seçimi: her rolün ne yapabildiği seçim anında görünsün diye açıklamalı radio grubu. */
+/** Role picker: a described radio group, so what each role can do is visible while choosing. */
 export function RoleRadioGroup({
   legend,
   name,
@@ -52,8 +52,8 @@ export function RoleRadioGroup({
 }
 
 /**
- * Workspace ve proje üyeleri için ortak tablo. Yönetme yetkisi yoksa roller metin
- * olarak gösterilir; varsa satır içi rol seçimi ve çıkarma eylemi açılır.
+ * Shared table for workspace and project members. Without manage permission, roles are
+ * shown as text; with it, inline role selection and the remove action are enabled.
  */
 export function MemberTable({
   members,
@@ -162,7 +162,7 @@ export function MemberTable({
   );
 }
 
-/** Geri alınamayan eylemler için onay: ne olacağını söyler, eylemin adını butonda tekrarlar. */
+/** Confirmation for irreversible actions: says what will happen and repeats the action name on the button. */
 export function ConfirmDialog({
   open,
   title,

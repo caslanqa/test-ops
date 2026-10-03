@@ -7,9 +7,9 @@ import * as crypto from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateApiTokenDto } from "./dto/create-api-token.dto";
 
-// FR-073: API token’ları iptal edilebilir olmalı; oluşturma/son kullanım audit edilmelidir.
-// Token sadece oluşturulduktan hemen sonra bir kez düz metin olarak döndürülür; sonrasında
-// yalnızca hash saklanır ve tekrar gösterilmez.
+// FR-073: API tokens must be revocable; creation/last use must be audited.
+// The token is returned in plain text only once, right after creation; after that
+// only the hash is stored and it is never shown again.
 @Injectable()
 export class ApiTokensService {
   constructor(private readonly prisma: PrismaService) {}
@@ -26,7 +26,7 @@ export class ApiTokensService {
     return {
       id: apiToken.id,
       name: apiToken.name,
-      token: plainToken, // yalnızca bu yanıtta görünür
+      token: plainToken, // visible only in this response
       createdAt: apiToken.createdAt,
     };
   }
@@ -53,7 +53,7 @@ export class ApiTokensService {
     if (token.userId !== userId) {
       throw new ForbiddenException("This token does not belong to you");
     }
-    // Yanıt tokenHash içermez; hash de olsa sızdırılmamalı.
+    // The response omits tokenHash; even a hash must not leak.
     return this.prisma.apiToken.update({
       where: { id: tokenId },
       data: { revokedAt: new Date() },

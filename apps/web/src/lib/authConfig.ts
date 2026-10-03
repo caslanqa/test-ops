@@ -1,7 +1,7 @@
 import { api } from '../api/client';
 import { useResource } from './useResource';
 
-/** Kendi kendine kaydın açık olup olmadığı (sunucudaki SELF_REGISTRATION). */
+/** Whether self-registration is enabled (SELF_REGISTRATION on the server). */
 export function useAuthConfig() {
   return useResource(() => api.get<{ selfRegistration: boolean }>('/auth/config'), []);
 }

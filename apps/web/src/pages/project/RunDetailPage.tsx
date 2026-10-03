@@ -52,7 +52,7 @@ interface ResultRow {
   runCase: { testCaseId: string };
 }
 
-/** Run başlatıldığındaki case kopyası (snapshot): tester'ın uygulayacağı adımlar. */
+/** Copy of the case taken when the run started (snapshot): the steps the tester will follow. */
 function RunCasePanel({ runCase, onClose }: { runCase: RunCase; onClose: () => void }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
@@ -104,9 +104,9 @@ function RunCasePanel({ runCase, onClose }: { runCase: RunCase; onClose: () => v
 }
 
 /**
- * Bir case için sonuç butonları (aria-pressed ile mevcut durum) ve kaldıysa defect açma.
- * Masaüstünde ayrı sütunda, dar ekranda case başlığının altında gösterilir; görünmeyen
- * kopya display:none ile erişilebilirlik ağacından da çıkar.
+ * Result buttons for a case (current status via aria-pressed) and, if it failed, filing a defect.
+ * Shown in a separate column on desktop and under the case title on narrow screens; the hidden
+ * copy is also removed from the accessibility tree by display:none.
  */
 function ResultActions({
   runCase,
@@ -222,7 +222,7 @@ export function RunDetailPage() {
   if (!run) return <Loading />;
 
   const isOpen = run.status === 'OPEN';
-  // Sonuç girişi yalnızca açık run'da ve yürütme yetkisi olan rollere (Admin, Tester, Otomasyon).
+  // Result entry only on open runs and for roles with execute permission (Admin, Tester, Automation).
   const canRecord = isOpen && execute;
   const runCases = [...run.runCases].sort((a, b) => a.position - b.position);
   const statuses = runCases.map((rc) => (isResultStatus(rc.status) ? rc.status : 'UNTESTED'));
@@ -286,8 +286,8 @@ export function RunDetailPage() {
         }
       />
 
-      {/* Sonuç listenin neresinde girilirse girilsin onay görünür kalsın diye ekranın altında
-          sabit; role=status ile odak taşınmadan ekran okuyuculara da duyurulur (WCAG 4.1.3). */}
+      {/* Fixed to the bottom of the screen so the confirmation stays visible wherever in the list the
+          result was entered; role=status also announces it to screen readers without moving focus (WCAG 4.1.3). */}
       <div className="toast-region" role="status">
         {notice && (
           <div className="toast">

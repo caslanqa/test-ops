@@ -8,7 +8,7 @@ export class CreateRequirementDto {
   @IsString()
   description?: string;
 
-  // Dış sistem referansı (ID/URL) - içerik senkronizasyonu MVP dışı (bkz. design-doc.md bölüm 11)
+  // External system reference (ID/URL) - content sync is out of MVP scope (see design-doc.md section 11)
   @IsOptional()
   @IsString()
   externalRef?: string;

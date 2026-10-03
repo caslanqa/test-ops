@@ -3,7 +3,7 @@ import { ApiTags } from "@nestjs/swagger";
 import { RunsService } from "./runs.service";
 import { Public } from "../common/decorators/public.decorator";
 
-// FR-063: tahmin edilemeyen token ile ayrıcalıklı (auth gerektirmeyen) run paylaşımı görünümü
+// FR-063: auth-exempt (no auth required) run share view behind an unguessable token
 @ApiTags("public")
 @Controller("public/runs")
 export class PublicRunsController {

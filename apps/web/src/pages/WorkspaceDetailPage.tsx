@@ -14,8 +14,8 @@ interface ProjectRow extends Project {
   createdAt: string;
 }
 
-// Form yalnızca dialog açıkken mount olur: her açılışta state temiz başlar ve
-// form'un ihtiyaç duyduğu veriler sayfa açılırken değil, dialog açılınca istenir.
+// The form mounts only while the dialog is open: state starts clean on every open, and
+// the data the form needs is requested when the dialog opens, not when the page loads.
 function CreateProjectDialog({ open, ...props }: Parameters<typeof CreateProjectForm>[0] & { open: boolean }) {
   return (
     <Dialog open={open} onClose={props.onClose} title="New project">
@@ -94,7 +94,7 @@ export function WorkspaceDetailPage() {
     [workspaceId],
   );
 
-  // Proje oluşturma yalnızca workspace admin'ine açık (sunucu da aynı kuralı uygular).
+  // Creating projects is open only to workspace admins (the server enforces the same rule).
   const isAdmin = workspace?.currentUserRole === 'ADMIN';
   const createButton = isAdmin ? (
     <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>

@@ -8,8 +8,8 @@ import { slugify } from '../lib/format';
 import type { Workspace } from '../lib/projectInfo';
 import { usePageTitle, useResource } from '../lib/useResource';
 
-// Form yalnızca dialog açıkken mount olur: her açılışta state temiz başlar ve
-// form'un ihtiyaç duyduğu veriler sayfa açılırken değil, dialog açılınca istenir.
+// The form mounts only while the dialog is open: state starts clean on every open, and
+// the data the form needs is requested when the dialog opens, not when the page loads.
 function CreateWorkspaceDialog({ open, ...props }: Parameters<typeof CreateWorkspaceForm>[0] & { open: boolean }) {
   return (
     <Dialog
@@ -70,7 +70,8 @@ function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
         <input
           id={slugId}
           value={slug}
-          pattern="[a-z0-9-]+"
+          // The browser compiles pattern with the `v` flag; an unescaped `-` inside a class is invalid.
+          pattern="[a-z0-9\-]+"
           required
           aria-describedby={slugHintId}
           onChange={(e) => {

@@ -77,8 +77,8 @@ export class ResultsService {
       dto.testCaseId,
     );
 
-    // FR-075: dış test kimliği üzerinden idempotency - aynı anahtarla gelen
-    // tekrar istekler yeni attempt yaratmak yerine mevcut sonucu günceller.
+    // FR-075: idempotency via the external test ID - repeated requests with the
+    // same key update the existing result instead of creating a new attempt.
     if (dto.externalTestId) {
       const existing = await this.prisma.result.findFirst({
         where: { runCaseId: runCase.id, externalTestId: dto.externalTestId },

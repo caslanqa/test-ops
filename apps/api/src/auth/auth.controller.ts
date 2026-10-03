@@ -1,10 +1,11 @@
 import { Body, Controller, Get, HttpCode, Patch, Post } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiTags, ApiTooManyRequestsResponse } from "@nestjs/swagger";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
 import { ChangePasswordDto, UpdateProfileDto } from "./dto/update-profile.dto";
 import { Public } from "../common/decorators/public.decorator";
+import { RateLimitAuthAttempt } from "../common/rate-limit";
 import {
   CurrentUser,
   AuthenticatedUser,
@@ -22,6 +23,8 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimitAuthAttempt("login")
+  @ApiTooManyRequestsResponse({ description: "Too many attempts; see the Retry-After header" })
   @HttpCode(200)
   @Post("login")
   login(@Body() dto: LoginDto) {
@@ -29,6 +32,8 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimitAuthAttempt("register")
+  @ApiTooManyRequestsResponse({ description: "Too many attempts; see the Retry-After header" })
   @Post("register")
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -44,6 +49,8 @@ export class AuthController {
     return this.authService.updateProfile(user.id, dto.displayName);
   }
 
+  @RateLimitAuthAttempt("password-change")
+  @ApiTooManyRequestsResponse({ description: "Too many attempts; see the Retry-After header" })
   @HttpCode(204)
   @Patch("me/password")
   async changePassword(

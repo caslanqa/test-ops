@@ -121,7 +121,7 @@ export class RequirementsService {
     }
   }
 
-  // FR-022: testsiz requirement'ları ve son test durumlarını gösteren coverage raporu
+  // FR-022: coverage report showing untested requirements and their latest test status
   async coverage(userId: string, projectId: string) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,

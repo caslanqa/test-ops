@@ -25,8 +25,8 @@ export class AuthService {
   }
 
   /**
-   * E-postayı büyük/küçük harf duyarsız arar: "Ali@x.com" ile kayıtlı kullanıcı
-   * "ali@x.com" ile de giriş yapabilmeli ve aynı adres ikinci kez kaydedilmemeli.
+   * Looks up the email case-insensitively: a user registered as "Ali@x.com" must
+   * also be able to sign in with "ali@x.com", and the same address must not register twice.
    */
   findUserByEmail(email: string) {
     return this.prisma.user.findFirst({
@@ -34,7 +34,7 @@ export class AuthService {
     });
   }
 
-  /** Giriş ekranının kayıt bağlantısını gösterip göstermeyeceği. */
+  /** Whether the login screen should show the sign-up link. */
   publicConfig() {
     return {
       selfRegistration: this.config.get<boolean>("auth.selfRegistration") ?? false,
@@ -54,9 +54,9 @@ export class AuthService {
   }
 
   /**
-   * Kendi kendine kayıt (SELF_REGISTRATION). Yeni kullanıcı hiçbir workspace'in
-   * üyesi değildir: kendi workspace'ini oluşturabilir veya bir admin tarafından
-   * eklenir; başka bir kapsamın verisini göremez.
+   * Self-registration (SELF_REGISTRATION). The new user is not a member of any
+   * workspace: they can create their own workspace or be added by an admin;
+   * they cannot see data from any other scope.
    */
   async register(dto: RegisterDto) {
     if (!this.publicConfig().selfRegistration) {
@@ -86,9 +86,9 @@ export class AuthService {
   }
 
   /**
-   * Parola değişikliği mevcut parolanın doğrulanmasını gerektirir; böylece açık
-   * kalmış bir oturumu ele geçiren biri hesabı kalıcı olarak devralamaz.
-   * API token'larıyla yapılamaz (token sahibinin parolasını değiştirmemeli).
+   * Changing the password requires verifying the current one, so someone who
+   * hijacks a session left open cannot take over the account permanently.
+   * Not allowed with API tokens (a token must not change its owner's password).
    */
   async changePassword(
     userId: string,

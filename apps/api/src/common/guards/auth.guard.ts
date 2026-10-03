@@ -10,9 +10,9 @@ import * as crypto from "crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 
-// Tek bir Authorization: Bearer <value> şeması hem web oturum JWT'sini
-// hem de otomasyon/CI API token'larını kabul eder (FR: API işlemleri kullanıcı
-// rolü ve token izinlerine tabidir).
+// A single Authorization: Bearer <value> scheme accepts both the web session JWT
+// and automation/CI API tokens (FR: API operations are subject to the user's
+// role and token permissions).
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
@@ -37,7 +37,7 @@ export class AuthGuard implements CanActivate {
     }
     const token = authHeader.slice("Bearer ".length).trim();
 
-    // JWT'ler üç nokta-ayrılmış segment içerir; API token'ları rastgele tek bir dizedir.
+    // JWTs have three dot-separated segments; API tokens are a single random string.
     if (token.split(".").length === 3) {
       try {
         const payload = await this.jwtService.verifyAsync(token);

@@ -7,23 +7,23 @@ import {
   type ResultStatus,
 } from '../lib/status';
 
-/** Bu sayının üzerindeki run'larda hücreler okunamayacak kadar incelir; oransal görünüme geçilir. */
+/** Above this many cases, cells get too thin to read; the proportional view is used instead. */
 const MAX_CELLS = 400;
 
 interface RibbonProps {
-  /** Run sırasıyla case durumları; verilirse her case bir hücre olarak çizilir. */
+  /** Case statuses in run order; when given, each case is drawn as a cell. */
   statuses?: ResultStatus[];
-  /** Durum → adet; `statuses` yoksa oransal segmentler çizilir. */
+  /** Status → count; without `statuses`, proportional segments are drawn. */
   counts?: Record<string, number>;
   size?: 'sm' | 'lg';
-  /** Ekran okuyucu özetinin başına eklenen bağlam (ör. run adı). */
+  /** Context prepended to the screen reader summary (e.g. the run name). */
   label?: string;
 }
 
 /**
- * Sonuç şeridi: arayüzün imza öğesi. Görsel hücreler aria-hidden'dır; bilgiyi
- * ekran okuyuculara `role="img"` etiketi, gören kullanıcılara ise yanındaki
- * StatusLegend metin olarak verir (renk tek başına anlam taşımaz).
+ * Result ribbon: the signature element of the UI. The visual cells are aria-hidden; the
+ * information reaches screen readers through the `role="img"` label and sighted users
+ * through the StatusLegend text next to it (color alone carries no meaning).
  */
 export function ResultRibbon({
   statuses,
@@ -70,7 +70,7 @@ export function ResultRibbon({
   );
 }
 
-/** Şeridin metin karşılığı: her durum için ikon, etiket ve adet. */
+/** Text equivalent of the ribbon: icon, label and count for each status. */
 export function StatusLegend({
   counts,
   hideEmpty = false,

@@ -7,7 +7,7 @@ const OPTIONS: { value: ThemePreference; label: string; icon: LucideIcon }[] = [
   { value: 'dark', label: 'Dark theme', icon: Moon },
 ];
 
-/** Sistem / açık / koyu seçimi; seçili olan aria-pressed ile işaretlenir. */
+/** System / light / dark choice; the selected one is marked with aria-pressed. */
 export function ThemeSwitcher() {
   const preference = useThemePreference();
   return (

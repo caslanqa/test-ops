@@ -53,8 +53,8 @@ export class WorkspacesService {
       where: { id: workspaceId },
     });
     if (!workspace) throw new NotFoundException("Workspace not found");
-    // Arayüz, kullanıcının yetkisi olmayan eylemleri göstermemek için rolü kullanır;
-    // yetki kontrolü yine her endpoint'te sunucuda yapılır.
+    // The UI uses the role to hide actions the user is not permitted to perform;
+    // authorization is still enforced on the server at every endpoint.
     return { ...workspace, currentUserRole: member.role };
   }
 
@@ -104,7 +104,7 @@ export class WorkspacesService {
       });
     }
 
-    // Var olan üyeyi tekrar eklemek rolünü günceller; son admin bu yoldan da düşürülemez.
+    // Re-adding an existing member updates their role; the last admin cannot be demoted this way either.
     const existing = await this.prisma.workspaceMember.findUnique({
       where: { workspaceId_userId: { workspaceId, userId: targetUser.id } },
     });
@@ -149,9 +149,9 @@ export class WorkspacesService {
     const member = await this.prisma.workspaceMember.findUniqueOrThrow({
       where: { id: memberId },
     });
-    // Proje erişimi proje üyeliğiyle kontrol edildiği için workspace'ten çıkarılan
-    // kişinin o workspace'teki proje üyelikleri de silinir; aksi halde projelere
-    // erişmeye devam ederdi.
+    // Project access is checked via project membership, so a person removed from the
+    // workspace also loses their project memberships in it; otherwise they would
+    // keep accessing those projects.
     await this.prisma.$transaction([
       this.prisma.projectMember.deleteMany({
         where: { userId: member.userId, project: { workspaceId } },
@@ -160,7 +160,7 @@ export class WorkspacesService {
     ]);
   }
 
-  /** Workspace yönetilemez kalmasın: son admin silinemez veya rolü düşürülemez. */
+  /** Keep the workspace manageable: the last admin cannot be removed or demoted. */
   private async assertNotLastAdmin(workspaceId: string, memberId: string) {
     const member = await this.prisma.workspaceMember.findUniqueOrThrow({
       where: { id: memberId },

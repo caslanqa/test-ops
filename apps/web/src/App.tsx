@@ -23,7 +23,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route element={<ProtectedRoute />}>
-          {/* Sidebar ve üst bar tüm oturum içi sayfalarda ortak; proje navigasyonu sidebar'da. */}
+          {/* Sidebar and top bar are shared by all signed-in pages; project navigation is in the sidebar. */}
           <Route element={<AppShell />}>
             <Route path="/workspaces" element={<WorkspacesPage />} />
             <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
