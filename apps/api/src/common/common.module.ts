@@ -26,7 +26,7 @@ import { AppThrottlerGuard, throttlerOptions } from "./rate-limit";
   ],
   providers: [
     AccessControlService,
-    // Sıra önemli: rate limit kimliği AuthGuard'ın doldurduğu request.user'dan okur.
+    // Order matters: the rate limit identity is read from request.user, set by AuthGuard.
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
   ],

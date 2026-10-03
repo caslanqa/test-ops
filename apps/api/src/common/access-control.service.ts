@@ -6,8 +6,8 @@ import {
 import { ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
-// FR-003: her sorgu, kullanıcının yetkili olduğu workspace/project ile sınırlandırılmalı.
-// Nesne ID tahmini ile veri sızıntısını önlemek için her erişimde membership doğrulanır.
+// FR-003: every query must be limited to the workspace/project the user is authorized for.
+// Membership is verified on every access to prevent data leaks through guessed object IDs.
 @Injectable()
 export class AccessControlService {
   constructor(private readonly prisma: PrismaService) {}
@@ -56,7 +56,7 @@ export class AccessControlService {
     return member;
   }
 
-  /** Bir projenin workspace'ine kullanıcının admin erişimi olup olmadığını (ör. workspace admin'in tüm projelere erişimi) kontrol eder. */
+  /** Checks whether the user has admin access to a project's workspace (e.g. a workspace admin's access to all projects). */
   async isWorkspaceAdminOfProject(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
@@ -71,7 +71,7 @@ export class AccessControlService {
     return member?.role === WorkspaceRole.ADMIN;
   }
 
-  /** Workspace admin'leri, kendi workspace'lerindeki her projede ADMIN gibi davranabilir. */
+  /** Workspace admins can act as ADMIN in every project of their own workspace. */
   async requireProjectRoleOrWorkspaceAdmin(
     userId: string,
     projectId: string,
@@ -84,7 +84,7 @@ export class AccessControlService {
     return { ...member, viaWorkspaceAdmin: false };
   }
 
-  /** Projeye herhangi bir rolle (en az VIEWER) erişimi olup olmadığını workspace admin düşüşüyle birlikte doğrular. */
+  /** Verifies access to the project with any role (at least VIEWER), falling back to workspace admin. */
   async requireProjectAccessOrWorkspaceAdmin(
     userId: string,
     projectId: string,
@@ -97,14 +97,14 @@ export class AccessControlService {
   }
 
   // ---------------------------------------------------------------------------
-  // Kapsam doğrulamaları (FR-003, design-doc bölüm 8)
+  // Scope checks (FR-003, design-doc section 8)
   //
-  // Üyelik kontrolü yalnızca URL'deki projeyi/workspace'i doğrular; istek
-  // gövdesindeki veya path'teki diğer ID'ler (case, result, suite, milestone,
-  // kullanıcı, üyelik) başka bir kapsama ait olabilir. Bunlar doğrulanmazsa
-  // başka projenin kaydı bağlanıp ilişki üzerinden okunabilir veya
-  // değiştirilebilir. "Yok" ile "başka kapsama ait" ayırt edilmeden 404 döner;
-  // böylece ID tahmini kaydın varlığını da sızdırmaz.
+  // The membership check only verifies the project/workspace in the URL; other
+  // IDs in the request body or path (case, result, suite, milestone, user,
+  // membership) may belong to another scope. If they are not checked, another
+  // project's record could be linked and then read or modified through the
+  // relation. "Missing" and "belongs to another scope" both return 404 alike,
+  // so a guessed ID does not leak whether the record exists either.
   // ---------------------------------------------------------------------------
 
   async assertCasesInProject(projectId: string, testCaseIds: string[]) {
@@ -127,7 +127,7 @@ export class AccessControlService {
     throwIfMissing(ids, found, "Results not found in this project");
   }
 
-  /** `suiteId` boşsa (kök seviye) kontrol atlanır. */
+  /** The check is skipped when `suiteId` is empty (root level). */
   async assertSuiteInProject(projectId: string, suiteId?: string | null) {
     if (!suiteId) return;
     const suite = await this.prisma.suite.findFirst({
@@ -137,7 +137,7 @@ export class AccessControlService {
     if (!suite) throw new NotFoundException("Suite not found");
   }
 
-  /** `milestoneId` boşsa kontrol atlanır. */
+  /** The check is skipped when `milestoneId` is empty. */
   async assertMilestoneInProject(
     projectId: string,
     milestoneId?: string | null,
@@ -150,7 +150,7 @@ export class AccessControlService {
     if (!milestone) throw new NotFoundException("Milestone not found");
   }
 
-  /** Atanacak kullanıcının projeye (üyelik veya workspace admin yoluyla) erişimi olmalı. */
+  /** The assignee must have access to the project (via membership or workspace admin). */
   async assertAssignableUser(projectId: string, assigneeId?: string | null) {
     if (!assigneeId) return;
     const member = await this.prisma.projectMember.findUnique({
@@ -178,7 +178,7 @@ export class AccessControlService {
   }
 }
 
-/** İstenen ID'lerden bulunamayanları mesajda listeleyerek 404 fırlatır. */
+/** Throws a 404 listing the requested IDs that were not found. */
 function throwIfMissing(
   requested: string[],
   found: { id: string }[],

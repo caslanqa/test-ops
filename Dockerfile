@@ -1,8 +1,8 @@
-# TestOps - tek imaj: NestJS API + React SPA aynı container/port'tan servis edilir
-# (design-doc.md bölüm 7: "Uygulama tek versiyonlu OCI/Docker image olarak yayımlanır").
-# PostgreSQL bilerek bu imajın dışında, ayrı bir servis/container olarak çalışır.
+# TestOps - single image: the NestJS API + React SPA are served from the same container/port
+# (design-doc.md section 7: "The application is published as a single versioned OCI/Docker image").
+# PostgreSQL deliberately stays outside this image and runs as a separate service/container.
 FROM node:20-bookworm-slim AS base
-# Prisma engine binary'leri libssl'e ihtiyaç duyar (ARM64/Debian slim imajlarda varsayılan yok)
+# Prisma engine binaries need libssl (not present by default in ARM64/Debian slim images)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl curl \
     && rm -rf /var/lib/apt/lists/*
@@ -31,16 +31,16 @@ COPY --from=build /app/apps/api/node_modules /app/apps/api/node_modules
 COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY --from=build /app/apps/api/prisma /app/apps/api/prisma
 COPY --from=build /app/apps/api/package.json /app/apps/api/package.json
-# SPA dosyaları dist'in yanına (ServeStaticModule rootPath = dist/../web) kopyalanır
+# SPA files are copied next to dist (ServeStaticModule rootPath = dist/../web)
 COPY --from=build /app/apps/web/dist /app/apps/api/web
 COPY --chmod=0755 apps/api/docker-entrypoint.sh /app/apps/api/docker-entrypoint.sh
 WORKDIR /app/apps/api
 
-# Container içeride bu portu dinler (PORT env ile değiştirilebilir); dışa açılan
-# host portu `docker run -p <İSTEDİĞİNİZ_PORT>:3000` ile serbestçe seçilir.
+# The container listens on this port internally (configurable via the PORT env var); the
+# exposed host port can be chosen freely with `docker run -p <YOUR_PORT>:3000`.
 ENV PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=5s --retries=10 CMD curl -f http://localhost:${PORT}/health || exit 1
-# DATABASE_URL'i kontrol eder, DB hazır olana kadar migrate deploy'u yeniden dener,
-# sonra tek process API+UI'ı başlatır (bkz. apps/api/docker-entrypoint.sh)
+# Checks DATABASE_URL, retries migrate deploy until the DB is ready, then starts
+# the single API+UI process (see apps/api/docker-entrypoint.sh)
 CMD ["./docker-entrypoint.sh"]

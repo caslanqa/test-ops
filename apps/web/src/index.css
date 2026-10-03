@@ -1,14 +1,14 @@
 /*
- * TestOps arayüz stilleri.
+ * TestOps UI styles.
  *
- * İlke: iskelet tek renkli (grafit), renk yalnızca test sonuçlarına ait.
- * Göz önce sonuç şeridine ve durum etiketlerine gitsin diye butonlar, seçili
- * durumlar ve paneller grafit/gri tonlarında tutulur; kobalt yalnızca link ve
- * odak halkasında kullanılır. Kontrast oranları WCAG 2.2 AA'ya göre seçildi.
+ * Principle: the skeleton is monochrome (graphite); color belongs to test results only.
+ * Buttons, selected states and panels stay in graphite/gray tones so the eye goes to
+ * the result ribbon and status labels first; cobalt is used only for links and the
+ * focus ring. Contrast ratios were chosen to meet WCAG 2.2 AA.
  */
 
 /* --------------------------------------------------------------------------
- * Tokenlar
+ * Tokens
  * ----------------------------------------------------------------------- */
 :root {
   --font-sans: 'Atkinson Hyperlegible Next Variable', 'Atkinson Hyperlegible Next',
@@ -34,13 +34,13 @@
   --focus: #2952cc;
   --focus-on-dark: #9db3ff;
 
-  /* Anlamsal yüzeyler: koyu temada yeniden tanımlanır. */
+  /* Semantic surfaces: redefined in the dark theme. */
   --sidebar-bg: var(--graphite-900);
   --sidebar-hover: var(--graphite-800);
   --sidebar-line: var(--graphite-800);
   --sidebar-text: var(--graphite-200);
   --sidebar-muted: var(--graphite-300);
-  /* "Ters" yüzey: birincil buton, seçili ağaç satırı, basılı segment, adım numarası. */
+  /* "Inverse" surface: primary button, selected tree row, pressed segment, step number. */
   --inverse-bg: var(--graphite-900);
   --inverse-hover: var(--graphite-800);
   --inverse-fg: #ffffff;
@@ -52,7 +52,7 @@
   --priority-on: var(--graphite-700);
   --danger-hover: #f7d4d4;
 
-  /* Sonuç renkleri: dolgu (şerit), koyu metin ve açık zemin (etiket). */
+  /* Result colors: fill (ribbon), dark text and light background (label). */
   --passed: #1f9d55;
   --passed-ink: #0f6b38;
   --passed-bg: #e4f4ea;
@@ -71,7 +71,7 @@
   --untested-ink: #55606e;
   --untested-bg: #f3f5f7;
 
-  /* Tip ölçeği (1.2 oranı, 15px gövde). */
+  /* Type scale (1.2 ratio, 15px body). */
   --text-xs: 0.8125rem;
   --text-sm: 0.875rem;
   --text-md: 0.9375rem;
@@ -95,8 +95,8 @@
   text-rendering: optimizeLegibility;
 }
 
-/* Koyu tema: kullanıcı seçtiyse ya da "Sistem" seçili ve işletim sistemi koyuysa.
- * Değerler WCAG AA kontrastına göre seçildi (metin ≥ 4.5:1, kontrol/grafik ≥ 3:1). */
+/* Dark theme: if the user chose it, or "System" is selected and the OS is dark.
+ * Values were chosen for WCAG AA contrast (text ≥ 4.5:1, controls/graphics ≥ 3:1). */
 :root[data-theme='dark'] {
   --canvas: #111418;
   --surface: #181c21;
@@ -198,7 +198,7 @@
 }
 
 /* --------------------------------------------------------------------------
- * Temel
+ * Base
  * ----------------------------------------------------------------------- */
 *,
 *::before,
@@ -206,7 +206,7 @@
   box-sizing: border-box;
 }
 
-/* Sabit üst bar ve alttaki bildirim, klavyeyle odaklanan öğeyi örtmesin (WCAG 2.4.11). */
+/* The fixed top bar and the bottom notice must not cover the keyboard-focused element (WCAG 2.4.11). */
 html {
   scroll-padding-top: calc(var(--topbar-h) + 0.75rem);
   scroll-padding-bottom: 5.5rem;
@@ -270,7 +270,7 @@ main:focus,
   outline: none;
 }
 
-/* Sayılar hizalı okunsun: sayaçlar, oranlar, tarihler. */
+/* Numbers read aligned: counters, ratios, dates. */
 .num {
   font-variant-numeric: tabular-nums;
 }
@@ -316,7 +316,7 @@ main:focus,
 }
 
 /* --------------------------------------------------------------------------
- * Butonlar
+ * Buttons
  * ----------------------------------------------------------------------- */
 .btn {
   display: inline-flex;
@@ -417,7 +417,7 @@ main:focus,
   outline-color: var(--focus-on-dark);
 }
 
-/* Segmented filtre (Tümü / Açık / Tamamlanan). */
+/* Segmented filter (All / Open / Completed). */
 .segmented {
   display: inline-flex;
   margin-bottom: 1rem;
@@ -444,7 +444,7 @@ main:focus,
 }
 
 /* --------------------------------------------------------------------------
- * Form alanları
+ * Form fields
  * ----------------------------------------------------------------------- */
 .field {
   display: flex;
@@ -528,7 +528,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Uygulama iskeleti
+ * App shell
  * ----------------------------------------------------------------------- */
 .shell {
   display: grid;
@@ -674,7 +674,7 @@ input[type='checkbox'] {
   color: #fff;
 }
 
-/* Seçili bölüm: zemin + soldaki beyaz işaret (renk değil, şekil de taşır). */
+/* Selected section: background + white marker on the left (shape carries it, not just color). */
 .side-nav a[aria-current='page'] {
   background: var(--sidebar-hover);
   color: #fff;
@@ -764,7 +764,7 @@ input[type='checkbox'] {
   display: none;
 }
 
-/* Tema seçici: üst barın sağında ve giriş ekranının sağ üstünde. */
+/* Theme switcher: on the right of the top bar and at the top right of the sign-in screen. */
 .theme-switcher {
   display: inline-flex;
   flex: none;
@@ -850,7 +850,7 @@ input[type='checkbox'] {
   color: var(--ink-muted);
 }
 
-/* Mobil çekmece: native dialog, soldan açılır. */
+/* Mobile drawer: native dialog, opens from the left. */
 .nav-drawer {
   width: min(var(--sidebar-w), 85vw);
   max-width: none;
@@ -875,7 +875,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Sayfa başlığı ve yüzeyler
+ * Page header and surfaces
  * ----------------------------------------------------------------------- */
 .page-header {
   display: flex;
@@ -941,11 +941,11 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Tablolar
+ * Tables
  * ----------------------------------------------------------------------- */
 .table-wrap {
-  /* Konumlandırılmış kap: içerideki visually-hidden (absolute) öğeler kaydırma
-   * alanının dışına taşıp sayfayı yatayda genişletmesin. */
+  /* Positioned container: visually-hidden (absolute) elements inside must not overflow
+   * the scroll area and widen the page horizontally. */
   position: relative;
   overflow-x: auto;
 }
@@ -984,14 +984,14 @@ input[type='checkbox'] {
   background: var(--selected);
 }
 
-/* Ana sütun (başlık) kalan genişliği alır; diğer sütunlar içerikleri kadar daralır.
- * Böylece geniş ekranlarda meta sütunları ekrana dağılmaz, sağda toplu kalır. */
+/* The main column (title) takes the remaining width; the other columns shrink to fit.
+ * That way meta columns don't spread across wide screens but stay grouped on the right. */
 .data-table:has(.col-main) th:not(.col-main):not(.col-ribbon) {
   width: 1%;
   white-space: nowrap;
 }
 
-/* Sayılar ve tarihler bölünmeden okunur ("2 Eki 2026" tek satırda). */
+/* Numbers and dates read without wrapping ("Oct 2, 2026" on one line). */
 .data-table td.num {
   white-space: nowrap;
 }
@@ -1062,7 +1062,7 @@ input[type='checkbox'] {
   border-top: 1px solid var(--line);
 }
 
-/* Detay paneli açıkken yer daralıyorsa ikincil sütunlar gizlenir; geniş ekranda kalır. */
+/* When the detail panel is open and space is tight, secondary columns hide; wide screens keep them. */
 @media (max-width: 100rem) {
   .repo--with-detail .col-optional {
     display: none;
@@ -1096,7 +1096,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Etiketler
+ * Labels
  * ----------------------------------------------------------------------- */
 .chip {
   display: inline-flex;
@@ -1149,7 +1149,7 @@ input[type='checkbox'] {
   list-style: none;
 }
 
-/* Öncelik: dört çubuk, yükseklikleri artan; dolu çubuk sayısı seviyeyi verir. */
+/* Priority: four bars of increasing height; the number of filled bars gives the level. */
 .priority {
   display: inline-flex;
   align-items: center;
@@ -1181,13 +1181,13 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Sonuç şeridi — arayüzün imza öğesi
+ * Result ribbon — the signature element of the UI
  * ----------------------------------------------------------------------- */
 .status-bg--passed { background: var(--passed); }
 .status-bg--failed { background: var(--failed); }
 .status-bg--skipped { background: var(--skipped); }
 
-/* Bloklandı ve test edilmedi yalnızca renkle değil dokuyla da ayrışır. */
+/* Blocked and untested are told apart by texture, not just by color. */
 .status-bg--blocked {
   background: repeating-linear-gradient(
     135deg,
@@ -1294,7 +1294,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Repository: suite ağacı | case listesi | detay paneli
+ * Repository: suite tree | case list | detail panel
  * ----------------------------------------------------------------------- */
 .repo {
   display: grid;
@@ -1303,8 +1303,8 @@ input[type='checkbox'] {
   overflow: hidden;
 }
 
-/* Masaüstünde repository pencere yüksekliğine kilitlenir: ağaç, liste ve detay
- * paneli sayfa yerine kendi içlerinde kayar (üst bar + sayfa başlığı payı düşülür). */
+/* On desktop the repository is locked to the window height: the tree, list and detail
+ * panel scroll on their own instead of the page (minus the top bar + page header). */
 @media (min-width: 56.0625rem) {
   .repo {
     height: calc(100dvh - 12.5rem);
@@ -1496,7 +1496,7 @@ input[type='checkbox'] {
   white-space: pre-wrap;
 }
 
-/* Adımlar gerçek bir sıra olduğu için numaralıdır. */
+/* Steps are numbered because they are a real sequence. */
 .steps {
   display: flex;
   flex-direction: column;
@@ -1548,7 +1548,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Run detayı
+ * Run detail
  * ----------------------------------------------------------------------- */
 .toast-region {
   position: fixed;
@@ -1640,7 +1640,7 @@ input[type='checkbox'] {
   gap: 0.5rem;
 }
 
-/* Dar ekranda başlığın altındaki kopya satır sonuna gelince alta geçebilir. */
+/* On narrow screens the copy under the title may wrap when it reaches the end of the row. */
 .cell-actions-sm .result-actions {
   flex-wrap: wrap;
 }
@@ -1691,7 +1691,7 @@ input[type='checkbox'] {
 .result-button--skipped[aria-pressed='true'] { background: var(--skipped-bg); color: var(--skipped-ink); }
 
 /* --------------------------------------------------------------------------
- * Case seçici (plan / run / requirement dialogları)
+ * Case picker (plan / run / requirement dialogs)
  * ----------------------------------------------------------------------- */
 .checklist {
   display: flex;
@@ -1853,7 +1853,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Boş, yükleniyor, hata
+ * Empty, loading, error
  * ----------------------------------------------------------------------- */
 .empty-state {
   display: flex;
@@ -1900,7 +1900,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Giriş
+ * Sign-in
  * ----------------------------------------------------------------------- */
 .login {
   display: grid;
@@ -1925,7 +1925,7 @@ input[type='checkbox'] {
   width: 100%;
 }
 
-/* Şerit paneli doldurur ve pencereyle birlikte ölçeklenir. */
+/* The ribbon fills the panel and scales with the window. */
 .ribbon--hero {
   height: clamp(5rem, 16vh, 13rem);
   gap: clamp(2px, 0.3vw, 6px);
@@ -1936,7 +1936,7 @@ input[type='checkbox'] {
   transform-origin: bottom;
 }
 
-/* Koyu zeminde test edilmemiş hücreler "boş" okunsun diye koyu tarama. */
+/* Dark hatching so untested cells read as "empty" on the dark background. */
 .login-showcase .status-bg--untested {
   background: repeating-linear-gradient(
     135deg,
@@ -1980,8 +1980,8 @@ input[type='checkbox'] {
   font-size: var(--text-sm);
 }
 
-/* Tek orkestre edilmiş hareket: giriş ekranında şerit soldan sağa dolar.
- * Hareketi azaltmayı tercih eden kullanıcılar şeridi doğrudan dolu görür. */
+/* A single orchestrated motion: on the sign-in screen the ribbon fills from left to right.
+ * Users who prefer reduced motion see the ribbon already filled. */
 @media (prefers-reduced-motion: no-preference) {
   .ribbon--hero .ribbon-cell {
     animation: ribbon-fill 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
@@ -2003,7 +2003,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Sekmeler, üyeler, roller
+ * Tabs, members, roles
  * ----------------------------------------------------------------------- */
 .tabs {
   display: flex;
@@ -2025,7 +2025,7 @@ input[type='checkbox'] {
   color: var(--ink);
 }
 
-/* Seçili sekme: alt çizgi + koyu metin (renk değil, şekil de taşır). */
+/* Selected tab: underline + dark text (shape carries it, not just color). */
 .tabs a[aria-current='page'] {
   color: var(--ink);
 }
@@ -2161,7 +2161,7 @@ input[type='checkbox'] {
 }
 
 /* --------------------------------------------------------------------------
- * Hesabım
+ * My account
  * ----------------------------------------------------------------------- */
 .settings-stack {
   display: flex;
@@ -2261,7 +2261,7 @@ code {
 }
 
 /* --------------------------------------------------------------------------
- * Duyarlı düzen
+ * Responsive layout
  * ----------------------------------------------------------------------- */
 @media (max-width: 75rem) {
   .repo--with-detail {

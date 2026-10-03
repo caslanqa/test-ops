@@ -1,11 +1,11 @@
 name: Publish Docker image
 
-# Yalnızca release.yml'den çağrılır; sürümü o hesaplar (bkz. scripts/next-version.sh).
+# Only called from release.yml, which computes the version (see scripts/next-version.sh).
 on:
   workflow_call:
     inputs:
       version:
-        description: Yayınlanacak semver, "v" öneki olmadan (ör. 0.1.3)
+        description: Semver to publish, without the "v" prefix (e.g. 0.1.3)
         required: true
         type: string
 
@@ -22,8 +22,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # amd64 runner üzerinde linux/arm64 imajını emülasyonla derlemek için
-      # (Apple Silicon ve ARM sunucularda imaj native çalışsın diye).
+      # To build the linux/arm64 image via emulation on the amd64 runner
+      # (so the image runs natively on Apple Silicon and ARM servers).
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -41,12 +41,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         env:
-          # Multi-arch imajlarda GHCR açıklama/kaynak bilgisini index'ten okur.
+          # For multi-arch images GHCR reads the description/source info from the index.
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ env.IMAGE }}
-          # Sürüm git ref'inden değil input'tan gelir; `latest` prerelease olmayan
-          # semver'de flavor latest=auto ile eklenir.
+          # The version comes from the input, not the git ref; `latest` is added for
+          # non-prerelease semver via flavor latest=auto.
           tags: |
             type=semver,pattern={{version}},value=${{ inputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
@@ -65,15 +65,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # GITHUB_TOKEN ile yayınlanan paket repo'nun görünürlüğünü devralır (public repo →
-      # public paket). Self-hosted kullanıcılar auth'suz çekebilsin diye anonim olarak doğrulanır.
+      # A package published with GITHUB_TOKEN inherits the repo's visibility (public repo →
+      # public package). Verified anonymously so self-hosted users can pull without auth.
       - name: Verify anonymous pull
         env:
           VERSION: ${{ inputs.version }}
         run: |
           docker logout ghcr.io
           if docker buildx imagetools inspect "$IMAGE:$VERSION" > /dev/null; then
-            echo "Anonim çekilebiliyor: $IMAGE:$VERSION"
+            echo "Anonymous pull works: $IMAGE:$VERSION"
           else
-            echo "::warning::$IMAGE:$VERSION anonim çekilemiyor; GitHub'da paket görünürlüğünü Public yapın."
+            echo "::warning::$IMAGE:$VERSION cannot be pulled anonymously; set the package visibility to Public on GitHub."
           fi

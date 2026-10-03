@@ -1,7 +1,7 @@
 #!/bin/sh
-# Container başlangıcı: önkoşulu açık bir mesajla kontrol eder, veritabanı hazır
-# olana kadar migration'ı yeniden dener ve uygulamayı PID 1 olarak başlatır.
-# `exec` sayesinde `docker stop`un SIGTERM'i araya giren sh'a takılmadan Node'a ulaşır.
+# Container startup: checks the prerequisite with a clear message, retries the
+# migration until the database is ready and starts the app as PID 1.
+# Thanks to `exec`, `docker stop`'s SIGTERM reaches Node without getting stuck in sh.
 set -eu
 
 if [ -z "${DATABASE_URL:-}" ]; then
@@ -14,8 +14,8 @@ EOF
   exit 1
 fi
 
-# `docker run` ile Postgres'ten hemen sonra başlatıldığında DB henüz bağlantı kabul
-# etmiyor olabilir; compose'da depends_on bunu zaten bekler.
+# When started with `docker run` right after Postgres, the DB may not be accepting
+# connections yet; in compose, depends_on already waits for this.
 attempts="${DB_WAIT_ATTEMPTS:-30}"
 i=1
 until node_modules/.bin/prisma migrate deploy; do

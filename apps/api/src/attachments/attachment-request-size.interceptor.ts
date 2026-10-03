@@ -8,15 +8,15 @@ import {
 import { ConfigService } from "@nestjs/config";
 import type { Request } from "express";
 
-/** Multipart sınırları ve parça başlıkları için tolerans; kesin toplam kontrolü serviste yapılır. */
+/** Allowance for multipart boundaries and part headers; the exact total check happens in the service. */
 const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 
 /**
- * FR-045: istek başına toplam boyut sınırını, gövde okunmadan `Content-Length`
- * üzerinden uygular. Multer'ın toplam boyut limiti olmadığından bu kontrol
- * olmadan sınırı aşan bir istek önce tamamen diske yazılır, sonra reddedilir.
- * Controller seviyesinde tanımlandığı için metot seviyesindeki
- * FilesInterceptor'dan önce çalışır.
+ * FR-045: enforces the total size limit per request via `Content-Length`, before
+ * the body is read. Multer has no total size limit, so without this check an
+ * oversized request would first be written to disk in full, then rejected.
+ * Because it is declared at controller level, it runs before the method-level
+ * FilesInterceptor.
  */
 @Injectable()
 export class AttachmentRequestSizeInterceptor implements NestInterceptor {

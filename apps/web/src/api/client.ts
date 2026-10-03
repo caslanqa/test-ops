@@ -44,7 +44,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       Array.isArray(message) ? message.join(", ") : message,
     );
   }
-  // DELETE gibi uç noktalar gövdesiz 200/204 dönebilir; boş gövde JSON değildir.
+  // Endpoints such as DELETE may return 200/204 without a body; an empty body is not JSON.
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
 }

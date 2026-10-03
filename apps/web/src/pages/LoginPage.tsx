@@ -32,7 +32,7 @@ export function LoginPage() {
           ? "Couldn't reach the server. Check your connection and try again."
           : err.status === 401
             ? 'Incorrect email or password. Check your details and try again.'
-            : // 429 dahil diğer durumlarda sunucu mesajı (ör. "Try again in 42 seconds.") yeterince açık.
+            : // In other cases, including 429, the server message (e.g. "Try again in 42 seconds.") is clear enough.
               err.message,
       );
     } finally {

@@ -11,7 +11,7 @@ export class AddWorkspaceMemberDto {
   @IsEmail()
   email!: string;
 
-  // Kullanıcı henüz yoksa yeni hesap oluşturmak için gerekli
+  // Required to create a new account if the user does not exist yet
   @IsOptional()
   @IsString()
   displayName?: string;

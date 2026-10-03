@@ -1,6 +1,6 @@
-// Geliştirme ortamı için başlangıç verisi: ilk admin kullanıcı + örnek workspace/project.
-// Çalıştırmak için: node prisma/seed.js  (veya docker compose exec app node prisma/seed.js)
-// Tekrar çalıştırmak güvenlidir: var olan kayıtlar, kullanıcının parolası dahil, değiştirilmez.
+// Seed data for development: the first admin user + a sample workspace/project.
+// To run: node prisma/seed.js  (or docker compose exec app node prisma/seed.js)
+// Safe to re-run: existing records, including the user's password, are left unchanged.
 const { PrismaClient, WorkspaceRole, ProjectRole } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 
@@ -10,9 +10,9 @@ async function main() {
   const email = process.env.SEED_ADMIN_EMAIL ?? "admin@testops.local";
   const password = process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!";
 
-  // Kullanıcı zaten varsa (önceki seed ya da aynı e-postayla kayıt) parolası sessizce
-  // değiştirilmez; aşağıdaki çıktı da yeni parolayı geçerliymiş gibi göstermemelidir.
-  // Giriş e-postayı büyük/küçük harf duyarsız eşlediği için arama da öyle yapılır.
+  // If the user already exists (an earlier seed or a sign-up with the same email), its
+  // password is not silently changed; the output below must not imply the new one works.
+  // Login matches email case-insensitively, so the lookup does the same.
   const existing = await prisma.user.findFirst({
     where: { email: { equals: email, mode: "insensitive" } },
   });

@@ -12,7 +12,7 @@ export class ChangePasswordDto {
   @MinLength(1)
   currentPassword!: string;
 
-  // bcrypt yalnızca ilk 72 baytı kullanır; daha uzun parola güvenlik vaat etmez.
+  // bcrypt only uses the first 72 bytes; a longer password promises no extra security.
   @IsString()
   @MinLength(8)
   @MaxLength(72)

@@ -19,9 +19,9 @@ import {
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
 
-// Storage ve dosya boyutu/sayısı limitleri AttachmentsModule'deki MulterModule
-// seçeneklerinden gelir; toplam istek boyutu, gövde okunmadan önce
-// AttachmentRequestSizeInterceptor ile kontrol edilir.
+// Storage and file size/count limits come from the MulterModule options in
+// AttachmentsModule; the total request size is checked by
+// AttachmentRequestSizeInterceptor before the body is read.
 @ApiTags("attachments")
 @Controller("projects/:projectId")
 @UseInterceptors(AttachmentRequestSizeInterceptor)
@@ -89,9 +89,10 @@ export class AttachmentsController {
         projectId,
         attachmentId,
       );
-    // res.attachment, ASCII dışı karakterli adlar için RFC 6266 `filename*=UTF-8''…`
-    // üretir; ham adı header'a yazmak "ş/ğ/ı" içeren adlarda 500'e yol açıyordu.
-    // Content-Type istemcinin bildirdiği değerden değil, uzantıdan türetilir.
+    // res.attachment produces RFC 6266 `filename*=UTF-8''…` for non-ASCII names;
+    // writing the raw name into the header caused a 500 for names with characters
+    // outside Latin-1 (e.g. "ł", "č", "中"), which Node rejects in header values.
+    // Content-Type is derived from the extension, not from the client-declared value.
     res.attachment(attachment.fileName);
     res.setHeader("Content-Type", contentType);
     return new StreamableFile(fs.createReadStream(filePath));

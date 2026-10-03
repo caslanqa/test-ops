@@ -1,10 +1,10 @@
-// Rate limit smoke testi: genel limit başlıkları, giriş/parola denemesi limitleri, 429 yanıtı.
-// Çalışan bir stack'e karşı koşar ve kendi verisini oluşturur:
+// Rate limit smoke test: general limit headers, login/password attempt limits, 429 response.
+// Runs against a running stack and creates its own data:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/ratelimit.mjs
-// Limit değerleri sabit yazılmaz, yanıt başlıklarından okunur; böylece AUTH_RATE_LIMIT_PER_MINUTE
-// değiştirilmiş kurulumlarda da çalışır. Diğer smoke testlerinden sonra koşturulmalıdır: aynı IP'nin
-// kimlik denemesi bütçesi yetmezse pencerenin sıfırlanmasını bekler.
+// Limit values are not hard-coded; they are read from the response headers, so the test also works
+// on installations with a changed AUTH_RATE_LIMIT_PER_MINUTE. Run it after the other smoke tests: if
+// the same IP's credential attempt budget is not enough, it waits for the window to reset.
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ORIGIN = new URL(BASE).origin;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
@@ -35,7 +35,7 @@ const num = (headers, name) => {
   return value === null ? undefined : Number(value);
 };
 
-/** Limit dolana kadar dener; dolduğunda dönen 429 yanıtını ve önceki durumları verir. */
+/** Retries until the limit is reached; returns the resulting 429 response and the earlier statuses. */
 async function exhaust(limit, request) {
   const statuses = [];
   for (let i = 0; i < limit; i++) statuses.push((await request()).status);
@@ -43,27 +43,27 @@ async function exhaust(limit, request) {
 }
 function checkBlocked(label, blocked) {
   const retryAfter = num(blocked.headers, 'retry-after');
-  check(`[${blocked.status}] ${label}: limit aşılınca 429`, blocked.status === 429, JSON.stringify(blocked.json));
-  check(`${label}: Retry-After 1-60 sn`, retryAfter >= 1 && retryAfter <= 60, `(Retry-After: ${retryAfter})`);
+  check(`[${blocked.status}] ${label}: 429 once the limit is exceeded`, blocked.status === 429, JSON.stringify(blocked.json));
+  check(`${label}: Retry-After 1-60 s`, retryAfter >= 1 && retryAfter <= 60, `(Retry-After: ${retryAfter})`);
   check(
-    `${label}: kullanıcıya gösterilebilir mesaj`,
+    `${label}: message that can be shown to the user`,
     /^Too many attempts\. Try again in \d+ seconds?\.$/.test(blocked.json?.message ?? ''),
     JSON.stringify(blocked.json),
   );
 }
 
-// 1) Sağlık yoklamaları limitlenmez ve sayaç başlığı taşımaz.
+// 1) Health probes are not rate limited and carry no counter headers.
 for (let i = 0; i < 3; i++) {
   const r = await call(null, 'GET', '/health', undefined, ORIGIN);
-  check(`[${r.status}] /health #${i + 1} limit dışı`, r.status === 200 && !r.headers.has('x-ratelimit-limit'));
+  check(`[${r.status}] /health #${i + 1} exempt from the limit`, r.status === 200 && !r.headers.has('x-ratelimit-limit'));
 }
 
-// 2) Genel limit: anonim istekler de sayılır, sayaç route başına değil kimlik başına.
+// 2) General limit: anonymous requests count too, and the counter is per identity, not per route.
 const anon = await call(null, 'GET', '/auth/config');
-check('anonim istekte X-RateLimit-Limit var', num(anon.headers, 'x-ratelimit-limit') > 0, `(${anon.headers.get('x-ratelimit-limit')})`);
+check('anonymous request has X-RateLimit-Limit', num(anon.headers, 'x-ratelimit-limit') > 0, `(${anon.headers.get('x-ratelimit-limit')})`);
 
 const adminLogin = await call(null, 'POST', '/auth/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
-check(`[${adminLogin.status}] admin girişi`, adminLogin.status === 200, JSON.stringify(adminLogin.json));
+check(`[${adminLogin.status}] admin login`, adminLogin.status === 200, JSON.stringify(adminLogin.json));
 const admin = adminLogin.json?.accessToken;
 const authLimit = num(adminLogin.headers, 'x-ratelimit-limit-auth');
 const authIpRemaining = num(adminLogin.headers, 'x-ratelimit-remaining-auth-ip');
@@ -73,43 +73,43 @@ const me1 = await call(admin, 'GET', '/auth/me');
 const ws = await call(admin, 'GET', '/workspaces');
 const r1 = num(me1.headers, 'x-ratelimit-remaining');
 const r2 = num(ws.headers, 'x-ratelimit-remaining');
-check('farklı endpoint\'ler aynı kullanıcı sayacını düşürür', r1 !== undefined && r2 === r1 - 1, `(/auth/me: ${r1}, /workspaces: ${r2})`);
+check('different endpoints decrement the same user counter', r1 !== undefined && r2 === r1 - 1, `(/auth/me: ${r1}, /workspaces: ${r2})`);
 
 if (!(authLimit > 0)) {
-  console.log('SKIP kimlik denemesi limiti kapalı (AUTH_RATE_LIMIT_PER_MINUTE=0)');
+  console.log('SKIP credential attempt limit is disabled (AUTH_RATE_LIMIT_PER_MINUTE=0)');
 } else {
-  // Bu testin kullanacağı IP bütçesi: giriş denemeleri + admin girişi + kayıt + parola denemeleri.
+  // IP budget this test uses: login attempts + admin login + registration + password attempts.
   const needed = 2 * (authLimit + 1) + 2;
   if (authIpRemaining !== undefined && authIpRemaining < needed) {
-    console.log(`.. IP başına deneme bütçesi yetersiz (${authIpRemaining} < ${needed}); ${authIpReset} sn bekleniyor`);
+    console.log(`.. per-IP attempt budget is insufficient (${authIpRemaining} < ${needed}); waiting ${authIpReset} s`);
     await new Promise((resolve) => setTimeout(resolve, (authIpReset + 1) * 1000));
   }
 
-  // 3) Giriş: hesap (+IP) başına limit; parola tahmini yavaşlar.
+  // 3) Login: limit per account (+IP); password guessing slows down.
   const target = `rl-${sfx}@test.local`;
-  const login = await exhaust(authLimit, () => call(null, 'POST', '/auth/login', { email: target, password: 'YanlisParola1' }));
-  check(`ilk ${authLimit} yanlış giriş 401`, login.statuses.every((s) => s === 401), `(${login.statuses.join(',')})`);
-  checkBlocked('giriş', login.blocked);
-  const upper = await call(null, 'POST', '/auth/login', { email: target.toUpperCase(), password: 'YanlisParola1' });
-  check(`[${upper.status}] e-postanın harf büyüklüğü limiti atlatmaz`, upper.status === 429);
+  const login = await exhaust(authLimit, () => call(null, 'POST', '/auth/login', { email: target, password: 'WrongPass123' }));
+  check(`first ${authLimit} wrong logins return 401`, login.statuses.every((s) => s === 401), `(${login.statuses.join(',')})`);
+  checkBlocked('login', login.blocked);
+  const upper = await call(null, 'POST', '/auth/login', { email: target.toUpperCase(), password: 'WrongPass123' });
+  check(`[${upper.status}] email letter case does not bypass the limit`, upper.status === 429);
 
   const again = await call(null, 'POST', '/auth/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
-  check(`[${again.status}] aynı IP'den başka hesap kilitlenmez`, again.status === 200, JSON.stringify(again.json));
+  check(`[${again.status}] other accounts from the same IP are not locked`, again.status === 200, JSON.stringify(again.json));
 
-  // 4) Parola değişikliği: kullanıcı başına limit (ele geçirilmiş oturumla parola tahmini).
-  const reg = await call(null, 'POST', '/auth/register', { email: `rl-user-${sfx}@test.local`, displayName: 'Rate Limit', password: 'IlkParola123' });
-  check(`[${reg.status}] kayıt`, reg.status === 201, JSON.stringify(reg.json));
+  // 4) Password change: per-user limit (password guessing with a hijacked session).
+  const reg = await call(null, 'POST', '/auth/register', { email: `rl-user-${sfx}@test.local`, displayName: 'Rate Limit', password: 'FirstPass123' });
+  check(`[${reg.status}] registration`, reg.status === 201, JSON.stringify(reg.json));
   const user = reg.json?.accessToken;
   const pw = await exhaust(authLimit, () =>
-    call(user, 'PATCH', '/auth/me/password', { currentPassword: 'YanlisParola1', newPassword: 'YeniParola456' }),
+    call(user, 'PATCH', '/auth/me/password', { currentPassword: 'WrongPass123', newPassword: 'NewPass4567' }),
   );
-  check(`ilk ${authLimit} yanlış parola değişikliği 401`, pw.statuses.every((s) => s === 401), `(${pw.statuses.join(',')})`);
-  checkBlocked('parola değişikliği', pw.blocked);
+  check(`first ${authLimit} wrong password changes return 401`, pw.statuses.every((s) => s === 401), `(${pw.statuses.join(',')})`);
+  checkBlocked('password change', pw.blocked);
 
-  // Kimlik denemesi limitine takılan kullanıcı diğer işlemlerine devam edebilir.
+  // A user who hit the credential attempt limit can still use everything else.
   const meAfter = await call(user, 'GET', '/auth/me');
-  check(`[${meAfter.status}] parola limiti diğer endpoint'leri etkilemez`, meAfter.status === 200);
+  check(`[${meAfter.status}] the password limit does not affect other endpoints`, meAfter.status === 200);
 }
 
-console.log(failures === 0 ? '\nTÜMÜ GEÇTİ' : `\n${failures} KONTROL BAŞARISIZ`);
+console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);
 process.exit(failures === 0 ? 0 : 1);

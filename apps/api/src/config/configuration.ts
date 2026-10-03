@@ -6,7 +6,7 @@ import {
   ATTACHMENT_DEFAULT_MAX_REQUEST_SIZE_BYTES,
 } from "../attachments/attachments.constants";
 
-/** Virgülle ayrılmış uzantı listesini ("png, .JPG,log") normalize eder; boşsa undefined. */
+/** Normalizes a comma-separated extension list ("png, .JPG,log"); undefined if empty. */
 function parseExtensionList(value: string | undefined): string[] | undefined {
   const list = (value ?? "")
     .split(",")
@@ -16,10 +16,10 @@ function parseExtensionList(value: string | undefined): string[] | undefined {
 }
 
 /**
- * Sayısal env değerini okur. Compose, tanımsız değişkenleri boş string olarak
- * geçirdiği için boş değer de "verilmemiş" sayılır; sayı olmayan değer
- * sessizce NaN limitine dönüşmek yerine başlangıçta hata verir. `allowZero`,
- * 0'ın "kapalı" anlamına geldiği ayarlar içindir (ör. rate limit).
+ * Reads a numeric env value. Compose passes undefined variables as empty
+ * strings, so an empty value also counts as "not set"; a non-numeric value
+ * fails at startup instead of silently becoming a NaN limit. `allowZero` is
+ * for settings where 0 means "disabled" (e.g. rate limit).
  */
 function intFromEnv(name: string, fallback: number, { allowZero = false } = {}): number {
   const raw = process.env[name]?.trim();
@@ -34,9 +34,9 @@ function intFromEnv(name: string, fallback: number, { allowZero = false } = {}):
 }
 
 /**
- * Express `trust proxy` ayarı. Varsayılan kapalı: uygulama doğrudan yayınlanıyorsa
- * X-Forwarded-For istemci tarafından uydurulabilir ve rate limit atlatılır. Ters
- * proxy arkasında "true", hop sayısı ("1") veya güvenilen adres/alt ağ listesi verilir.
+ * Express `trust proxy` setting. Off by default: if the app is exposed directly, the
+ * client can forge X-Forwarded-For and bypass the rate limit. Behind a reverse
+ * proxy, set "true", a hop count ("1") or a list of trusted addresses/subnets.
  */
 function trustProxyFromEnv(): boolean | number | string {
   const raw = process.env.TRUST_PROXY?.trim();
@@ -49,17 +49,17 @@ function trustProxyFromEnv(): boolean | number | string {
 export default () => ({
   port: parseInt(process.env.PORT ?? "3000", 10),
   auth: {
-    // Kendi kendine kayıt; kapalı kurulumlarda hesapları yalnızca workspace admin'leri oluşturur.
+    // Self-registration; on closed installs only workspace admins create accounts.
     selfRegistration: process.env.SELF_REGISTRATION?.trim().toLowerCase() !== "false",
   },
-  // Dakikalık istek limitleri; 0 ilgili limiti kapatır (bkz. common/rate-limit.ts).
+  // Per-minute request limits; 0 disables that limit (see common/rate-limit.ts).
   rateLimit: {
     trustProxy: trustProxyFromEnv(),
-    // Oturum açmış kullanıcı (JWT veya API token) ya da anonim IP başına tüm API.
+    // The whole API, per signed-in user (JWT or API token) or per anonymous IP.
     perMinute: intFromEnv("RATE_LIMIT_PER_MINUTE", 600, { allowZero: true }),
-    // Giriş/kayıt/parola değişikliği: hesap (+IP) başına, parola denemelerini yavaşlatır.
+    // Login/sign-up/password change: per account (+IP), slows down password attempts.
     authPerMinute: intFromEnv("AUTH_RATE_LIMIT_PER_MINUTE", 10, { allowZero: true }),
-    // Aynı IP'den farklı hesaplara yapılan denemeler (credential stuffing, toplu kayıt).
+    // Attempts against different accounts from the same IP (credential stuffing, mass sign-up).
     authIpPerMinute: intFromEnv("AUTH_IP_RATE_LIMIT_PER_MINUTE", 60, { allowZero: true }),
   },
   jwt: {

@@ -5,7 +5,7 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 const STORAGE_KEY = 'testops.theme';
 const listeners = new Set<() => void>();
 
-/** Kayıtlı tercih; depolama erişilemezse "system" (bkz. public/theme-init.js). */
+/** Saved preference; "system" if storage is unavailable (see public/theme-init.js). */
 export function getThemePreference(): ThemePreference {
   try {
     const value = localStorage.getItem(STORAGE_KEY);
@@ -21,13 +21,13 @@ function applyTheme(preference: ThemePreference) {
   else root.setAttribute('data-theme', preference);
 }
 
-/** Tercihi kaydeder, hemen uygular ve tüm tema seçicilerini günceller. */
+/** Saves the preference, applies it immediately and updates all theme switchers. */
 export function setThemePreference(preference: ThemePreference) {
   try {
     if (preference === 'system') localStorage.removeItem(STORAGE_KEY);
     else localStorage.setItem(STORAGE_KEY, preference);
   } catch {
-    // Kaydedilemese de bu oturumda uygulanır.
+    // Even if it can't be saved, it still applies for this session.
   }
   applyTheme(preference);
   listeners.forEach((listener) => listener());
@@ -35,7 +35,7 @@ export function setThemePreference(preference: ThemePreference) {
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  // Başka sekmede değiştirilirse bu sekme de aynı temaya geçer.
+  // If it is changed in another tab, this tab switches to the same theme too.
   const onStorage = (event: StorageEvent) => {
     if (event.key !== STORAGE_KEY) return;
     applyTheme(getThemePreference());

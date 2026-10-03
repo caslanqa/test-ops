@@ -24,7 +24,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, displayName: string, password: string) => Promise<void>;
-  /** Profil güncellemesinden sonra sidebar'daki adı tazeler. */
+  /** Refreshes the name shown in the sidebar after a profile update. */
   updateUser: (user: CurrentUser) => void;
   logout: () => void;
 }
@@ -33,7 +33,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
-  // Token yoksa oturum kontrolü gerekmez; başlangıç durumu doğrudan "yüklendi"dir.
+  // Without a token no session check is needed; the initial state is "loaded" right away.
   const [loading, setLoading] = useState(() => getToken() !== null);
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// Hook bileşenle aynı dosyada: sağlayıcı ve tüketici birlikte değişir.
+// The hook lives in the same file as the component: provider and consumer change together.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);

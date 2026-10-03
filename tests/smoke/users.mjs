@@ -1,8 +1,8 @@
-// Kullanıcı yönetimi smoke testi: kayıt, parola, roller, üyelik kapsamı.
-// Çalışan bir stack'e karşı koşar ve kendi verisini oluşturur:
+// User management smoke test: registration, passwords, roles, membership scope.
+// Runs against a running stack and creates its own data:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/users.mjs
-// SELF_REGISTRATION=true (varsayılan) olmalı. BASE, ADMIN_EMAIL, ADMIN_PASSWORD ile hedef değiştirilebilir.
+// Requires SELF_REGISTRATION=true (the default). The target can be changed with BASE, ADMIN_EMAIL and ADMIN_PASSWORD.
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'ChangeMe123!';
@@ -34,75 +34,76 @@ function check(label, pass, detail = '') {
 }
 async function expectStatus(label, expected, token, method, path, body) {
   const r = await call(token, method, path, body);
-  check(`[${r.status}] ${label}`, r.status === expected, `(beklenen ${expected}) ${JSON.stringify(r.json)}`);
+  check(`[${r.status}] ${label}`, r.status === expected, `(expected ${expected}) ${JSON.stringify(r.json)}`);
   return r;
 }
 
 const admin = (await ok(null, 'POST', '/auth/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).accessToken;
 
-console.log('--- Kayıt ve oturum ---');
+console.log('--- Registration and session ---');
 const config = await ok(null, 'GET', '/auth/config');
-check('kayıt yapılandırması açık', config.selfRegistration === true, JSON.stringify(config));
-const email = `Yeni.Kullanici-${sfx}@Test.Local`;
-const reg = await expectStatus('kayıt ol', 201, null, 'POST', '/auth/register', { email, displayName: 'Yeni Kullanıcı', password: 'IlkParola123' });
+check('registration config is enabled', config.selfRegistration === true, JSON.stringify(config));
+const email = `New.User-${sfx}@Test.Local`;
+const reg = await expectStatus('register', 201, null, 'POST', '/auth/register', { email, displayName: 'New User', password: 'FirstPass123' });
 let user = reg.json.accessToken;
-check('kayıtta e-posta küçük harfe çevrildi', reg.json.user.email === email.toLowerCase(), reg.json.user.email);
-await expectStatus('aynı e-postayla (farklı harf) tekrar kayıt reddedilir', 409, null, 'POST', '/auth/register', { email: email.toUpperCase(), displayName: 'X Y', password: 'BaskaParola1' });
-await expectStatus('kısa parola reddedilir', 400, null, 'POST', '/auth/register', { email: `kisa-${sfx}@test.local`, displayName: 'Kısa', password: '123' });
-await expectStatus('büyük harfli e-postayla giriş', 200, null, 'POST', '/auth/login', { email: email.toUpperCase(), password: 'IlkParola123' });
+check('email lowercased on registration', reg.json.user.email === email.toLowerCase(), reg.json.user.email);
+await expectStatus('re-registering with the same email (different case) is rejected', 409, null, 'POST', '/auth/register', { email: email.toUpperCase(), displayName: 'X Y', password: 'OtherPass123' });
+await expectStatus('short password is rejected', 400, null, 'POST', '/auth/register', { email: `short-${sfx}@test.local`, displayName: 'Short', password: '123' });
+await expectStatus('login with an uppercase email', 200, null, 'POST', '/auth/login', { email: email.toUpperCase(), password: 'FirstPass123' });
 const fresh = await ok(user, 'GET', '/workspaces');
-check('yeni kullanıcının hiçbir workspace erişimi yok', fresh.length === 0, JSON.stringify(fresh));
+check('a new user has no workspace access', fresh.length === 0, JSON.stringify(fresh));
 
-console.log('--- Profil ve parola ---');
+console.log('--- Profile and password ---');
+// The non-ASCII (Turkish) display name is deliberate: it checks that UTF-8 round-trips unchanged.
 const prof = await ok(user, 'PATCH', '/auth/me', { displayName: 'Ayşe Yılmaz' });
-check('ad güncellendi', prof.displayName === 'Ayşe Yılmaz', JSON.stringify(prof));
-await expectStatus('yanlış mevcut parola', 401, user, 'PATCH', '/auth/me/password', { currentPassword: 'yanlis', newPassword: 'YeniParola456' });
-await expectStatus('parola değiştir', 204, user, 'PATCH', '/auth/me/password', { currentPassword: 'IlkParola123', newPassword: 'YeniParola456' });
-await expectStatus('eski parolayla giriş reddedilir', 401, null, 'POST', '/auth/login', { email, password: 'IlkParola123' });
-user = (await ok(null, 'POST', '/auth/login', { email, password: 'YeniParola456' })).accessToken;
-check('yeni parolayla giriş', !!user);
+check('display name updated', prof.displayName === 'Ayşe Yılmaz', JSON.stringify(prof));
+await expectStatus('wrong current password', 401, user, 'PATCH', '/auth/me/password', { currentPassword: 'wrong', newPassword: 'NewPass4567' });
+await expectStatus('change password', 204, user, 'PATCH', '/auth/me/password', { currentPassword: 'FirstPass123', newPassword: 'NewPass4567' });
+await expectStatus('login with the old password is rejected', 401, null, 'POST', '/auth/login', { email, password: 'FirstPass123' });
+user = (await ok(null, 'POST', '/auth/login', { email, password: 'NewPass4567' })).accessToken;
+check('login with the new password', !!user);
 const tok = await ok(user, 'POST', '/api-tokens', { name: 'smoke' });
-await expectStatus('API token ile parola değiştirilemez', 403, tok.token, 'PATCH', '/auth/me/password', { currentPassword: 'YeniParola456', newPassword: 'Baska789012' });
+await expectStatus('password cannot be changed with an API token', 403, tok.token, 'PATCH', '/auth/me/password', { currentPassword: 'NewPass4567', newPassword: 'Other789012' });
 const revoked = await ok(user, 'DELETE', `/api-tokens/${tok.id}`);
-check('token iptal yanıtında tokenHash yok', revoked && !('tokenHash' in revoked), JSON.stringify(revoked));
-await expectStatus('iptal edilen token reddedilir', 401, tok.token, 'GET', '/auth/me');
+check('token revoke response has no tokenHash', revoked && !('tokenHash' in revoked), JSON.stringify(revoked));
+await expectStatus('revoked token is rejected', 401, tok.token, 'GET', '/auth/me');
 
-console.log('--- Workspace üyeliği ve roller ---');
-const ws = await ok(admin, 'POST', '/workspaces', { name: 'Üyelik testi', slug: `uyelik-${sfx}` });
-const pA = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'UA', name: 'Proje A' });
-const pB = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'UB', name: 'Proje B' });
-await expectStatus('workspace üyesi olmayanı projeye ekleme reddedilir', 400, admin, 'POST', `/projects/${pA.id}/members`, { email, role: 'TESTER' });
+console.log('--- Workspace membership and roles ---');
+const ws = await ok(admin, 'POST', '/workspaces', { name: 'Membership test', slug: `membership-${sfx}` });
+const pA = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'UA', name: 'Project A' });
+const pB = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'UB', name: 'Project B' });
+await expectStatus('adding a non-workspace-member to a project is rejected', 400, admin, 'POST', `/projects/${pA.id}/members`, { email, role: 'TESTER' });
 await ok(admin, 'POST', `/workspaces/${ws.id}/members`, { email: email.toUpperCase(), role: 'MEMBER' });
 const wsAsUser = await ok(user, 'GET', `/workspaces/${ws.id}`);
-check('workspace yanıtında rol: MEMBER', wsAsUser.currentUserRole === 'MEMBER', JSON.stringify(wsAsUser));
-check('admin için rol: ADMIN', (await ok(admin, 'GET', `/workspaces/${ws.id}`)).currentUserRole === 'ADMIN');
-await expectStatus('üye projeye ekleme', 201, admin, 'POST', `/projects/${pA.id}/members`, { email, role: 'VIEWER' });
+check('workspace response role: MEMBER', wsAsUser.currentUserRole === 'MEMBER', JSON.stringify(wsAsUser));
+check('role for admin: ADMIN', (await ok(admin, 'GET', `/workspaces/${ws.id}`)).currentUserRole === 'ADMIN');
+await expectStatus('add a member to a project', 201, admin, 'POST', `/projects/${pA.id}/members`, { email, role: 'VIEWER' });
 const visible = await ok(user, 'GET', `/workspaces/${ws.id}/projects`);
-check('üye yalnızca kendi projesini görür', visible.length === 1 && visible[0].id === pA.id, JSON.stringify(visible.map((p) => p.key)));
-check('admin tüm projeleri görür', (await ok(admin, 'GET', `/workspaces/${ws.id}/projects`)).length === 2);
-check('proje yanıtında rol: VIEWER', (await ok(user, 'GET', `/projects/${pA.id}`)).currentUserRole === 'VIEWER');
-check('workspace admin projede ADMIN görünür', (await ok(admin, 'GET', `/projects/${pB.id}`)).currentUserRole === 'ADMIN');
-await expectStatus('VIEWER case oluşturamaz', 403, user, 'POST', `/projects/${pA.id}/cases`, { title: 'x' });
+check('a member only sees their own project', visible.length === 1 && visible[0].id === pA.id, JSON.stringify(visible.map((p) => p.key)));
+check('admin sees all projects', (await ok(admin, 'GET', `/workspaces/${ws.id}/projects`)).length === 2);
+check('project response role: VIEWER', (await ok(user, 'GET', `/projects/${pA.id}`)).currentUserRole === 'VIEWER');
+check('workspace admin appears as ADMIN in the project', (await ok(admin, 'GET', `/projects/${pB.id}`)).currentUserRole === 'ADMIN');
+await expectStatus('VIEWER cannot create a case', 403, user, 'POST', `/projects/${pA.id}/cases`, { title: 'x' });
 const pm = (await ok(admin, 'GET', `/projects/${pA.id}/members`)).find((m) => m.user.email === email.toLowerCase());
 await ok(admin, 'PATCH', `/projects/${pA.id}/members/${pm.id}`, { role: 'TESTER' });
-await expectStatus('TESTER case oluşturur', 201, user, 'POST', `/projects/${pA.id}/cases`, { title: 'Tester case' });
-await expectStatus('üye olmadığı projeye erişemez', 403, user, 'GET', `/projects/${pB.id}`);
+await expectStatus('TESTER creates a case', 201, user, 'POST', `/projects/${pA.id}/cases`, { title: 'Tester case' });
+await expectStatus('cannot access a project they are not a member of', 403, user, 'GET', `/projects/${pB.id}`);
 
-console.log('--- Son admin koruması ---');
+console.log('--- Last admin protection ---');
 const wsMembers = await ok(admin, 'GET', `/workspaces/${ws.id}/members`);
 const adminMember = wsMembers.find((m) => m.user.email === ADMIN_EMAIL);
 const userMember = wsMembers.find((m) => m.user.email === email.toLowerCase());
-await expectStatus('son admin üyeye düşürülemez', 400, admin, 'PATCH', `/workspaces/${ws.id}/members/${adminMember.id}`, { role: 'MEMBER' });
-await expectStatus('son admin çıkarılamaz', 400, admin, 'DELETE', `/workspaces/${ws.id}/members/${adminMember.id}`);
-await expectStatus('son admin tekrar ekleme yoluyla düşürülemez', 400, admin, 'POST', `/workspaces/${ws.id}/members`, { email: ADMIN_EMAIL, role: 'MEMBER' });
+await expectStatus('last admin cannot be demoted to member', 400, admin, 'PATCH', `/workspaces/${ws.id}/members/${adminMember.id}`, { role: 'MEMBER' });
+await expectStatus('last admin cannot be removed', 400, admin, 'DELETE', `/workspaces/${ws.id}/members/${adminMember.id}`);
+await expectStatus('last admin cannot be demoted by re-adding', 400, admin, 'POST', `/workspaces/${ws.id}/members`, { email: ADMIN_EMAIL, role: 'MEMBER' });
 await ok(admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'ADMIN' });
-await expectStatus('ikinci admin varken admin düşürülebilir', 200, admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'MEMBER' });
+await expectStatus('an admin can be demoted while there is a second admin', 200, admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'MEMBER' });
 
-console.log('--- Workspace\'ten çıkarma proje erişimini de kaldırır ---');
-await expectStatus('üyeyi workspace\'ten çıkar', 200, admin, 'DELETE', `/workspaces/${ws.id}/members/${userMember.id}`);
-await expectStatus('çıkarılan üye projeye erişemez', 403, user, 'GET', `/projects/${pA.id}`);
+console.log('--- Removal from the workspace also removes project access ---');
+await expectStatus('remove the member from the workspace', 200, admin, 'DELETE', `/workspaces/${ws.id}/members/${userMember.id}`);
+await expectStatus('a removed member cannot access the project', 403, user, 'GET', `/projects/${pA.id}`);
 const left = await ok(admin, 'GET', `/projects/${pA.id}/members`);
-check('proje üyeliği de silindi', !left.some((m) => m.user.email === email.toLowerCase()), JSON.stringify(left.map((m) => m.user.email)));
+check('project membership was deleted too', !left.some((m) => m.user.email === email.toLowerCase()), JSON.stringify(left.map((m) => m.user.email)));
 
-console.log(`\n${failures === 0 ? 'TÜMÜ GEÇTİ' : `${failures} BAŞARISIZ`}`);
+console.log(`\n${failures === 0 ? 'ALL PASSED' : `${failures} CHECKS FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

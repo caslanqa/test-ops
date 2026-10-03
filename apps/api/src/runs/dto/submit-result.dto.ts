@@ -42,7 +42,7 @@ export class SubmitResultDto {
   @IsInt()
   durationMs?: number;
 
-  // Otomasyon sonuçlarında idempotency için dış test kimliği (FR-075)
+  // External test ID for idempotency of automation results (FR-075)
   @IsOptional()
   @IsString()
   externalTestId?: string;

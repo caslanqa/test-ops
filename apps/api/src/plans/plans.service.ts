@@ -149,8 +149,8 @@ export class PlansService {
     }
   }
 
-  // FR-036: otomasyon istemcilerinin seçici çalıştırma (selective execution) için
-  // kullandığı düz case ID listesi.
+  // FR-036: flat test case ID list that automation clients use for
+  // selective execution.
   async caseIds(userId: string, projectId: string, planId: string) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,

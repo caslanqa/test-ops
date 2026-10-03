@@ -1,98 +1,98 @@
 # TestOps
 
-Test case yönetimi, test run'ları ve otomasyon sonuçlarını tek yerde toplayan, kendi sunucunuzda çalıştırabileceğiniz bir test yönetim aracı. API ve web arayüzü tek bir Docker imajında gelir; veriler ayrı bir PostgreSQL veritabanında tutulur.
+A test management tool you can run on your own server, bringing test case management, test runs and automation results together in one place. The API and the web UI ship in a single Docker image; data is stored in a separate PostgreSQL database.
 
-- İmaj: `ghcr.io/caslanqa/testops` (linux/amd64 ve linux/arm64, herkese açık)
-- Gereksinim: Docker Engine 24+ ve Docker Compose v2 (`docker compose version` ile kontrol edin)
+- Image: `ghcr.io/caslanqa/testops` (linux/amd64 and linux/arm64, public)
+- Requirements: Docker Engine 24+ and Docker Compose v2 (check with `docker compose version`)
 
-## Hızlı başlangıç (önerilen)
+## Quick start (recommended)
 
-Kaynak koda gerek yoktur; iki dosya ve üç komut yeterlidir.
+No source code is needed; two files and three commands are enough.
 
 ```bash
 mkdir testops && cd testops
 
-# 1. Compose dosyasını indirin (PostgreSQL + TestOps)
+# 1. Download the Compose file (PostgreSQL + TestOps)
 curl -fsSLO https://raw.githubusercontent.com/caslanqa/test-ops/master/docker-compose.yml
 
-# 2. Zorunlu iki secret'ı içeren .env dosyasını oluşturun
+# 2. Create the .env file containing the two required secrets
 cat > .env <<EOF
 JWT_SECRET=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 EOF
 
-# 3. Başlatın; --wait uygulama hazır olana kadar bekler (ilk seferde imajlar indirilir)
+# 3. Start it; --wait blocks until the app is ready (images are downloaded the first time)
 docker compose up -d --wait
 ```
 
-Ardından tarayıcıda **http://localhost:8080** adresini açın.
+Then open **http://localhost:8080** in your browser.
 
-> `.env` dosyası secret içerir; saklayın ve paylaşmayın. Özellikle `POSTGRES_PASSWORD` ilk kurulumdan sonra değiştirilmemelidir (bkz. [Sorun giderme](#sorun-giderme)).
+> The `.env` file contains secrets; keep it safe and do not share it. In particular, `POSTGRES_PASSWORD` must not be changed after the first installation (see [Troubleshooting](#troubleshooting)).
 
-### İlk giriş
+### First sign-in
 
-Yeni kurulumda hiç kullanıcı yoktur. İki seçeneğiniz var:
+A new installation has no users. You have two options:
 
-- **Hesap oluşturun:** Giriş ekranındaki **Create account** bağlantısıyla kaydolun, sonra **New workspace** ile ilk workspace'inizi oluşturun. Workspace'i oluşturan kişi onun admin'i olur ve diğer kullanıcıları buradan ekler.
-- **Demo veri yükleyin:** Örnek bir workspace, proje ve admin kullanıcısı oluşturur.
+- **Create an account:** Sign up with the **Create account** link on the sign-in screen, then create your first workspace with **New workspace**. The person who creates a workspace becomes its admin and adds the other users from there.
+- **Load demo data:** Creates a sample workspace, project and admin user.
 
   ```bash
   docker compose exec -e SEED_ADMIN_PASSWORD="$(openssl rand -base64 18)" app node prisma/seed.js
   ```
 
-  Komut, giriş bilgilerini `Seed complete. Sign in with: admin@testops.local / …` satırında yazdırır; e-posta `SEED_ADMIN_EMAIL` ile değiştirilebilir. `SEED_ADMIN_PASSWORD` verilmezse parola `ChangeMe123!` olur; bu durumda girişten sonra **Account** sayfasından hemen değiştirin. Komutu tekrar çalıştırmak güvenlidir: var olan kayıtlara ve kullanıcının parolasına dokunmaz, bunu çıktıda da belirtir.
+  The command prints the sign-in details on the `Seed complete. Sign in with: admin@testops.local / …` line; the email can be changed with `SEED_ADMIN_EMAIL`. If `SEED_ADMIN_PASSWORD` is not given, the password is `ChangeMe123!`; in that case change it on the **Account** page right after signing in. Running the command again is safe: it does not touch existing records or the user's password, and its output says so.
 
-`SELF_REGISTRATION=false` ile kaydı kapattıysanız ilk kullanıcıyı demo veri komutuyla oluşturun.
+If you have turned off registration with `SELF_REGISTRATION=false`, create the first user with the demo data command.
 
-## Günlük işlemler
+## Day-to-day operations
 
-Komutları `docker-compose.yml` dosyasının bulunduğu klasörde çalıştırın.
+Run the commands in the folder that contains `docker-compose.yml`.
 
-| İşlem | Komut |
+| Task | Command |
 |---|---|
-| Durum | `docker compose ps` |
-| Loglar | `docker compose logs -f app` |
-| Durdurma (veriler korunur) | `docker compose down` |
-| Yeniden başlatma | `docker compose up -d --wait` |
-| Güncelleme | `docker compose pull && docker compose up -d --wait` |
-| Veritabanı yedeği | `docker compose exec -T postgres pg_dump -U testops testops > testops.sql` |
-| Ek dosya yedeği | `docker compose cp app:/data/attachments ./attachments-yedek` |
-| Her şeyi silme (**veriler dahil**) | `docker compose down -v` |
+| Status | `docker compose ps` |
+| Logs | `docker compose logs -f app` |
+| Stop (data is kept) | `docker compose down` |
+| Restart | `docker compose up -d --wait` |
+| Update | `docker compose pull && docker compose up -d --wait` |
+| Database backup | `docker compose exec -T postgres pg_dump -U testops testops > testops.sql` |
+| Attachment backup | `docker compose cp app:/data/attachments ./attachments-backup` |
+| Delete everything (**including data**) | `docker compose down -v` |
 
-Güncellemede veritabanı migration'ları uygulama açılırken otomatik uygulanır. Belirli bir sürümde kalmak için `.env` dosyasına `APP_IMAGE=ghcr.io/caslanqa/testops:0.2.0` ekleyin. Yayınlanan etiketler: `latest`, `X.Y.Z`, `X.Y` ve `sha-<commit>`. Sürümler ve değişiklikler [Releases](https://github.com/caslanqa/test-ops/releases) sayfasında listelenir.
+When you update, database migrations are applied automatically as the app starts. To stay on a specific version, add `APP_IMAGE=ghcr.io/caslanqa/testops:0.2.0` to the `.env` file. Published tags: `latest`, `X.Y.Z`, `X.Y` and `sha-<commit>`. Versions and changes are listed on the [Releases](https://github.com/caslanqa/test-ops/releases) page.
 
-## Yapılandırma
+## Configuration
 
-Ayarlar `.env` dosyasından okunur; değiştirdikten sonra `docker compose up -d --wait` ile uygulayın. Tüm değişkenlerin açıklamalı listesi [`.env.example`](.env.example) dosyasındadır.
+Settings are read from the `.env` file; after changing them, apply them with `docker compose up -d --wait`. A list of all variables with descriptions is in [`.env.example`](.env.example).
 
-| Değişken | Varsayılan | Açıklama |
+| Variable | Default | Description |
 |---|---|---|
-| `JWT_SECRET` | — (zorunlu) | Oturum token'larını imzalar. En az 32 karakter; `openssl rand -hex 32`. Değiştirilirse herkesin oturumu kapanır. |
-| `POSTGRES_PASSWORD` | — (zorunlu) | Veritabanı parolası. Postgres bunu volume ilk oluşturulurken kaydeder. |
-| `POSTGRES_USER`, `POSTGRES_DB` | `testops` | Veritabanı kullanıcısı ve adı. |
-| `APP_PORT` | `8080` | Arayüzün host'ta açılacağı port. |
-| `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Çalıştırılacak imaj; sürüm sabitlemek için kullanın. |
-| `JWT_EXPIRES_IN` | `8h` | Oturum süresi. |
-| `SELF_REGISTRATION` | `true` | `false` ise kullanıcıları yalnızca workspace admin'leri ekler. |
-| `RATE_LIMIT_PER_MINUTE` | `600` | Kullanıcı (veya anonim IP) başına dakikalık istek limiti; `0` kapatır. |
-| `AUTH_RATE_LIMIT_PER_MINUTE` | `10` | Giriş, kayıt ve parola değişikliği için hesap başına limit. |
-| `AUTH_IP_RATE_LIMIT_PER_MINUTE` | `60` | Aynı IP'den tüm hesaplara yapılan kimlik denemesi limiti. |
-| `TRUST_PROXY` | kapalı | Ters proxy arkasındaysanız `true` veya hop sayısı (ör. `1`); bkz. aşağısı. |
-| `ATTACHMENT_MAX_FILE_SIZE_BYTES` | 32 MB | Tek ek dosya sınırı. |
-| `ATTACHMENT_MAX_REQUEST_SIZE_BYTES` | 128 MB | Tek istekte toplam yükleme sınırı. |
-| `ATTACHMENT_MAX_FILES_PER_REQUEST` | `20` | Tek istekteki dosya sayısı. |
-| `ATTACHMENT_ALLOWED_EXTENSIONS` | görüntü, video, metin, pdf, arşiv | Virgülle ayrılmış uzantılar, ör. `png,jpg,log,zip`. |
+| `JWT_SECRET` | — (required) | Signs session tokens. At least 32 characters; `openssl rand -hex 32`. Changing it signs everyone out. |
+| `POSTGRES_PASSWORD` | — (required) | Database password. Postgres stores it when the volume is first created. |
+| `POSTGRES_USER`, `POSTGRES_DB` | `testops` | Database user and name. |
+| `APP_PORT` | `8080` | Host port on which the UI is exposed. |
+| `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Image to run; use it to pin a version. |
+| `JWT_EXPIRES_IN` | `8h` | Session duration. |
+| `SELF_REGISTRATION` | `true` | If `false`, users can only be added by workspace admins. |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Request limit per minute per user (or anonymous IP); `0` turns it off. |
+| `AUTH_RATE_LIMIT_PER_MINUTE` | `10` | Per-account limit for sign-in, registration and password change. |
+| `AUTH_IP_RATE_LIMIT_PER_MINUTE` | `60` | Limit on authentication attempts from a single IP across all accounts. |
+| `TRUST_PROXY` | off | `true` or the hop count (e.g. `1`) if you are behind a reverse proxy; see below. |
+| `ATTACHMENT_MAX_FILE_SIZE_BYTES` | 32 MB | Size limit for a single attachment. |
+| `ATTACHMENT_MAX_REQUEST_SIZE_BYTES` | 128 MB | Total upload limit for a single request. |
+| `ATTACHMENT_MAX_FILES_PER_REQUEST` | `20` | Number of files in a single request. |
+| `ATTACHMENT_ALLOWED_EXTENSIONS` | images, video, text, pdf, archives | Comma-separated extensions, e.g. `png,jpg,log,zip`. |
 
-### Ters proxy ve HTTPS
+### Reverse proxy and HTTPS
 
-TestOps kendi başına HTTP sunar. İnternete açacaksanız önüne TLS sonlandıran bir ters proxy (nginx, Caddy, Traefik) koyun ve proxy'yi `http://localhost:8080` adresine yönlendirin. Bu durumda `.env` dosyasına `TRUST_PROXY=1` ekleyin. Aksi halde uygulama tüm istekleri proxy'nin IP'sinden gelmiş sayar ve kullanıcılar aynı rate limit sayacını paylaşır. Uygulama doğrudan internete açıksa `TRUST_PROXY`'yi boş bırakın; aksi halde istemciler `X-Forwarded-For` başlığını uydurarak limiti atlatabilir.
+On its own, TestOps serves plain HTTP. If you are going to expose it to the internet, put a TLS-terminating reverse proxy (nginx, Caddy, Traefik) in front of it and point the proxy at `http://localhost:8080`. In that case, add `TRUST_PROXY=1` to the `.env` file. Otherwise the app treats every request as coming from the proxy's IP, and all users share the same rate limit counter. If the app is exposed directly to the internet, leave `TRUST_PROXY` empty; otherwise clients can bypass the limit by forging the `X-Forwarded-For` header.
 
-## Compose olmadan (`docker run`)
+## Without Compose (`docker run`)
 
-İmaj veritabanı içermez; önce PostgreSQL'i aynı Docker ağında başlatmanız gerekir. Uygulama container'ı içeride **3000** portunu dinler, bu yüzden port eşlemesi `-p <host-portu>:3000` şeklinde olmalıdır.
+The image does not include a database; you first need to start PostgreSQL on the same Docker network. The app container listens on port **3000** internally, so the port mapping must be `-p <host-port>:3000`.
 
 ```bash
-PGPW=$(openssl rand -hex 16)      # bu iki değeri saklayın; yeniden kurulumda aynısı gerekir
+PGPW=$(openssl rand -hex 16)      # keep these two values; a reinstall needs the same ones
 JWT=$(openssl rand -hex 32)
 
 docker network create testops
@@ -110,37 +110,37 @@ docker run -d --name testops --network testops --restart unless-stopped \
   ghcr.io/caslanqa/testops:latest
 ```
 
-Uygulama, veritabanı bağlantı kabul edene kadar migration'ı yeniden dener. Hazır olduğunu `docker inspect -f '{{.State.Health.Status}}' testops` komutuyla (`healthy`) ya da `curl http://localhost:8080/ready` ile kontrol edebilirsiniz.
+The app retries migrations until the database accepts connections. You can check that it is ready with `docker inspect -f '{{.State.Health.Status}}' testops` (`healthy`) or with `curl http://localhost:8080/ready`.
 
-## Sorun giderme
+## Troubleshooting
 
-Önce `docker compose logs app` (veya `docker logs testops`) çıktısına bakın.
+First look at the output of `docker compose logs app` (or `docker logs testops`).
 
-| Belirti | Sebep ve çözüm |
+| Symptom | Cause and fix |
 |---|---|
-| `TestOps: DATABASE_URL is not set` veya `Environment variable not found: DATABASE_URL` | İmaj veritabanı olmadan tek başına çalıştırılmış. [Hızlı başlangıç](#hızlı-başlangıç-önerilen) bölümündeki Compose kurulumunu kullanın ya da [Compose olmadan](#compose-olmadan-docker-run) bölümündeki gibi PostgreSQL'i de başlatıp `DATABASE_URL` verin. |
-| `JWT_SECRET tanımlı değil` (compose) veya `JWT_SECRET is not set / is a placeholder / is too short` | `.env` dosyasına `JWT_SECRET=$(openssl rand -hex 32)` ile üretilmiş bir değer yazın. |
-| Container `healthy` ama tarayıcıda sayfa açılmıyor | Port eşlemesi yanlış: container 3000'i dinler. `-p 8080:3000` kullanın (`-p 8080:8080` değil). |
-| `port is already allocated` / `address already in use` | 8080 başka bir uygulamada. `.env` dosyasına ör. `APP_PORT=9090` yazıp http://localhost:9090 adresini kullanın. |
-| `P1000: Authentication failed against database server` | `POSTGRES_PASSWORD` ilk kurulumdan sonra değiştirilmiş; Postgres eski parolayı kullanmaya devam eder. Eski parolaya dönün. Verileri silmeyi göze alıyorsanız `docker compose down -v` sonrası yeniden başlatın. |
-| `pull access denied for testops` | `.env` içinde eski `APP_IMAGE=testops:local` satırı kalmış; o satırı silin. |
-| `docker: invalid reference format` veya `--name: command not found` | Çok satırlı komutta `\` satırın son karakteri olmalı; arkasında boşluk kalırsa komut bölünür. |
-| Girişte `Too many attempts. Try again in N seconds.` | Kısa sürede çok fazla deneme yapıldı; belirtilen süre kadar bekleyin. Limitler yukarıdaki tabloda. |
+| `TestOps: DATABASE_URL is not set` or `Environment variable not found: DATABASE_URL` | The image was run on its own, without a database. Use the Compose setup from the [Quick start](#quick-start-recommended) section, or start PostgreSQL as well and pass `DATABASE_URL` as shown in the [Without Compose](#without-compose-docker-run) section. |
+| `JWT_SECRET is not set; add it to .env (scripts/start.sh generates one)` (compose) or `JWT_SECRET is not set / is a placeholder / is too short` | Put a value generated with `JWT_SECRET=$(openssl rand -hex 32)` into the `.env` file. |
+| The container is `healthy` but the page does not open in the browser | Wrong port mapping: the container listens on 3000. Use `-p 8080:3000` (not `-p 8080:8080`). |
+| `port is already allocated` / `address already in use` | Port 8080 is used by another application. Put e.g. `APP_PORT=9090` in the `.env` file and use http://localhost:9090. |
+| `P1000: Authentication failed against database server` | `POSTGRES_PASSWORD` was changed after the first installation; Postgres keeps using the old password. Switch back to the old password. If you are willing to lose the data, run `docker compose down -v` and then start again. |
+| `pull access denied for testops` | An old `APP_IMAGE=testops:local` line is left in `.env`; delete that line. |
+| `docker: invalid reference format` or `--name: command not found` | In a multi-line command, `\` must be the last character on the line; if whitespace follows it, the command gets split. |
+| `Too many attempts. Try again in N seconds.` on sign-in | Too many attempts were made in a short time; wait for the stated amount of time. The limits are in the table above. |
 
-Sağlık uç noktaları: `/health` (process ayakta mı) ve `/ready` (veritabanı erişilebilir mi). API dokümantasyonu `/api/docs` adresindedir.
+Health endpoints: `/health` (is the process up) and `/ready` (is the database reachable). The API documentation is at `/api/docs`.
 
-## Geliştirme
+## Development
 
-Kaynak koddan çalıştırmak için Node 20+, pnpm (sürümü `package.json` içindeki `packageManager` alanında) ve Docker gerekir.
+Running from source requires Node 20+, pnpm (the version is in the `packageManager` field of `package.json`) and Docker.
 
 ```bash
 git clone https://github.com/caslanqa/test-ops.git && cd test-ops
 pnpm install
-pnpm start        # .env'i hazırlar, imajı kaynaktan build eder, demo veriyi yükler ve tarayıcıyı açar
-pnpm test:smoke   # çalışan stack'e karşı smoke testleri
+pnpm start        # prepares .env, builds the image from source, loads the demo data and opens the browser
+pnpm test:smoke   # smoke tests against the running stack
 ```
 
-Repo içindeki `docker compose` komutları `docker-compose.override.yml` dosyasını da otomatik yükler. Bu dosya imajı registry yerine çalışma kopyasından build eder (`testops:local`) ve PostgreSQL'i `127.0.0.1:5432` üzerinden host'a açar. Kurulum için yalnızca `docker-compose.yml` gerekir.
+`docker compose` commands run inside the repo also load `docker-compose.override.yml` automatically. That file builds the image from the working copy instead of pulling it from the registry (`testops:local`) and exposes PostgreSQL to the host on `127.0.0.1:5432`. Installation only needs `docker-compose.yml`.
 
-- Monorepo: `apps/api` (NestJS + Prisma), `apps/web` (React + Vite). Tasarım: [`design-doc.md`](design-doc.md), yol haritası: [`PLAN.md`](PLAN.md).
-- `master`'a merge edilen her değişiklik CI'dan geçtikten sonra otomatik olarak sürümlenir; imaj GHCR'ye gönderilir, git tag'i ve GitHub Release oluşturulur. Sürüm commit mesajından belirlenir: `feat:` minor, `fix:` ve diğerleri patch, `feat!:` veya `BREAKING CHANGE:` major artırır.
+- Monorepo: `apps/api` (NestJS + Prisma), `apps/web` (React + Vite). Design: [`design-doc.md`](design-doc.md), roadmap: [`PLAN.md`](PLAN.md).
+- Every change merged into `master` is versioned automatically after it passes CI; the image is pushed to GHCR, and a git tag and a GitHub Release are created. The version is determined from the commit message: `feat:` bumps minor, `fix:` and everything else bump patch, `feat!:` or `BREAKING CHANGE:` bumps major.

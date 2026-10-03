@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Bir sonraki sürümü son `vX.Y.Z` tag'inden ve o tag'den bu yana gelen commit
-# mesajlarından hesaplar; çıktıyı GitHub Actions output biçiminde yazar
-# (`version=X.Y.Z`, `skip=true|false`). release.yml tarafından kullanılır.
+# Computes the next version from the latest `vX.Y.Z` tag and the commit messages
+# since that tag; writes the result in GitHub Actions output format
+# (`version=X.Y.Z`, `skip=true|false`). Used by release.yml.
 #
-#   - Hiç sürüm tag'i yoksa: package.json'daki `version` (ilk sürüm)
-#   - `BREAKING CHANGE:` satırı veya `type!:` öneki → major
-#   - `feat:` / `feat(scope):` öneki                 → minor
-#   - diğer her şey                                   → patch
-#   - HEAD zaten sürüm tag'liyse                      → skip=true (tekrar çalıştırma)
+#   - No version tag at all: `version` from package.json (first release)
+#   - `BREAKING CHANGE:` line or `type!:` prefix  → major
+#   - `feat:` / `feat(scope):` prefix             → minor
+#   - anything else                               → patch
+#   - HEAD already has a version tag              → skip=true (re-run)
 #
-# Prerelease tag'leri (ör. v1.0.0-rc.1) hesaba katılmaz.
+# Prerelease tags (e.g. v1.0.0-rc.1) are ignored.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

@@ -18,8 +18,8 @@ interface CaseChecklistProps {
 }
 
 /**
- * Plan, run ve requirement bağlama dialoglarında ortak case seçici: suite'e göre
- * gruplanmış onay kutuları, arama ve görünenlerin tümünü seçme.
+ * Shared case picker for the plan, run and requirement linking dialogs: checkboxes
+ * grouped by suite, search, and selecting all visible cases.
  */
 export function CaseChecklist({
   cases,
@@ -37,8 +37,8 @@ export function CaseChecklist({
     const visible = needle
       ? cases.filter((c) => foldForSearch(c.title).includes(needle))
       : cases;
-    // Repository ile aynı sıra: suite ağacı sırası, suite içinde oluşturulma sırası
-    // (API en yeniyi önce döndürür); suite dışı case'ler en sonda.
+    // Same order as the repository: suite tree order, then creation order within a suite
+    // (the API returns the newest first); cases outside any suite come last.
     const order = new Map(flattenTree(buildSuiteTree(suites)).map((node, i) => [node.id, i]));
     const rank = (c: ChecklistCase) => (c.suiteId ? (order.get(c.suiteId) ?? Infinity) : Infinity);
     const bySuite = new Map<string | null, ChecklistCase[]>();

@@ -5,8 +5,8 @@ import { SkipThrottle } from "@nestjs/throttler";
 import { PrismaHealthIndicator } from "./prisma-health.indicator";
 import { Public } from "../common/decorators/public.decorator";
 
-// Orkestratör/izleme yoklamaları sık ve tek IP'den gelir; rate limit onları
-// "unhealthy" gösterip container'ı yeniden başlatmamalı.
+// Orchestrator/monitoring probes are frequent and come from a single IP; the rate
+// limit must not make them report "unhealthy" and restart the container.
 @SkipThrottle()
 @ApiTags("health")
 @Controller()
@@ -16,14 +16,14 @@ export class HealthController {
     private readonly prismaHealth: PrismaHealthIndicator,
   ) {}
 
-  // Liveness: process ayağa kalkmış mı, DB kontrolü yok
+  // Liveness: is the process up, no DB check
   @Public()
   @Get("health")
   liveness() {
     return { status: "ok" };
   }
 
-  // Readiness: DB hazır olana kadar trafiği reddet (design-doc.md bölüm 7)
+  // Readiness: reject traffic until the DB is ready (design-doc.md section 7)
   @Public()
   @Get("ready")
   @HealthCheck()

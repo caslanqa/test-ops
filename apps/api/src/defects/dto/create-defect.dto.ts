@@ -22,7 +22,7 @@ export class CreateDefectDto {
   @IsString({ each: true })
   tags?: string[];
 
-  // ör. Jira, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, custom
+  // e.g. Jira, GitHub, GitLab, Azure DevOps, Linear, Trello, YouTrack, custom
   @IsOptional()
   @IsString()
   externalProvider?: string;
@@ -35,7 +35,7 @@ export class CreateDefectDto {
   @IsString()
   externalUrl?: string;
 
-  // Failed sonuçtan defect açma akışı için (FR-044)
+  // For the flow that opens a defect from a failed result (FR-044)
   @IsOptional()
   @IsArray()
   @IsString({ each: true })

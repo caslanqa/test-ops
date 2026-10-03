@@ -14,8 +14,8 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const logger = new Logger("Bootstrap");
 
-  // Rate limit istemciyi req.ip ile tanır; ters proxy arkasında gerçek istemci
-  // adresi X-Forwarded-For'dan ancak proxy güvenilir ilan edilirse okunur.
+  // The rate limit identifies the client by req.ip; behind a reverse proxy the real
+  // client address is read from X-Forwarded-For only if the proxy is declared trusted.
   app.set("trust proxy", app.get(ConfigService).get("rateLimit.trustProxy"));
 
   app.use(helmet());
@@ -29,7 +29,7 @@ async function bootstrap() {
     }),
   );
 
-  // FR-070: /api/v1 altında belgelenmiş REST API + OpenAPI şeması
+  // FR-070: documented REST API under /api/v1 + OpenAPI schema
   const swaggerConfig = new DocumentBuilder()
     .setTitle("TestOps API")
     .setDescription("TestOps public REST API (v1)")
@@ -39,8 +39,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup("api/docs", app, document);
 
-  // SPA fallback: statik dosya eşleşmeyen /api, /health, /ready dışındaki
-  // GET isteklerini index.html'e yönlendirir (React Router client-side routing).
+  // SPA fallback: routes GET requests outside /api, /health, /ready that match no
+  // static file to index.html (React Router client-side routing).
   const webIndex = join(__dirname, "..", "web", "index.html");
   if (existsSync(webIndex)) {
     app.use((req: Request, res: Response, next: NextFunction) => {

@@ -51,8 +51,8 @@ export class RunsService {
       where: { projectId, status },
       orderBy: { createdAt: "desc" },
     });
-    // Liste görünümündeki sonuç şeridi için run başına durum sayıları; tüm
-    // runCase satırlarını çekmek yerine tek bir groupBy sorgusuyla hesaplanır.
+    // Per-run status counts for the result bar in the list view; computed with a
+    // single groupBy query instead of fetching every runCase row.
     const counts = await this.prisma.runCase.groupBy({
       by: ["runId", "status"],
       where: { runId: { in: runs.map((r) => r.id) } },
@@ -117,8 +117,8 @@ export class RunsService {
       }
       caseIds = plan.items.map((i) => i.testCaseId);
     } else if (dto.testCaseIds) {
-      // Başka projeye ait ID'ler sessizce düşürülmek yerine reddedilir; aksi halde
-      // istemci eksik case'lerle oluşan run'ı fark etmez.
+      // IDs from another project are rejected rather than silently dropped; otherwise
+      // the client would not notice the run was created with missing test cases.
       await this.accessControl.assertCasesInProject(projectId, dto.testCaseIds);
       caseIds = dto.testCaseIds;
     }
@@ -197,7 +197,7 @@ export class RunsService {
     });
   }
 
-  // FR-063: public payla\u015f\u0131m linki ayr\u0131cal\u0131kl\u0131 ve kapat\u0131labilir olmal\u0131, tahmin edilemeyen token kullanmal\u0131.
+  // FR-063: the public share link must be auth-exempt and revocable, and use an unguessable token.
   async toggleShare(
     userId: string,
     projectId: string,
@@ -248,7 +248,7 @@ export class RunsService {
     };
   }
 
-  /** Results modülü için run'ın mevcut olduğunu ve tamamlanmadığını doğrular. */
+  /** Verifies, for the Results module, that the run exists and is not completed. */
   async assertWritableRun(projectId: string, runId: string) {
     const run = await this.prisma.testRun.findUnique({ where: { id: runId } });
     if (!run || run.projectId !== projectId) {

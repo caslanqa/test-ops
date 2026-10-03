@@ -11,21 +11,21 @@ import {
 } from "@nestjs/throttler";
 import * as crypto from "crypto";
 
-/** Kimlik denemesi türü; hangi kimliğin (e-posta, IP, kullanıcı) sayılacağını belirler. */
+/** Auth attempt kind; determines which identity (email, IP, user) is counted. */
 export type AuthAttemptKind = "login" | "register" | "password-change";
 
 const AUTH_ATTEMPT_KEY = "rateLimit:authAttempt";
 
-/** Tüm API istekleri: oturum açmış kullanıcı veya anonim IP başına. */
+/** All API requests: per signed-in user or per anonymous IP. */
 export const DEFAULT_THROTTLER = "default";
-/** Kimlik denemeleri: hesap (+IP) başına; parola tahminini yavaşlatır. */
+/** Auth attempts: per account (+IP); slows down password guessing. */
 export const AUTH_THROTTLER = "auth";
-/** Kimlik denemeleri: IP başına, hesaptan bağımsız (credential stuffing, toplu kayıt). */
+/** Auth attempts: per IP, independent of account (credential stuffing, mass sign-up). */
 export const AUTH_IP_THROTTLER = "auth-ip";
 
 /**
- * Endpoint'i kimlik denemesi olarak işaretler; genel limite ek olarak `auth` ve
- * `auth-ip` limitleri uygulanır. İşaretsiz endpoint'lerde bu iki limit atlanır.
+ * Marks the endpoint as an auth attempt; the `auth` and `auth-ip` limits apply in
+ * addition to the general limit. Unmarked endpoints skip these two limits.
  *
  * @example
  * ```ts
@@ -39,10 +39,10 @@ export const RateLimitAuthAttempt = (kind: AuthAttemptKind) =>
   SetMetadata(AUTH_ATTEMPT_KEY, kind);
 
 /**
- * `rateLimit.*` ayarlarından throttler listesini üretir. Limiti 0 olan throttler
- * listeye hiç eklenmez, böylece "kapalı" ayarı guard'da ek kontrol gerektirmez.
- * Sayaçlar bellekte tutulur; birden fazla replika çalıştırılacaksa paylaşılan
- * bir storage (ör. Redis) gerekir.
+ * Builds the throttler list from the `rateLimit.*` settings. A throttler with limit 0
+ * is never added, so the "disabled" setting needs no extra check in the guard.
+ * Counters are kept in memory; running more than one replica requires a shared
+ * storage (e.g. Redis).
  */
 export function throttlerOptions(config: ConfigService): ThrottlerModuleOptions {
   const window = seconds(60);
@@ -59,18 +59,18 @@ export function throttlerOptions(config: ConfigService): ThrottlerModuleOptions 
 }
 
 /**
- * Uygulamanın rate limit guard'ı. Kütüphanenin varsayılanlarından üç noktada ayrılır:
- * - Sayaç anahtarı route başına değil kimlik başınadır; aksi halde limit her
- *   endpoint için ayrı ayrı işler ve "dakikada N istek" anlamını yitirir.
- * - Kimlik, throttler türüne göre seçilir (kullanıcı, IP, e-posta + IP).
- * - 429 yanıtında standart `Retry-After` başlığı ve kullanıcıya gösterilebilir mesaj döner.
+ * The app's rate limit guard. It departs from the library defaults in three ways:
+ * - The counter key is per identity, not per route; otherwise the limit runs
+ *   separately for each endpoint and loses its "N requests per minute" meaning.
+ * - The identity is chosen by throttler kind (user, IP, email + IP).
+ * - A 429 response carries the standard `Retry-After` header and a user-facing message.
  *
- * AuthGuard'dan sonra çalışmalıdır (CommonModule'de sıra buna göre); `request.user`
- * ancak o zaman doludur.
+ * Must run after AuthGuard (CommonModule orders them accordingly); only then is
+ * `request.user` populated.
  */
 @Injectable()
 export class AppThrottlerGuard extends ThrottlerGuard {
-  /** Throttler'ın bu istekte uygulanıp uygulanmayacağına ve kimliğe karar verir. */
+  /** Decides whether the throttler applies to this request and which identity it tracks. */
   protected async handleRequest(requestProps: ThrottlerRequest): Promise<boolean> {
     const { context, throttler } = requestProps;
     const kind = this.authAttemptKind(context);
@@ -83,20 +83,20 @@ export class AppThrottlerGuard extends ThrottlerGuard {
     });
   }
 
-  /** Sayaç anahtarı: throttler adı + kimlik. Bellekte e-posta tutmamak için hash'lenir. */
+  /** Counter key: throttler name + identity. Hashed so emails are not kept in memory. */
   protected generateKey(_context: ExecutionContext, tracker: string, name: string): string {
     return crypto.createHash("sha256").update(`${name}:${tracker}`).digest("hex");
   }
 
-  /** 429 yanıtı: standart Retry-After başlığı ve kalan süreyi söyleyen mesaj. */
+  /** 429 response: standard Retry-After header and a message stating the remaining wait. */
   protected async throwThrottlingException(
     context: ExecutionContext,
     detail: ThrottlerLimitDetail,
   ): Promise<void> {
     const { res } = this.getRequestResponse(context);
     const wait = Math.max(1, detail.timeToBlockExpire);
-    // Kütüphane adlandırılmış limitlerde başlığı "Retry-After-auth" gibi yazıyor;
-    // istemcilerin ve proxy'lerin tanıdığı başlık RFC 9110'daki Retry-After.
+    // For named limits the library writes the header as e.g. "Retry-After-auth";
+    // the header clients and proxies recognize is RFC 9110's Retry-After.
     this.setResponseHeader(res, "Retry-After", wait);
     const subject = this.authAttemptKind(context) ? "Too many attempts" : "Too many requests";
     throw new ThrottlerException(
@@ -104,14 +104,14 @@ export class AppThrottlerGuard extends ThrottlerGuard {
     );
   }
 
-  /** Throttler türüne göre sayılacak kimlik. */
+  /** The identity to count, based on the throttler kind. */
   private async trackerFor(
     name: string,
     req: Record<string, any>,
     kind: AuthAttemptKind | undefined,
   ): Promise<string> {
-    // Temel getTracker IPv6 adreslerini /64 alt ağa indirger; tek bir istemcinin
-    // alt ağındaki adresleri döndürerek limiti atlatmasını engeller.
+    // The base getTracker reduces IPv6 addresses to their /64 subnet; this stops a single
+    // client from bypassing the limit by rotating addresses within its subnet.
     const ip = await super.getTracker(req);
     const userId: string | undefined = req.user?.id;
 
@@ -121,10 +121,10 @@ export class AppThrottlerGuard extends ThrottlerGuard {
     if (name === AUTH_THROTTLER) {
       switch (kind) {
         case "password-change":
-          // Oturum ele geçirilse bile mevcut parolanın tahmin edilmesini yavaşlatır.
+          // Slows down guessing the current password even if the session is hijacked.
           return `user:${userId}`;
         case "login": {
-          // Ofis NAT'ı gibi paylaşılan IP'lerde farklı kullanıcılar birbirini kilitlemesin.
+          // On shared IPs such as office NAT, different users must not lock each other out.
           const email = typeof req.body?.email === "string" ? req.body.email : "";
           return `login:${ip}:${email.trim().toLowerCase()}`;
         }
@@ -135,7 +135,7 @@ export class AppThrottlerGuard extends ThrottlerGuard {
     return userId ? `user:${userId}` : `ip:${ip}`;
   }
 
-  /** Handler'daki @RateLimitAuthAttempt işareti. */
+  /** The @RateLimitAuthAttempt marker on the handler. */
   private authAttemptKind(context: ExecutionContext): AuthAttemptKind | undefined {
     return this.reflector.get<AuthAttemptKind | undefined>(AUTH_ATTEMPT_KEY, context.getHandler());
   }

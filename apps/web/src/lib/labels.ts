@@ -1,4 +1,4 @@
-// API enum değerlerinin arayüzdeki Türkçe karşılıkları (bkz. apps/api/prisma/schema.prisma).
+// UI display labels for the API enum values (see apps/api/prisma/schema.prisma).
 
 export const PRIORITY_LABEL = {
   LOW: 'Low',
@@ -8,7 +8,7 @@ export const PRIORITY_LABEL = {
 } as const;
 export type CasePriority = keyof typeof PRIORITY_LABEL;
 
-/** Öncelik göstergesindeki dolu çubuk sayısı (1–4). */
+/** Number of filled bars in the priority indicator (1–4). */
 export const PRIORITY_LEVEL: Record<CasePriority, number> = {
   LOW: 1,
   MEDIUM: 2,
@@ -65,7 +65,7 @@ export const DEFECT_SEVERITY_LABEL = {
   CRITICAL: 'Critical',
 } as const;
 
-/** Bilinmeyen bir enum değeri gelirse ham değeri gösterir; arayüz boş kalmaz. */
+/** Shows the raw value if an unknown enum value arrives, so the UI never stays blank. */
 export function labelOf<T extends Record<string, string>>(
   labels: T,
   value: string | null | undefined,
@@ -82,7 +82,7 @@ export const PROJECT_ROLE_LABEL = {
 } as const;
 export type ProjectRole = keyof typeof PROJECT_ROLE_LABEL;
 
-/** Rol seçiminde gösterilen açıklamalar (sunucudaki yetki kurallarıyla aynı). */
+/** Descriptions shown in the role picker (matching the server's permission rules). */
 export const PROJECT_ROLE_DESCRIPTION: Record<ProjectRole, string> = {
   ADMIN: "Can do everything, including managing project members and their roles.",
   TESTER: "Creates cases, suites, requirements and plans; starts runs and records results.",

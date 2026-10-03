@@ -12,17 +12,17 @@ allowBuilds:
   '@prisma/engines': true
   prisma: true
 
-# Güvenlik: @nestjs/platform-express 10.x multer'ı tam olarak 2.0.2'ye sabitliyor ve
-# dosya yüklemelerini bu kopya işliyor. 2.3.0 altındaki sürümlerde birden fazla DoS
-# açığı var (GHSA-wc9g-mqfw-jrwm, GHSA-535w-7cp7-47q4, GHSA-72gw-mp4g-v24j vb.);
-# override, bağımlılık ağacının tamamında düzeltilmiş sürümü zorlar.
+# Security: @nestjs/platform-express 10.x pins multer to exactly 2.0.2, and that copy
+# handles file uploads. Versions below 2.3.0 have several DoS vulnerabilities
+# (GHSA-wc9g-mqfw-jrwm, GHSA-535w-7cp7-47q4, GHSA-72gw-mp4g-v24j, etc.);
+# the override forces the fixed version across the whole dependency tree.
 overrides:
   multer: ^2.4.0
-  # Aynı major sürüm içinde kalan, düşük riskli güvenlik yamaları (pnpm audit):
-  # lodash GHSA-r5fr-rjxr-66jc/-f23m-r3pf-42rh/-xxjr-mmjv-4gpg, js-yaml GHSA-52cp-r559-cp3m vb.,
+  # Low-risk security patches that stay within the same major version (pnpm audit):
+  # lodash GHSA-r5fr-rjxr-66jc/-f23m-r3pf-42rh/-xxjr-mmjv-4gpg, js-yaml GHSA-52cp-r559-cp3m etc.,
   # qs GHSA-4mjr-xmp4-gh2g/-x5fp-wj9c-mxmx/-q8mj-m7cp-5q26, body-parser GHSA-v422-hmwv-36x6.
-  # file-type, path-to-regexp (serve-static) ve @nestjs/core yamaları major sürüm
-  # gerektiriyor; Nest 11 geçişinde ele alınacak (bkz. PLAN.md).
+  # The file-type, path-to-regexp (serve-static) and @nestjs/core patches require a major
+  # version bump; they will be handled in the Nest 11 migration (see PLAN.md).
   "lodash@4": ^4.18.1
   "js-yaml@4": ^4.3.2
   "qs@6": ^6.16.0

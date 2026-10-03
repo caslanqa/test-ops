@@ -11,7 +11,7 @@ interface Crumb {
   to?: string;
 }
 
-/** Üst bardaki konum: Workspace'ler › workspace › proje › bölüm. */
+/** Location shown in the top bar: Workspaces › workspace › project › section. */
 function Breadcrumbs() {
   const workspaceMatch = useMatch('/workspaces/:workspaceId/*');
   const workspaceId = workspaceMatch?.params.workspaceId;
@@ -46,8 +46,8 @@ function Breadcrumbs() {
       });
     }
   }
-  // Linki olmayan son öğe bulunulan sayfadır (aria-current). Run detayı gibi alt
-  // sayfalarda bölüm de link olarak kalır; sayfanın adı zaten h1'dedir.
+  // The last item without a link is the current page (aria-current). On subpages such as
+  // run detail the section also stays a link; the page name is already in the h1.
   const last = crumbs.length - 1;
 
   return (
@@ -68,7 +68,7 @@ function Breadcrumbs() {
   );
 }
 
-/** Mobilde sidebar: native <dialog> olduğu için odak tuzağı ve Esc tarayıcıdan gelir. */
+/** Sidebar on mobile: as a native <dialog>, the focus trap and Esc come from the browser. */
 function NavDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -93,14 +93,14 @@ function NavDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
-/** Oturum açılmış tüm sayfaların iskeleti: skip link, sidebar, üst bar ve içerik. */
+/** Skeleton of all signed-in pages: skip link, sidebar, top bar and content. */
 export function AppShell() {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
   const isFirstRender = useRef(true);
   const [navOpen, setNavOpen] = useState(false);
 
-  // SPA'da sayfa değişimi ekran okuyuculara duyurulmaz; odağı içeriğe taşı (a11y RX2).
+  // In an SPA, page changes aren't announced to screen readers; move focus to the content (a11y RX2).
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;

@@ -1,8 +1,8 @@
 name: CI
 
-# Her PR'da ve release.yml'den çağrı (workflow_call) ile çalışır. master push'larında
-# release.yml bu workflow'u zaten çağırdığı için ayrıca `push` tetikleyicisi yoktur;
-# imaj yalnızca bu workflow geçerse yayınlanır.
+# Runs on every PR and when called from release.yml (workflow_call). There is no
+# separate `push` trigger because release.yml already calls this workflow on master
+# pushes; the image is only published if this workflow passes.
 on:
   pull_request:
   workflow_call: {}
@@ -12,17 +12,17 @@ permissions:
 
 jobs:
   verify:
-    name: Build ve typecheck
+    name: Build and typecheck
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # pnpm sürümü package.json'daki `packageManager` alanından okunur (Dockerfile ile aynı).
+      # The pnpm version is read from the `packageManager` field in package.json (same as the Dockerfile).
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
 
-      # Node sürümü Dockerfile'daki base imajla aynı tutulur.
+      # The Node version is kept in sync with the base image in the Dockerfile.
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -41,15 +41,15 @@ jobs:
       - name: API build
         run: pnpm --filter @testops/api run build
 
-      # API lint (eslint) henüz kurulu/yapılandırılmış değil; bkz. PLAN.md 0.1.
+      # API lint (eslint) is not installed/configured yet; see PLAN.md 0.1.
       - name: Web lint
         run: pnpm --filter @testops/web run lint
 
-      - name: Web build (tsc -b dahil)
+      - name: Web build (includes tsc -b)
         run: pnpm --filter @testops/web run build
 
   smoke:
-    name: Docker smoke testleri
+    name: Docker smoke tests
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -61,11 +61,11 @@ jobs:
         with:
           node-version: 20
 
-      # Uygulama varsayılan/kısa JWT_SECRET ile başlamaz; script rastgele üretir.
+      # The app does not start with a default/short JWT_SECRET; the script generates a random one.
       - name: Prepare .env
         run: bash scripts/ensure-env.sh
 
-      # Yayınlanacak Dockerfile ile aynı imaj; app healthcheck'i (/ready) geçene kadar beklenir.
+      # Same image as the Dockerfile that gets published; waits until the app healthcheck (/ready) passes.
       - name: Start stack
         run: docker compose up -d --build --wait --wait-timeout 300
 

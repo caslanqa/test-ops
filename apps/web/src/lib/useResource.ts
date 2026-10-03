@@ -6,9 +6,9 @@ interface ResourceState<T> {
 }
 
 /**
- * Bir GET isteğini bileşen ömrü boyunca yönetir: yükleniyor/hata durumu ve
- * `reload`. Bağımlılıklar değişince eski isteğin cevabı yok sayılır; böylece
- * hızlı sayfa geçişlerinde yanlış projenin verisi ekrana yazılmaz.
+ * Manages a GET request for the component's lifetime: loading/error state and
+ * `reload`. When dependencies change, the stale request's response is ignored, so
+ * fast page switches never render the wrong project's data.
  */
 export function useResource<T>(load: () => Promise<T>, deps: DependencyList) {
   const [state, setState] = useState<ResourceState<T>>({
@@ -35,7 +35,7 @@ export function useResource<T>(load: () => Promise<T>, deps: DependencyList) {
     return () => {
       cancelled = true;
     };
-    // `load` her render'da yeniden oluşturulur; tetikleyici olarak çağıranın bağımlılıkları kullanılır.
+    // `load` is recreated on every render; the caller's dependencies are used as the trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, version]);
 
@@ -49,7 +49,7 @@ export function useResource<T>(load: () => Promise<T>, deps: DependencyList) {
   };
 }
 
-/** Sayfa başlığını "<başlık> – TestOps" yapar (WCAG 2.4.2, SPA rota duyurusu). */
+/** Sets the page title to "<title> – TestOps" (WCAG 2.4.2, SPA route announcement). */
 export function usePageTitle(title: string | undefined) {
   useEffect(() => {
     document.title = title ? `${title} – TestOps` : 'TestOps';

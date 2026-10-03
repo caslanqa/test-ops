@@ -10,7 +10,7 @@ export class RegisterDto {
   @MaxLength(100)
   displayName!: string;
 
-  // bcrypt yalnızca ilk 72 baytı kullanır; daha uzun parola güvenlik vaat etmez.
+  // bcrypt only uses the first 72 bytes; a longer password promises no extra security.
   @IsString()
   @MinLength(8)
   @MaxLength(72)

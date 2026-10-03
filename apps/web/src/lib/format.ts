@@ -11,12 +11,12 @@ const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
-/** ISO tarihini "Oct 2, 2026" biçiminde gösterir. */
+/** Formats an ISO date as "Oct 2, 2026". */
 export function formatDate(iso: string | null | undefined): string {
   return iso ? dateFormatter.format(new Date(iso)) : '—';
 }
 
-/** ISO tarihini "Oct 2, 02:05 PM" biçiminde gösterir (run adları gibi kısa bağlamlar için). */
+/** Formats an ISO date as "Oct 2, 02:05 PM" (for short contexts such as run names). */
 export function formatDateTime(iso: string | Date): string {
   return dateTimeFormatter.format(typeof iso === 'string' ? new Date(iso) : iso);
 }
@@ -30,7 +30,7 @@ const TURKISH_ASCII: Record<string, string> = {
   ü: 'u',
 };
 
-/** Workspace adından API'nin kabul ettiği slug'ı (küçük harf, rakam, tire) üretir. */
+/** Builds the slug the API accepts (lowercase letters, digits, hyphens) from a workspace name. */
 export function slugify(value: string): string {
   return value
     .toLocaleLowerCase('tr-TR')
@@ -42,15 +42,15 @@ export function slugify(value: string): string {
 }
 
 /**
- * Arama için büyük/küçük harf ve i/ı/İ farkını yok sayan biçim. `toLocaleLowerCase('tr-TR')`
- * İngilizce başlıkları bozar ("Invoice" → "ınvoice"), varsayılan `toLowerCase` ise Türkçe
- * "İ"yi "i̇" yapar; ikisini de aynı "i"ye indirger.
+ * Search form that ignores case and the i/ı/İ distinction. `toLocaleLowerCase('tr-TR')`
+ * breaks English titles ("Invoice" → "ınvoice"), while the default `toLowerCase` turns the
+ * Turkish "İ" into "i̇"; this reduces both to the same "i".
  */
 export function foldForSearch(value: string): string {
   return value.toLowerCase().replace(/ı/g, 'i').normalize('NFD').replace(/\u0307/g, '');
 }
 
-/** "1 case" / "3 cases" gibi İngilizce sayı-isim uyumu. */
+/** English number-noun agreement, such as "1 case" / "3 cases". */
 export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : pluralForm}`;
 }

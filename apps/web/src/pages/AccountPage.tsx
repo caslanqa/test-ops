@@ -128,7 +128,7 @@ function PasswordSection() {
   );
 }
 
-/** Oluşturulan token yalnızca bir kez gösterilir; sunucu yalnızca hash'ini saklar (FR-073). */
+/** The created token is shown only once; the server stores only its hash (FR-073). */
 function NewTokenReveal({ token, onDone }: { token: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   const tokenId = useId();
@@ -138,7 +138,7 @@ function NewTokenReveal({ token, onDone }: { token: string; onDone: () => void }
       await navigator.clipboard.writeText(token);
       setCopied(true);
     } catch {
-      // Pano izni yoksa metin seçili bırakılır; kullanıcı elle kopyalar.
+      // Without clipboard permission the text is left selected; the user copies it manually.
       (document.getElementById(tokenId) as HTMLInputElement | null)?.select();
     }
   }

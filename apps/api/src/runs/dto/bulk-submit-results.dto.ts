@@ -7,7 +7,7 @@ import {
 } from "class-validator";
 import { SubmitResultDto } from "./submit-result.dto";
 
-// FR-074: toplu istek boyutu sınırlandırılmalı
+// FR-074: bulk request size must be limited
 export const BULK_RESULTS_MAX_ITEMS = 500;
 
 export class BulkSubmitResultsDto {

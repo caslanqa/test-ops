@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Tek komutla TestOps'u ayağa kaldırır: .env hazırlar, tek imajı build edip
-# compose stack'i başlatır, uygulama hazır olana kadar bekler, demo veriyi
-# seed eder ve arayüzü tarayıcıda açar.
+# Brings TestOps up with a single command: prepares .env, builds the single image
+# and starts the compose stack, waits until the app is ready, seeds the demo data
+# and opens the UI in the browser.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -23,7 +23,7 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
-# Uygulama başlamayı reddettiyse (ör. geçersiz JWT_SECRET) sebebi görünür olsun.
+# If the app refused to start (e.g. invalid JWT_SECRET), make the reason visible.
 if [ "$ready" != true ]; then
   echo "The app did not become ready within 120 s. Latest logs:" >&2
   docker compose logs --tail 40 app >&2
@@ -32,7 +32,7 @@ fi
 
 docker compose exec -T app node prisma/seed.js || true
 
-# Giriş bilgisini seed yazdırır (kullanıcı önceden varsa parolasının değişmediğini söyler).
+# The seed prints the login credentials (or says the password was left unchanged if the user already existed).
 echo "Ready: $APP_URL"
 
 if command -v open > /dev/null 2>&1; then

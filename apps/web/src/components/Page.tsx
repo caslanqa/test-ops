@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
-/** Sayfanın tek h1'i, kısa açıklaması ve sağda birincil eylemleri. */
+/** The page's single h1, its short description and the primary actions on the right. */
 export function PageHeader({
   title,
   description,
@@ -25,7 +25,7 @@ export function PageHeader({
   );
 }
 
-/** Boş liste: ne olduğunu ve bir sonraki adımı söyler. */
+/** Empty list: says what it is and what the next step is. */
 export function EmptyState({
   icon: Icon,
   title,
@@ -47,7 +47,7 @@ export function EmptyState({
   );
 }
 
-/** Yükleme hatası: neyin başarısız olduğunu ve nasıl tekrar deneneceğini gösterir. */
+/** Load error: shows what failed and how to try again. */
 export function LoadError({
   message,
   onRetry,
@@ -75,7 +75,7 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
   );
 }
 
-/** Form hatası: alanların altında, ekran okuyuculara hemen duyurulur. */
+/** Form error: shown below the fields and announced to screen readers immediately. */
 export function FormError({ message }: { message: string | null }) {
   if (!message) return null;
   return (

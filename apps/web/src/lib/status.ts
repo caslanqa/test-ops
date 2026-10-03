@@ -14,7 +14,7 @@ export type ResultStatus =
   | 'SKIPPED'
   | 'UNTESTED';
 
-/** Şeritte ve lejantta sabit sıra: önce sonuçlananlar, en son test edilmeyenler. */
+/** Fixed order in the ribbon and legend: results first, untested last. */
 export const STATUS_ORDER: ResultStatus[] = [
   'PASSED',
   'FAILED',
@@ -23,7 +23,7 @@ export const STATUS_ORDER: ResultStatus[] = [
   'UNTESTED',
 ];
 
-/** Tester'ın bir case için seçebileceği sonuçlar (Untested geri alınamaz bir başlangıç durumudur). */
+/** Results a tester can pick for a case (Untested is an initial state that can't be returned to). */
 export const RESULT_CHOICES: Exclude<ResultStatus, 'UNTESTED'>[] = [
   'PASSED',
   'FAILED',
@@ -31,7 +31,7 @@ export const RESULT_CHOICES: Exclude<ResultStatus, 'UNTESTED'>[] = [
   'SKIPPED',
 ];
 
-// Renk tek başına anlam taşımasın diye (WCAG 1.4.1) her durumun bir etiketi ve ikonu var.
+// Each status has a label and an icon so that color alone carries no meaning (WCAG 1.4.1).
 export const STATUS_META: Record<
   ResultStatus,
   { label: string; icon: LucideIcon }
@@ -47,7 +47,7 @@ export function isResultStatus(value: string): value is ResultStatus {
   return value in STATUS_META;
 }
 
-/** Durum → adet sözlüğünü, bilinmeyen anahtarları atarak normalize eder. */
+/** Normalizes a status → count map, dropping unknown keys. */
 export function normalizeCounts(
   counts: Record<string, number> | undefined,
 ): Record<ResultStatus, number> {
@@ -64,7 +64,7 @@ export function normalizeCounts(
   return result;
 }
 
-/** "12 passed, 3 failed" biçiminde ekran okuyucu özeti; sıfır olan durumlar atlanır. */
+/** Screen reader summary such as "12 passed, 3 failed"; statuses with zero are skipped. */
 export function describeCounts(counts: Record<ResultStatus, number>): string {
   const parts = STATUS_ORDER.filter((s) => counts[s] > 0).map(
     (s) => `${counts[s]} ${STATUS_META[s].label.toLowerCase()}`,

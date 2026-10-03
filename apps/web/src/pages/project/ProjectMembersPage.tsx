@@ -17,7 +17,7 @@ const ROLE_OPTIONS = (Object.keys(PROJECT_ROLE_LABEL) as ProjectRole[]).map((rol
   description: PROJECT_ROLE_DESCRIPTION[role],
 }));
 
-/** Projeye eklenecek kişi workspace üyeleri arasından seçilir (sunucu da bunu zorunlu tutar). */
+/** People added to the project are picked from the workspace members (the server enforces this too). */
 function AddProjectMemberForm({
   projectId,
   workspaceId,

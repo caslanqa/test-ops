@@ -30,7 +30,7 @@ export interface AttachmentTarget {
   defectId?: string;
 }
 
-/** Dosyayı belleğe almadan SHA-256 özetini hesaplar. */
+/** Computes the file's SHA-256 digest without loading it into memory. */
 async function sha256File(filePath: string): Promise<string> {
   const hash = crypto.createHash("sha256");
   for await (const chunk of createReadStream(filePath)) {
@@ -48,9 +48,9 @@ export class AttachmentsService {
   ) {}
 
   /**
-   * Multer'ın geçici dizine yazdığı dosyaları doğrular ve kalıcı konuma taşır
-   * (FR-045/FR-046). Tüm doğrulamalar herhangi bir dosya taşınmadan önce yapılır;
-   * reddedilen veya taşınamayan geçici dosyalar `finally` içinde silinir.
+   * Validates the files Multer wrote to the temp directory and moves them to permanent
+   * storage (FR-045/FR-046). All validation happens before any file is moved;
+   * rejected or unmovable temp files are deleted in `finally`.
    */
   async upload(
     userId: string,
@@ -59,8 +59,8 @@ export class AttachmentsService {
     files: Express.Multer.File[] | undefined,
   ) {
     const uploaded = files ?? [];
-    // Ad; doğrulama mesajlarında, DB kaydında ve indirmede tutarlı olsun diye
-    // ilk adımda düzeltilir.
+    // The name is fixed up first so it is consistent across validation messages,
+    // the DB record and downloads.
     for (const file of uploaded) {
       file.originalname = normalizeUploadedFileName(file.originalname);
     }
@@ -85,7 +85,7 @@ export class AttachmentsService {
           `${crypto.randomUUID()}-${safeName}`,
         );
         const finalPath = path.join(baseDir, storageKey);
-        // Geçici dizin aynı volume içinde olduğundan rename atomiktir.
+        // The temp directory is on the same volume, so the rename is atomic.
         await fs.rename(file.path, finalPath);
         try {
           created.push(
@@ -104,7 +104,7 @@ export class AttachmentsService {
             }),
           );
         } catch (error) {
-          // Metadata yazılamadıysa sahipsiz dosya bırakma.
+          // If the metadata could not be written, do not leave an orphaned file.
           await fs.rm(finalPath, { force: true });
           throw error;
         }
@@ -144,8 +144,8 @@ export class AttachmentsService {
     } catch {
       throw new NotFoundException("Attachment file is missing from storage");
     }
-    // Eski kayıtlar istemcinin bildirdiği MIME tipini taşıyabilir; bu yüzden
-    // sunulacak tip her indirmede uzantıdan yeniden türetilir.
+    // Older records may carry the client-declared MIME type; so the type to
+    // serve is re-derived from the extension on every download.
     return {
       attachment,
       filePath,
@@ -153,7 +153,7 @@ export class AttachmentsService {
     };
   }
 
-  /** Sayı, toplam/tekil boyut ve uzantı sınırlarını tüm dosyalar için uygular (FR-045, bölüm 8). */
+  /** Applies the count, total/per-file size and extension limits to all files (FR-045, section 8). */
   private validateFiles(files: Express.Multer.File[]) {
     const maxFiles = this.config.get<number>("attachments.maxFilesPerRequest")!;
     const maxFileSize = this.config.get<number>(

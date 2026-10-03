@@ -1,10 +1,10 @@
 import { Link } from 'react-router-dom';
 
-// Marka işareti, ürünün ana görsel motifi olan sonuç şeridinin küçük bir kesiti:
-// her çubuk bir case, rengi o case'in sonucu.
+// The brand mark is a small slice of the result ribbon, the product's main visual motif:
+// each bar is a case, and its color is that case's result.
 const MARK_BARS = ['passed', 'passed', 'failed', 'passed', 'blocked'] as const;
 
-/** `to` verilmezse (ör. giriş ekranı) link değil, yalnızca marka olarak çizilir. */
+/** Without `to` (e.g. on the sign-in screen) it renders as the brand only, not as a link. */
 export function BrandMark({ to }: { to?: string }) {
   const content = (
     <>
