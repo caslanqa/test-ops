@@ -1,16 +1,26 @@
 name: Release
 
-# On every push/merge to master (except Markdown-only changes), with no manual
+# On every push/merge to master that changes the image's inputs, with no manual
 # steps: CI → compute version → publish the image to GHCR → tag + GitHub Release.
 # See scripts/next-version.sh for the versioning rules.
+#
+# Changes that leave the image identical (docs, CI, tests, install.sh, docker-compose.yml,
+# which users download straight from the repository) do not cut a release; their
+# commits are included in the next release's version bump and notes.
 #
 # Because the tag is created with GITHUB_TOKEN, GitHub does not trigger another workflow;
 # that is why publishing happens inside this run instead of a separate tag-triggered workflow.
 on:
   push:
     branches: [master]
-    paths-ignore:
-      - "**.md"
+    # Everything the Dockerfile copies into the image.
+    paths:
+      - "Dockerfile"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "apps/**"
+      - "!**.md"
   workflow_dispatch: {}
 
 # Runs are serialized so two back-to-back pushes do not compute the same version and collide.

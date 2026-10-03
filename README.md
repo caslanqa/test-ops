@@ -7,7 +7,51 @@ A test management tool you can run on your own server, bringing test case manage
 
 ## Quick start (recommended)
 
-No source code is needed; two files and three commands are enough.
+One command installs TestOps; Docker is the only requirement.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/caslanqa/test-ops/master/install.sh | bash
+```
+
+The [installer](install.sh):
+
+1. checks that Docker and Docker Compose v2 are installed and running, and that the port is free;
+2. creates `~/testops` with `docker-compose.yml` and a `.env` file holding random secrets;
+3. pulls the images, starts PostgreSQL and TestOps and waits until they are ready;
+4. creates the first admin account, with a starter workspace and demo project, and prints its password.
+
+When it finishes, open **http://localhost:8080** and sign in with the printed account. The password is shown only once; change it on the **Account** page.
+
+Options are environment variables placed before `bash`, for example `curl -fsSL …/install.sh | TESTOPS_PORT=9090 bash`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TESTOPS_DIR` | `~/testops` | Install directory |
+| `TESTOPS_PORT` | `8080` | Port the web UI is published on; also changes the port of an existing install |
+| `TESTOPS_VERSION` | `latest` | Image version to run, e.g. `0.3.0`; the install stays pinned to it until you run the installer with `TESTOPS_VERSION=latest` |
+| `TESTOPS_ADMIN_EMAIL` | `admin@testops.local` | Email of the first admin account |
+
+**Upgrading:** run the same command again. It refreshes `docker-compose.yml` (a changed copy is kept as `docker-compose.yml.bak`), pulls the newer image and restarts TestOps; `.env` and your data are left as they are.
+
+**Reading the script first:** download it, review it, then run it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/caslanqa/test-ops/master/install.sh -o install.sh
+less install.sh
+bash install.sh
+```
+
+**Uninstalling:** `cd ~/testops && docker compose down -v`, then delete the folder. This **deletes all data**; take a [backup](#day-to-day-operations) first if you need it.
+
+> `.env` holds the generated secrets; `cat ~/testops/.env` shows them. Neither is a sign-in password: `JWT_SECRET` signs sessions and `POSTGRES_PASSWORD` is only used by the app to reach its database. Keep a copy of the file (e.g. in your password manager): the database password cannot be recovered without it, and it must not be changed after the first installation (see [Troubleshooting](#troubleshooting)).
+
+### First sign-in
+
+The installer creates the first admin account. Everyone else either signs up with the **Create one** link on the sign-in screen, or is added by a workspace admin under **Members**; the person who creates a workspace becomes its admin. With `SELF_REGISTRATION=false` in `.env`, only the second way is available.
+
+### Manual installation
+
+The same setup without the installer, for example to review every step:
 
 ```bash
 mkdir testops && cd testops
@@ -15,7 +59,7 @@ mkdir testops && cd testops
 # 1. Download the Compose file (PostgreSQL + TestOps)
 curl -fsSLO https://raw.githubusercontent.com/caslanqa/test-ops/master/docker-compose.yml
 
-# 2. Create the .env file containing the two required secrets
+# 2. Create the .env file containing the two required secrets (nothing is printed)
 cat > .env <<EOF
 JWT_SECRET=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
@@ -23,28 +67,12 @@ EOF
 
 # 3. Start it; --wait blocks until the app is ready (images are downloaded the first time)
 docker compose up -d --wait
+
+# 4. Create the first admin account with a starter workspace and demo project
+docker compose exec -e SEED_ADMIN_PASSWORD="$(openssl rand -base64 18)" app node prisma/seed.js
 ```
 
-Then open **http://localhost:8080** in your browser.
-
-> Step 2 prints nothing; run `cat .env` to see the generated values. Neither is a TestOps sign-in password: `JWT_SECRET` signs sessions and `POSTGRES_PASSWORD` is only used by the app to reach its database, so you never type them in. Sign-in accounts are created as described in [First sign-in](#first-sign-in).
->
-> The `.env` file contains secrets; keep it safe (e.g. a copy in your password manager) and do not share it. In particular, `POSTGRES_PASSWORD` must not be changed after the first installation (see [Troubleshooting](#troubleshooting)).
-
-### First sign-in
-
-A new installation has no users. You have two options:
-
-- **Create an account:** Sign up with the **Create account** link on the sign-in screen, then create your first workspace with **New workspace**. The person who creates a workspace becomes its admin and adds the other users from there.
-- **Load demo data:** Creates a sample workspace, project and admin user.
-
-  ```bash
-  docker compose exec -e SEED_ADMIN_PASSWORD="$(openssl rand -base64 18)" app node prisma/seed.js
-  ```
-
-  The command prints the sign-in details on the `Seed complete. Sign in with: admin@testops.local / …` line; the email can be changed with `SEED_ADMIN_EMAIL`. If `SEED_ADMIN_PASSWORD` is not given, the password is `ChangeMe123!`; in that case change it on the **Account** page right after signing in. Running the command again is safe: it does not touch existing records or the user's password, and its output says so.
-
-If you have turned off registration with `SELF_REGISTRATION=false`, create the first user with the demo data command.
+Step 4 prints the sign-in details on the `Seed complete. Sign in with: admin@testops.local / …` line; the email can be changed with `SEED_ADMIN_EMAIL`. Running it again is safe: it does not touch existing records or the user's password, and its output says so. Instead of step 4 you can also sign up with **Create one**.
 
 ## Day-to-day operations
 
@@ -56,7 +84,7 @@ Run the commands in the folder that contains `docker-compose.yml`.
 | Logs | `docker compose logs -f app` |
 | Stop (data is kept) | `docker compose down` |
 | Restart | `docker compose up -d --wait` |
-| Update | `docker compose pull && docker compose up -d --wait` |
+| Update | Run the [install command](#quick-start-recommended) again, or `docker compose pull && docker compose up -d --wait` |
 | Database backup | `docker compose exec -T postgres pg_dump -U testops testops > testops.sql` |
 | Attachment backup | `docker compose cp app:/data/attachments ./attachments-backup` |
 | Delete everything (**including data**) | `docker compose down -v` |
@@ -123,7 +151,7 @@ First look at the output of `docker compose logs app` (or `docker logs testops`)
 | `TestOps: DATABASE_URL is not set` or `Environment variable not found: DATABASE_URL` | The image was run on its own, without a database. Use the Compose setup from the [Quick start](#quick-start-recommended) section, or start PostgreSQL as well and pass `DATABASE_URL` as shown in the [Without Compose](#without-compose-docker-run) section. |
 | `JWT_SECRET is not set; add it to .env (scripts/start.sh generates one)` (compose) or `JWT_SECRET is not set / is a placeholder / is too short` | Put a value generated with `JWT_SECRET=$(openssl rand -hex 32)` into the `.env` file. |
 | The container is `healthy` but the page does not open in the browser | Wrong port mapping: the container listens on 3000. Use `-p 8080:3000` (not `-p 8080:8080`). |
-| `port is already allocated` / `address already in use` | Port 8080 is used by another application. Put e.g. `APP_PORT=9090` in the `.env` file and use http://localhost:9090. |
+| `Port 8080 is already in use` (installer), `port is already allocated` / `address already in use` | Port 8080 is used by another application. Run the installer with e.g. `TESTOPS_PORT=9090`, or put `APP_PORT=9090` in the `.env` file, and use http://localhost:9090. |
 | `P1000: Authentication failed against database server` | `POSTGRES_PASSWORD` was changed after the first installation; Postgres keeps using the old password. Switch back to the old password. If you are willing to lose the data, run `docker compose down -v` and then start again. |
 | `pull access denied for testops` | An old `APP_IMAGE=testops:local` line is left in `.env`; delete that line. |
 | `docker: invalid reference format` or `--name: command not found` | In a multi-line command, `\` must be the last character on the line; if whitespace follows it, the command gets split. |
@@ -145,4 +173,4 @@ pnpm test:smoke   # smoke tests against the running stack
 `docker compose` commands run inside the repo also load `docker-compose.override.yml` automatically. That file builds the image from the working copy instead of pulling it from the registry (`testops:local`) and exposes PostgreSQL to the host on `127.0.0.1:5432`. Installation only needs `docker-compose.yml`.
 
 - Monorepo: `apps/api` (NestJS + Prisma), `apps/web` (React + Vite). Design: [`design-doc.md`](design-doc.md), roadmap: [`PLAN.md`](PLAN.md).
-- Every change merged into `master` is versioned automatically after it passes CI; the image is pushed to GHCR, and a git tag and a GitHub Release are created. The version is determined from the commit message: `feat:` bumps minor, `fix:` and everything else bump patch, `feat!:` or `BREAKING CHANGE:` bumps major.
+- Every change to the image's inputs (`apps/**`, `Dockerfile`, `package.json`, `pnpm-*`) merged into `master` is versioned automatically after it passes CI; the image is pushed to GHCR, and a git tag and a GitHub Release are created. Changes that leave the image identical (docs, CI, tests, `install.sh`, `docker-compose.yml`) do not cut a release; their commits count towards the next one. The version is determined from the commit message: `feat:` bumps minor, `fix:` and everything else bump patch, `feat!:` or `BREAKING CHANGE:` bumps major.
