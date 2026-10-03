@@ -27,7 +27,9 @@ docker compose up -d --wait
 
 Then open **http://localhost:8080** in your browser.
 
-> The `.env` file contains secrets; keep it safe and do not share it. In particular, `POSTGRES_PASSWORD` must not be changed after the first installation (see [Troubleshooting](#troubleshooting)).
+> Step 2 prints nothing; run `cat .env` to see the generated values. Neither is a TestOps sign-in password: `JWT_SECRET` signs sessions and `POSTGRES_PASSWORD` is only used by the app to reach its database, so you never type them in. Sign-in accounts are created as described in [First sign-in](#first-sign-in).
+>
+> The `.env` file contains secrets; keep it safe (e.g. a copy in your password manager) and do not share it. In particular, `POSTGRES_PASSWORD` must not be changed after the first installation (see [Troubleshooting](#troubleshooting)).
 
 ### First sign-in
 
