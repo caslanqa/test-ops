@@ -1,9 +1,12 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { ProjectRole } from "@prisma/client";
+import { Prisma, ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRequirementDto } from "./dto/create-requirement.dto";
 import { UpdateRequirementDto } from "./dto/update-requirement.dto";
+import { ListRequirementsQueryDto } from "./dto/list-requirements-query.dto";
+import { pageArgs } from "../common/pagination";
+import { ListRequirementCasesQueryDto } from "./dto/list-requirement-cases-query.dto";
 
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
 
@@ -14,16 +17,26 @@ export class RequirementsService {
     private readonly accessControl: AccessControlService,
   ) {}
 
-  async list(userId: string, projectId: string) {
+  async list(userId: string, projectId: string, query: ListRequirementsQueryDto) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
-    return this.prisma.requirement.findMany({
-      where: { projectId, archivedAt: null },
-      include: { cases: { include: { testCase: true } } },
-      orderBy: { createdAt: "desc" },
-    });
+    const where: Prisma.RequirementWhereInput = {
+      projectId,
+      archivedAt: null,
+      title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.requirement.findMany({
+        where,
+        include: { cases: { include: { testCase: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.requirement.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async getOne(userId: string, projectId: string, requirementId: string) {
@@ -159,5 +172,30 @@ export class RequirementsService {
       });
     }
     return result;
+  }
+
+  /** The test cases linked to a requirement, as a paged list of cases. */
+  async listCases(
+    userId: string,
+    projectId: string,
+    requirementId: string,
+    query: ListRequirementCasesQueryDto,
+  ) {
+    await this.getOne(userId, projectId, requirementId);
+    const where: Prisma.TestCaseWhereInput = {
+      archivedAt: null,
+      requirements: { some: { requirementId } },
+      title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.testCase.findMany({
+        where,
+        include: { steps: { orderBy: { position: "asc" } } },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.testCase.count({ where }),
+    ]);
+    return { items, total };
   }
 }

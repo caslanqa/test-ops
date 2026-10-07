@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { ProjectRole } from "@prisma/client";
+import { Prisma, ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreatePlanDto } from "./dto/create-plan.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
+import { ListPlansQueryDto } from "./dto/list-plans-query.dto";
+import { pageArgs } from "../common/pagination";
 
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
 
@@ -14,16 +16,27 @@ export class PlansService {
     private readonly accessControl: AccessControlService,
   ) {}
 
-  async list(userId: string, projectId: string) {
+  async list(userId: string, projectId: string, query: ListPlansQueryDto) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
-    return this.prisma.testPlan.findMany({
-      where: { projectId, archivedAt: null },
-      include: { _count: { select: { items: true, runs: true } } },
-      orderBy: { createdAt: "desc" },
-    });
+    const where: Prisma.TestPlanWhereInput = {
+      projectId,
+      archivedAt: null,
+      milestoneId: query.milestoneId,
+      title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.testPlan.findMany({
+        where,
+        include: { _count: { select: { items: true, runs: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.testPlan.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async getOne(userId: string, projectId: string, planId: string) {

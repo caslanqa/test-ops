@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { WorkspacesService } from "./workspaces.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
@@ -16,6 +8,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import type { Response } from "express";
+import { PageQueryDto, PagedResponse, sendPage } from "../common/pagination";
+import { DeleteWorkspaceDto } from "./dto/delete-workspace.dto";
 
 @ApiTags("workspaces")
 @Controller("workspaces")
@@ -31,8 +26,13 @@ export class WorkspacesController {
   }
 
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser) {
-    return this.workspacesService.listForUser(user.id);
+  @PagedResponse()
+  async list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: PageQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return sendPage(res, await this.workspacesService.listForUser(user.id, query));
   }
 
   @Get(":workspaceId")
@@ -91,5 +91,16 @@ export class WorkspacesController {
     @Param("memberId") memberId: string,
   ) {
     return this.workspacesService.removeMember(user.id, workspaceId, memberId);
+  }
+
+  /** Deletes the workspace with all its projects and data; send the workspace name to confirm. */
+  @Delete(":workspaceId")
+  @HttpCode(204)
+  async remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("workspaceId") workspaceId: string,
+    @Body() dto: DeleteWorkspaceDto,
+  ) {
+    await this.workspacesService.remove(user.id, workspaceId, dto.confirmName);
   }
 }

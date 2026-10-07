@@ -7,15 +7,18 @@ import {
 import { WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
+import { PageQueryDto, pageArgs } from "../common/pagination";
 import { AuthService } from "../auth/auth.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
 import { AddWorkspaceMemberDto } from "./dto/add-workspace-member.dto";
+import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
 @Injectable()
 export class WorkspacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
+    private readonly attachmentFiles: AttachmentFilesService,
     private readonly authService: AuthService,
   ) {}
 
@@ -37,11 +40,17 @@ export class WorkspacesService {
     });
   }
 
-  async listForUser(userId: string) {
-    return this.prisma.workspace.findMany({
-      where: { members: { some: { userId } } },
-      orderBy: { createdAt: "asc" },
-    });
+  async listForUser(userId: string, query: PageQueryDto) {
+    const where = { members: { some: { userId } } };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.workspace.findMany({
+        where,
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.workspace.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async getOne(userId: string, workspaceId: string) {
@@ -174,5 +183,40 @@ export class WorkspacesService {
         "The last workspace admin can't be removed or demoted. Make another member an admin first.",
       );
     }
+  }
+
+  /**
+   * Deletes the workspace with every project, case, run, result and attachment in it.
+   * Only a workspace admin may do this, and the name must be repeated as confirmation.
+   */
+  async remove(userId: string, workspaceId: string, confirmName: string) {
+    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+    });
+    if (!workspace) throw new NotFoundException("Workspace not found");
+    if (workspace.name !== confirmName) {
+      throw new BadRequestException(
+        "confirmName must match the workspace name exactly",
+      );
+    }
+    const inWorkspace = { project: { workspaceId } };
+    const keys = await this.attachmentFiles.keysFor({
+      OR: [
+        { result: { runCase: { run: inWorkspace } } },
+        { stepResult: { result: { runCase: { run: inWorkspace } } } },
+        { defect: inWorkspace },
+      ],
+    });
+    // run_cases reference test cases without a cascade, so the cascade from the workspace
+    // would try to delete cases before the run cases that point at them. Deleting the runs
+    // first (which cascades to their cases and results) avoids that.
+    await this.prisma.$transaction([
+      this.prisma.testRun.deleteMany({ where: inWorkspace }),
+      this.prisma.workspace.delete({ where: { id: workspaceId } }),
+    ]);
+    await this.attachmentFiles.removeFiles(keys);
   }
 }

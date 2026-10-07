@@ -1,14 +1,5 @@
 import * as fs from "fs";
-import {
-  Controller,
-  Get,
-  Param,
-  Post,
-  Res,
-  StreamableFile,
-  UploadedFiles,
-  UseInterceptors,
-} from "@nestjs/common";
+import { Controller, Delete, Get, HttpCode, Param, Post, Query, Res, StreamableFile, UploadedFiles, UseInterceptors } from "@nestjs/common";
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
@@ -18,6 +9,8 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import { ListAttachmentsQueryDto } from "./dto/list-attachments-query.dto";
+import { PagedResponse, sendPage } from "../common/pagination";
 
 // Storage and file size/count limits come from the MulterModule options in
 // AttachmentsModule; the total request size is checked by
@@ -96,5 +89,27 @@ export class AttachmentsController {
     res.attachment(attachment.fileName);
     res.setHeader("Content-Type", contentType);
     return new StreamableFile(fs.createReadStream(filePath));
+  }
+
+  @Get("attachments")
+  @PagedResponse()
+  async list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Query() query: ListAttachmentsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return sendPage(res, await this.attachmentsService.list(user.id, projectId, query));
+  }
+
+  /** Deletes an attachment and its file (project admins, or the uploader). */
+  @Delete("attachments/:attachmentId")
+  @HttpCode(204)
+  async remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("attachmentId") attachmentId: string,
+  ) {
+    await this.attachmentsService.remove(user.id, projectId, attachmentId);
   }
 }

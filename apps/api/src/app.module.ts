@@ -17,6 +17,8 @@ import { PlansModule } from "./plans/plans.module";
 import { RunsModule } from "./runs/runs.module";
 import { DefectsModule } from "./defects/defects.module";
 import { AttachmentsModule } from "./attachments/attachments.module";
+import { AttachmentFilesModule } from "./attachments/attachment-files.module";
+import { SystemFieldsModule } from "./system-fields/system-fields.module";
 import { ApiTokensModule } from "./api-tokens/api-tokens.module";
 
 @Module({
@@ -42,6 +44,8 @@ import { ApiTokensModule } from "./api-tokens/api-tokens.module";
     RunsModule,
     DefectsModule,
     AttachmentsModule,
+    AttachmentFilesModule,
+    SystemFieldsModule,
     ApiTokensModule,
   ],
 })

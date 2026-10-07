@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { SuitesService } from "./suites.service";
 import { CreateSuiteDto } from "./dto/create-suite.dto";
@@ -15,6 +7,8 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import type { Response } from "express";
+import { PageQueryDto, PagedResponse, sendPage } from "../common/pagination";
 
 @ApiTags("suites")
 @Controller("projects/:projectId/suites")
@@ -22,11 +16,14 @@ export class SuitesController {
   constructor(private readonly suitesService: SuitesService) {}
 
   @Get()
-  list(
+  @PagedResponse()
+  async list(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
+    @Query() query: PageQueryDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.suitesService.list(user.id, projectId);
+    return sendPage(res, await this.suitesService.list(user.id, projectId, query));
   }
 
   @Post()
@@ -55,5 +52,14 @@ export class SuitesController {
     @Param("suiteId") suiteId: string,
   ) {
     return this.suitesService.remove(user.id, projectId, suiteId);
+  }
+
+  @Get(":suiteId")
+  getOne(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("suiteId") suiteId: string,
+  ) {
+    return this.suitesService.getOne(user.id, projectId, suiteId);
   }
 }

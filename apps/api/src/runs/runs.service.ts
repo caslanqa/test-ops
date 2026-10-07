@@ -10,6 +10,9 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRunDto } from "./dto/create-run.dto";
 import { UpdateRunDto } from "./dto/update-run.dto";
+import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
+import { pageArgs } from "../common/pagination";
+import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
 const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.ADMIN,
@@ -40,17 +43,29 @@ export class RunsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
+    private readonly attachmentFiles: AttachmentFilesService,
   ) {}
 
-  async list(userId: string, projectId: string, status?: RunStatus) {
+  async list(userId: string, projectId: string, query: ListRunsQueryDto) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
-    const runs = await this.prisma.testRun.findMany({
-      where: { projectId, status },
-      orderBy: { createdAt: "desc" },
-    });
+    const where: Prisma.TestRunWhereInput = {
+      projectId,
+      status: query.status,
+      planId: query.planId,
+      milestoneId: query.milestoneId,
+      title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+    };
+    const [runs, total] = await this.prisma.$transaction([
+      this.prisma.testRun.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.testRun.count({ where }),
+    ]);
     // Per-run status counts for the result bar in the list view; computed with a
     // single groupBy query instead of fetching every runCase row.
     const counts = await this.prisma.runCase.groupBy({
@@ -64,10 +79,11 @@ export class RunsService {
       progress[row.status] = row._count._all;
       progressByRun.set(row.runId, progress);
     }
-    return runs.map((run) => ({
+    const items = runs.map((run) => ({
       ...run,
       progress: progressByRun.get(run.id) ?? {},
     }));
+    return { items, total };
   }
 
   async getOne(userId: string, projectId: string, runId: string) {
@@ -260,5 +276,26 @@ export class RunsService {
       );
     }
     return run;
+  }
+
+  /** Deletes the run with its results and their attachments (project admins only). */
+  async remove(userId: string, projectId: string, runId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      [ProjectRole.ADMIN],
+    );
+    const run = await this.prisma.testRun.findUnique({ where: { id: runId } });
+    if (!run || run.projectId !== projectId) {
+      throw new NotFoundException("Run not found");
+    }
+    const keys = await this.attachmentFiles.keysFor({
+      OR: [
+        { result: { runCase: { runId } } },
+        { stepResult: { result: { runCase: { runId } } } },
+      ],
+    });
+    await this.prisma.testRun.delete({ where: { id: runId } });
+    await this.attachmentFiles.removeFiles(keys);
   }
 }

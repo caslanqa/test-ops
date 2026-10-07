@@ -6,6 +6,7 @@ import {
 import { ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
+import { PageQueryDto, pageArgs } from "../common/pagination";
 import { CreateSuiteDto } from "./dto/create-suite.dto";
 import { UpdateSuiteDto } from "./dto/update-suite.dto";
 
@@ -18,15 +19,21 @@ export class SuitesService {
     private readonly accessControl: AccessControlService,
   ) {}
 
-  async list(userId: string, projectId: string) {
+  async list(userId: string, projectId: string, query: PageQueryDto) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
-    return this.prisma.suite.findMany({
-      where: { projectId },
-      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    });
+    const where = { projectId };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.suite.findMany({
+        where,
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.suite.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async create(userId: string, projectId: string, dto: CreateSuiteDto) {
@@ -101,5 +108,14 @@ export class SuitesService {
       throw new NotFoundException("Suite not found");
     }
     return suite;
+  }
+
+  async getOne(userId: string, projectId: string, suiteId: string) {
+    await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
+      userId,
+      projectId,
+    );
+    await this.assertBelongsToProject(projectId, suiteId);
+    return this.prisma.suite.findUniqueOrThrow({ where: { id: suiteId } });
   }
 }
