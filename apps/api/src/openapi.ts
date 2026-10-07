@@ -48,7 +48,9 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     new DocumentBuilder()
       .setTitle("TestOps API")
       .setDescription(description)
-      .setVersion(config.get<string>("version", "dev"))
+      // The API version, not the release: this document is public, and the exact release
+      // would tell an anonymous visitor which known issues apply (see GET /system/info).
+      .setVersion("v1")
       .addBearerAuth()
       .build(),
   );

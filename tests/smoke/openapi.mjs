@@ -99,7 +99,7 @@ check(
   info.status === 200 && typeof infoBody.version === 'string' && infoBody.version.length > 0 && infoBody.apiVersion === 'v1',
   JSON.stringify(infoBody),
 );
-check('the document version matches the running version', doc.info?.version === infoBody.version, `${doc.info?.version} vs ${infoBody.version}`);
+check('the public document does not reveal the release version', doc.info?.version === 'v1' && !JSON.stringify(doc).includes(infoBody.version) || infoBody.version === 'dev', doc.info?.version);
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);
 process.exit(failures === 0 ? 0 : 1);
