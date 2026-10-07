@@ -4,6 +4,9 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateTestCaseDto } from "./dto/create-test-case.dto";
 import { UpdateTestCaseDto } from "./dto/update-test-case.dto";
+import { ListTestCasesQueryDto } from "./dto/list-test-cases-query.dto";
+import { pageArgs } from "../common/pagination";
+import { BulkCreateTestCasesDto } from "./dto/bulk-create-test-cases.dto";
 
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
 
@@ -17,21 +20,33 @@ export class TestCasesService {
   async list(
     userId: string,
     projectId: string,
-    filters: { suiteId?: string; includeArchived?: boolean },
+    query: ListTestCasesQueryDto,
   ) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
-    return this.prisma.testCase.findMany({
-      where: {
-        projectId,
-        suiteId: filters.suiteId,
-        archivedAt: filters.includeArchived ? undefined : null,
-      },
-      include: { steps: { orderBy: { position: "asc" } } },
-      orderBy: { createdAt: "desc" },
-    });
+    const where: Prisma.TestCaseWhereInput = {
+      projectId,
+      suiteId: query.suiteId,
+      archivedAt: query.includeArchived ? undefined : null,
+      priority: query.priority,
+      severity: query.severity,
+      type: query.type,
+      automationStatus: query.automationStatus,
+      title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+    };
+    // `id` breaks ties between equal timestamps so pages never repeat or skip items.
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.testCase.findMany({
+        where,
+        include: { steps: { orderBy: { position: "asc" } } },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.testCase.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async getOne(userId: string, projectId: string, caseId: string) {
@@ -164,5 +179,52 @@ export class TestCasesService {
       where: { testCaseId: caseId },
       orderBy: { changedAt: "desc" },
     });
+  }
+
+  /**
+   * Creates many cases in one transaction: either all are created or none, so a client that
+   * gets an error can simply retry the whole request.
+   */
+  async createMany(userId: string, projectId: string, dto: BulkCreateTestCasesDto) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    const suiteIds = [...new Set(dto.cases.map((c) => c.suiteId).filter(Boolean))];
+    for (const suiteId of suiteIds) {
+      await this.accessControl.assertSuiteInProject(projectId, suiteId);
+    }
+    const items = await this.prisma.$transaction(
+      dto.cases.map((c) =>
+        this.prisma.testCase.create({
+          data: {
+            projectId,
+            suiteId: c.suiteId,
+            title: c.title,
+            preconditions: c.preconditions,
+            description: c.description,
+            priority: c.priority,
+            severity: c.severity,
+            type: c.type,
+            automationStatus: c.automationStatus,
+            tags: c.tags ?? [],
+            customFields: c.customFields as Prisma.InputJsonValue,
+            createdById: userId,
+            steps: c.steps
+              ? {
+                  create: c.steps.map((step, index) => ({
+                    position: index,
+                    action: step.action,
+                    expectedResult: step.expectedResult,
+                  })),
+                }
+              : undefined,
+          },
+          include: { steps: true },
+        }),
+      ),
+    );
+    return { count: items.length, cases: items };
   }
 }

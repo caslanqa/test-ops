@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { DefectsService } from "./defects.service";
 import { CreateDefectDto } from "./dto/create-defect.dto";
@@ -16,6 +8,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import type { Response } from "express";
+import { PagedResponse, sendPage } from "../common/pagination";
+import { ListDefectsQueryDto } from "./dto/list-defects-query.dto";
 
 @ApiTags("defects")
 @Controller("projects/:projectId/defects")
@@ -23,11 +18,14 @@ export class DefectsController {
   constructor(private readonly defectsService: DefectsService) {}
 
   @Get()
-  list(
+  @PagedResponse()
+  async list(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
+    @Query() query: ListDefectsQueryDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.defectsService.list(user.id, projectId);
+    return sendPage(res, await this.defectsService.list(user.id, projectId, query));
   }
 
   @Get(":defectId")
@@ -86,5 +84,16 @@ export class DefectsController {
       defectId,
       resultId,
     );
+  }
+
+  /** Deletes the defect and its attachments (project admins only); linked results are kept. */
+  @Delete(":defectId")
+  @HttpCode(204)
+  async remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("defectId") defectId: string,
+  ) {
+    await this.defectsService.remove(user.id, projectId, defectId);
   }
 }

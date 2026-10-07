@@ -1,9 +1,12 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { ProjectRole } from "@prisma/client";
+import { Prisma, ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateDefectDto } from "./dto/create-defect.dto";
 import { UpdateDefectDto } from "./dto/update-defect.dto";
+import { ListDefectsQueryDto } from "./dto/list-defects-query.dto";
+import { pageArgs } from "../common/pagination";
+import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
 const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.ADMIN,
@@ -16,18 +19,31 @@ export class DefectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
+    private readonly attachmentFiles: AttachmentFilesService,
   ) {}
 
-  async list(userId: string, projectId: string) {
+  async list(userId: string, projectId: string, query: ListDefectsQueryDto) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
-    return this.prisma.defect.findMany({
-      where: { projectId },
-      include: { _count: { select: { results: true } } },
-      orderBy: { createdAt: "desc" },
-    });
+    const where: Prisma.DefectWhereInput = {
+      projectId,
+      status: query.status,
+      severity: query.severity,
+      assigneeId: query.assigneeId,
+      title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.defect.findMany({
+        where,
+        include: { _count: { select: { results: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.defect.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async getOne(userId: string, projectId: string, defectId: string) {
@@ -132,5 +148,18 @@ export class DefectsService {
     if (count === 0) {
       throw new NotFoundException("Defect is not linked to this result");
     }
+  }
+
+  /** Deletes the defect and its attachments (project admins only); linked results are kept. */
+  async remove(userId: string, projectId: string, defectId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      [ProjectRole.ADMIN],
+    );
+    await this.getOne(userId, projectId, defectId);
+    const keys = await this.attachmentFiles.keysFor({ defectId });
+    await this.prisma.defect.delete({ where: { id: defectId } });
+    await this.attachmentFiles.removeFiles(keys);
   }
 }

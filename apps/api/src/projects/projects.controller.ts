@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { ProjectsService } from "./projects.service";
 import { CreateProjectDto } from "./dto/create-project.dto";
@@ -17,6 +9,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import type { Response } from "express";
+import { PageQueryDto, PagedResponse, sendPage } from "../common/pagination";
+import { ListProjectsQueryDto } from "./dto/list-projects-query.dto";
 
 @ApiTags("projects")
 @Controller()
@@ -33,11 +28,14 @@ export class ProjectsController {
   }
 
   @Get("workspaces/:workspaceId/projects")
-  listForWorkspace(
+  @PagedResponse()
+  async listForWorkspace(
     @CurrentUser() user: AuthenticatedUser,
     @Param("workspaceId") workspaceId: string,
+    @Query() query: PageQueryDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.projectsService.listForWorkspace(user.id, workspaceId);
+    return sendPage(res, await this.projectsService.listForWorkspace(user.id, workspaceId, query));
   }
 
   @Get("projects/:projectId")
@@ -104,5 +102,16 @@ export class ProjectsController {
     @Param("memberId") memberId: string,
   ) {
     return this.projectsService.removeMember(user.id, projectId, memberId);
+  }
+
+  /** Every project the signed-in user can open, across workspaces. */
+  @Get("projects")
+  @PagedResponse()
+  async listAccessible(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ListProjectsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return sendPage(res, await this.projectsService.listAccessible(user.id, query));
   }
 }

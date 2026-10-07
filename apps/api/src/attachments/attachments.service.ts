@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnsupportedMediaTypeException,
@@ -9,7 +10,7 @@ import * as crypto from "crypto";
 import { createReadStream } from "fs";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ProjectRole } from "@prisma/client";
+import { Prisma, ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import {
@@ -17,6 +18,8 @@ import {
   attachmentMimeType,
   normalizeUploadedFileName,
 } from "./attachments.constants";
+import { ListAttachmentsQueryDto } from "./dto/list-attachments-query.dto";
+import { pageArgs } from "../common/pagination";
 
 const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.ADMIN,
@@ -231,5 +234,80 @@ export class AttachmentsService {
         throw new NotFoundException("Defect not found");
       }
     }
+  }
+
+  /** Attachments of results, steps and defects in the project (metadata only; download by id). */
+  async list(userId: string, projectId: string, query: ListAttachmentsQueryDto) {
+    await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
+      userId,
+      projectId,
+    );
+    const inProject = {
+      OR: [
+        { result: { runCase: { run: { projectId } } } },
+        { stepResult: { result: { runCase: { run: { projectId } } } } },
+        { defect: { projectId } },
+      ],
+    } satisfies Prisma.AttachmentWhereInput;
+    const where: Prisma.AttachmentWhereInput = {
+      AND: [
+        inProject,
+        {
+          resultId: query.resultId,
+          defectId: query.defectId,
+          fileName: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+        },
+      ],
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.attachment.findMany({
+        where,
+        // The storage key is an internal path and is never exposed.
+        select: {
+          id: true,
+          fileName: true,
+          mimeType: true,
+          sizeBytes: true,
+          checksumSha256: true,
+          resultId: true,
+          stepResultId: true,
+          defectId: true,
+          uploaderUserId: true,
+          createdAt: true,
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.attachment.count({ where }),
+    ]);
+    return { items, total };
+  }
+
+  /** Deletes the attachment and its file; testers and automation may delete only their own uploads. */
+  async remove(userId: string, projectId: string, attachmentId: string) {
+    const access = await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    const attachment = await this.prisma.attachment.findUnique({
+      where: { id: attachmentId },
+    });
+    if (!attachment) {
+      throw new NotFoundException("Attachment not found");
+    }
+    await this.assertTargetBelongsToProject(projectId, {
+      resultId: attachment.resultId ?? undefined,
+      stepResultId: attachment.stepResultId ?? undefined,
+      defectId: attachment.defectId ?? undefined,
+    });
+    if (access.role !== ProjectRole.ADMIN && attachment.uploaderUserId !== userId) {
+      throw new ForbiddenException("You can only delete attachments you uploaded");
+    }
+    await this.prisma.attachment.delete({ where: { id: attachmentId } });
+    await fs.rm(
+      path.join(this.config.get<string>("attachments.dir")!, attachment.storageKey),
+      { force: true },
+    );
   }
 }

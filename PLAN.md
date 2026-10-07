@@ -112,15 +112,15 @@
 Goal from the owner: the public API must cover everything, not only CI result upload. Reference: Qase TestOps API v1 has 89 endpoints (spec: github.com/qase-tms/specs, `testops-api/v1`); v2 adds only result upload and custom field reads. Qase's API has no requirement or workspace endpoints; TestOps keeps and extends its own.
 
 **Step 1 — complete CRUD (one PR, no schema change):**
-- [ ] Pagination (`limit`/`offset`, total in `X-Total-Count`, responses stay arrays so the UI and CI clients don't break) and filters on every list endpoint (FR-072, FR-061).
-- [ ] Requirements: keep CRUD + case linking + coverage; add pagination/filters and list the linked cases of a requirement.
-- [ ] Suites: get one. Milestones: get, update, delete. Runs: delete. Defects: delete. Workspaces: delete.
-- [ ] Results: update, delete, and a project-wide list with filters (status, run, case, date).
-- [ ] Attachments: list and delete.
-- [ ] Test cases: bulk create.
-- [ ] Projects: one list of all projects the user can access.
-- [ ] System fields: the fixed values (priorities, severities, types, statuses, roles) from one endpoint.
-- [ ] A smoke test for every new endpoint; OpenAPI guard (`tests/smoke/openapi.mjs`) stays green.
+- [x] Pagination (`limit`/`offset`, total in `X-Total-Count`, responses stay arrays so the UI and CI clients don't break) and filters on every list endpoint (FR-072, FR-061). _(8 October 2026; member lists and the case/requirement coverage endpoints are not paged yet.)_
+- [x] Requirements: keep CRUD + case linking + coverage; add pagination/filters and list the linked cases of a requirement.
+- [x] Suites: get one. Milestones: get, update, delete. Runs: delete. Defects: delete. Workspaces: delete (needs the exact name; runs are deleted first because `run_cases` reference cases without a cascade).
+- [x] Results: update, delete, and a project-wide list with filters (status, run, case, date).
+- [x] Attachments: list and delete.
+- [x] Test cases: bulk create.
+- [x] Projects: one list of all projects the user can access.
+- [x] System fields: the fixed values (priorities, severities, types, statuses, roles) from one endpoint.
+- [x] A smoke test for every new endpoint; OpenAPI guard (`tests/smoke/openapi.mjs`) stays green.
 
 **Step 2 — defects ↔ GitHub issues (owner request):**
 - [ ] Link an existing GitHub issue to a defect (URL or `owner/repo#number`), validated against the GitHub API; unlink.

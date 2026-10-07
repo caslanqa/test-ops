@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { PlansService } from "./plans.service";
 import { CreatePlanDto } from "./dto/create-plan.dto";
@@ -16,6 +8,9 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import type { Response } from "express";
+import { PagedResponse, sendPage } from "../common/pagination";
+import { ListPlansQueryDto } from "./dto/list-plans-query.dto";
 
 @ApiTags("plans")
 @Controller("projects/:projectId/plans")
@@ -23,11 +18,14 @@ export class PlansController {
   constructor(private readonly plansService: PlansService) {}
 
   @Get()
-  list(
+  @PagedResponse()
+  async list(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
+    @Query() query: ListPlansQueryDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.plansService.list(user.id, projectId);
+    return sendPage(res, await this.plansService.list(user.id, projectId, query));
   }
 
   @Get(":planId")

@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, ProjectRole } from "@prisma/client";
+import { Prisma, ProjectRole, ResultStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { RunsService } from "./runs.service";
 import { SubmitResultDto } from "./dto/submit-result.dto";
+import { UpdateResultDto } from "./dto/update-result.dto";
+import { ListResultsQueryDto } from "./dto/list-results-query.dto";
+import { pageArgs } from "../common/pagination";
+import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
 const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.ADMIN,
@@ -17,6 +21,7 @@ export class ResultsService {
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
     private readonly runsService: RunsService,
+    private readonly attachmentFiles: AttachmentFilesService,
   ) {}
 
   async list(userId: string, projectId: string, runId: string) {
@@ -225,5 +230,126 @@ export class ResultsService {
       throw new NotFoundException("Run not found");
     }
     return run;
+  }
+
+  /** Results across the whole project, newest first, with the run and test case they belong to. */
+  async listForProject(userId: string, projectId: string, query: ListResultsQueryDto) {
+    await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
+      userId,
+      projectId,
+    );
+    const where: Prisma.ResultWhereInput = {
+      runCase: {
+        run: { projectId },
+        runId: query.runId,
+        testCaseId: query.testCaseId,
+      },
+      status: query.status,
+      source: query.source,
+      isLatest: query.latestOnly ? true : undefined,
+      createdAt: {
+        gte: query.from ? new Date(query.from) : undefined,
+        lte: query.to ? new Date(query.to) : undefined,
+      },
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.result.findMany({
+        where,
+        include: {
+          runCase: { select: { runId: true, testCaseId: true } },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.result.count({ where }),
+    ]);
+    return { items, total };
+  }
+
+  /** Corrects a result. Changing the status of the latest attempt also updates the run's case. */
+  async update(
+    userId: string,
+    projectId: string,
+    runId: string,
+    resultId: string,
+    dto: UpdateResultDto,
+  ) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.runsService.assertWritableRun(projectId, runId);
+    const existing = await this.findInRun(runId, resultId);
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.result.update({
+        where: { id: resultId },
+        data: {
+          status: dto.status,
+          comment: dto.comment,
+          automationSourceLabel: dto.automationSourceLabel,
+          startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
+          endedAt: dto.endedAt ? new Date(dto.endedAt) : undefined,
+          durationMs: dto.durationMs,
+        },
+        include: { stepResults: true },
+      });
+      if (dto.status && existing.isLatest) {
+        await tx.runCase.update({
+          where: { id: existing.runCaseId },
+          data: { status: dto.status },
+        });
+      }
+      return result;
+    });
+  }
+
+  /**
+   * Deletes a result and its attachments (project admins only). If it was the latest attempt,
+   * the previous attempt becomes the latest and sets the case's status again; with none left
+   * the case goes back to untested.
+   */
+  async remove(userId: string, projectId: string, runId: string, resultId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      [ProjectRole.ADMIN],
+    );
+    await this.runsService.assertWritableRun(projectId, runId);
+    const existing = await this.findInRun(runId, resultId);
+    const keys = await this.attachmentFiles.keysFor({
+      OR: [{ resultId }, { stepResult: { resultId } }],
+    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.result.delete({ where: { id: resultId } });
+      if (existing.isLatest) {
+        const previous = await tx.result.findFirst({
+          where: { runCaseId: existing.runCaseId },
+          orderBy: { attemptNumber: "desc" },
+        });
+        if (previous) {
+          await tx.result.update({
+            where: { id: previous.id },
+            data: { isLatest: true },
+          });
+        }
+        await tx.runCase.update({
+          where: { id: existing.runCaseId },
+          data: { status: previous?.status ?? ResultStatus.UNTESTED },
+        });
+      }
+    });
+    await this.attachmentFiles.removeFiles(keys);
+  }
+
+  private async findInRun(runId: string, resultId: string) {
+    const result = await this.prisma.result.findUnique({
+      where: { id: resultId },
+      include: { runCase: true },
+    });
+    if (!result || result.runCase.runId !== runId) {
+      throw new NotFoundException("Result not found");
+    }
+    return result;
   }
 }

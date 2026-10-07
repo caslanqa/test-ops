@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { RequirementsService } from "./requirements.service";
 import { CreateRequirementDto } from "./dto/create-requirement.dto";
@@ -16,6 +8,10 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import type { Response } from "express";
+import { PagedResponse, sendPage } from "../common/pagination";
+import { ListRequirementsQueryDto } from "./dto/list-requirements-query.dto";
+import { ListRequirementCasesQueryDto } from "./dto/list-requirement-cases-query.dto";
 
 @ApiTags("requirements")
 @Controller("projects/:projectId/requirements")
@@ -23,11 +19,14 @@ export class RequirementsController {
   constructor(private readonly requirementsService: RequirementsService) {}
 
   @Get()
-  list(
+  @PagedResponse()
+  async list(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
+    @Query() query: ListRequirementsQueryDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.requirementsService.list(user.id, projectId);
+    return sendPage(res, await this.requirementsService.list(user.id, projectId, query));
   }
 
   @Get("coverage")
@@ -107,6 +106,22 @@ export class RequirementsController {
       projectId,
       requirementId,
       caseId,
+    );
+  }
+
+  /** The test cases linked to the requirement. */
+  @Get(":requirementId/cases")
+  @PagedResponse()
+  async listCases(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("requirementId") requirementId: string,
+    @Query() query: ListRequirementCasesQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return sendPage(
+      res,
+      await this.requirementsService.listCases(user.id, projectId, requirementId, query),
     );
   }
 }

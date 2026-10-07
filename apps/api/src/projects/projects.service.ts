@@ -4,12 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { ProjectRole, WorkspaceRole } from "@prisma/client";
+import { Prisma, ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
+import { PageQueryDto, pageArgs } from "../common/pagination";
 import { CreateProjectDto } from "./dto/create-project.dto";
 import { UpdateProjectDto } from "./dto/update-project.dto";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
+import { ListProjectsQueryDto } from "./dto/list-projects-query.dto";
 
 @Injectable()
 export class ProjectsService {
@@ -41,23 +43,29 @@ export class ProjectsService {
     });
   }
 
-  async listForWorkspace(userId: string, workspaceId: string) {
+  async listForWorkspace(userId: string, workspaceId: string, query: PageQueryDto) {
     const member = await this.accessControl.requireWorkspaceMembership(
       userId,
       workspaceId,
     );
     // A workspace admin sees all projects; other members see only the projects they
     // belong to (not even the names of projects they cannot access are listed).
-    return this.prisma.project.findMany({
-      where: {
-        workspaceId,
-        archivedAt: null,
-        ...(member.role === WorkspaceRole.ADMIN
-          ? {}
-          : { members: { some: { userId } } }),
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    const where: Prisma.ProjectWhereInput = {
+      workspaceId,
+      archivedAt: null,
+      ...(member.role === WorkspaceRole.ADMIN
+        ? {}
+        : { members: { some: { userId } } }),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.project.findMany({
+        where,
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.project.count({ where }),
+    ]);
+    return { items, total };
   }
 
   async getOne(userId: string, projectId: string) {
@@ -172,5 +180,42 @@ export class ProjectsService {
     );
     await this.accessControl.assertProjectMemberRecord(projectId, memberId);
     await this.prisma.projectMember.delete({ where: { id: memberId } });
+  }
+
+  /**
+   * Every project the user can open, across workspaces: all projects of workspaces they
+   * administer plus the ones they are a member of.
+   */
+  async listAccessible(userId: string, query: ListProjectsQueryDto) {
+    const where: Prisma.ProjectWhereInput = {
+      archivedAt: null,
+      workspaceId: query.workspaceId,
+      OR: [
+        { members: { some: { userId } } },
+        { workspace: { members: { some: { userId, role: WorkspaceRole.ADMIN } } } },
+      ],
+      ...(query.q
+        ? {
+            AND: [
+              {
+                OR: [
+                  { name: { contains: query.q, mode: "insensitive" } },
+                  { key: { contains: query.q, mode: "insensitive" } },
+                ],
+              },
+            ],
+          }
+        : {}),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.project.findMany({
+        where,
+        include: { workspace: { select: { id: true, name: true } } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        ...pageArgs(query),
+      }),
+      this.prisma.project.count({ where }),
+    ]);
+    return { items, total };
   }
 }

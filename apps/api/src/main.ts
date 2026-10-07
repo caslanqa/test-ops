@@ -20,7 +20,16 @@ async function bootstrap() {
   app.set("trust proxy", app.get(ConfigService).get("rateLimit.trustProxy"));
 
   app.use(helmet());
-  app.enableCors();
+  // Browsers only expose these response headers to cross-origin scripts when listed here.
+  app.enableCors({
+    exposedHeaders: [
+      "X-Total-Count",
+      "Retry-After",
+      "X-RateLimit-Limit",
+      "X-RateLimit-Remaining",
+      "X-RateLimit-Reset",
+    ],
+  });
   app.setGlobalPrefix("api/v1", { exclude: ["health", "ready"] });
   app.useGlobalPipes(
     new ValidationPipe({
