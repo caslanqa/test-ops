@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { AccountPage } from './pages/AccountPage';
+import { SupportPage } from './pages/SupportPage';
 import { WorkspaceMembersPage } from './pages/WorkspaceMembersPage';
 import { ProjectMembersPage } from './pages/project/ProjectMembersPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
             <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembersPage />} />
             <Route path="/account" element={<AccountPage />} />
+            <Route path="/support" element={<SupportPage />} />
             <Route path="/projects/:projectId">
               <Route index element={<Navigate to="cases" replace />} />
               <Route path="cases" element={<SuitesCasesPage />} />

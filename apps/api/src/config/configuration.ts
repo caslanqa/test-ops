@@ -48,6 +48,8 @@ function trustProxyFromEnv(): boolean | number | string {
 
 export default () => ({
   port: parseInt(process.env.PORT ?? "3000", 10),
+  // Set at image build time from the release version (Dockerfile ARG APP_VERSION); "dev" for local builds.
+  version: process.env.APP_VERSION?.trim() || "dev",
   auth: {
     // Self-registration; on closed installs only workspace admins create accounts.
     selfRegistration: process.env.SELF_REGISTRATION?.trim().toLowerCase() !== "false",

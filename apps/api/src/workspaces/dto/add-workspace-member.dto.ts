@@ -1,3 +1,4 @@
+import { ApiProperty } from "@nestjs/swagger";
 import {
   IsEmail,
   IsEnum,
@@ -21,6 +22,7 @@ export class AddWorkspaceMemberDto {
   @MinLength(8)
   password?: string;
 
+  @ApiProperty({ enum: WorkspaceRole, enumName: "WorkspaceRole" })
   @IsEnum(WorkspaceRole)
   role!: WorkspaceRole;
 }

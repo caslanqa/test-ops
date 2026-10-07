@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
   IsArray,
@@ -15,6 +16,7 @@ export class SubmitResultDto {
   @IsString()
   testCaseId!: string;
 
+  @ApiProperty({ enum: ResultStatus, enumName: "ResultStatus" })
   @IsEnum(ResultStatus)
   status!: ResultStatus;
 
@@ -23,6 +25,7 @@ export class SubmitResultDto {
   comment?: string;
 
   @IsOptional()
+  @ApiPropertyOptional({ enum: ResultSource, enumName: "ResultSource" })
   @IsEnum(ResultSource)
   source?: ResultSource;
 
