@@ -86,12 +86,15 @@ export class MilestonesService {
     });
   }
 
-  /** Plans and runs of the milestone are kept and simply lose the milestone. */
+  /**
+   * Plans and runs of the milestone are kept and simply lose the milestone. Project admins
+   * only, like every other delete: it changes how plans and runs are grouped.
+   */
   async remove(userId: string, projectId: string, milestoneId: string) {
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
-      WRITE_ROLES,
+      [ProjectRole.ADMIN],
     );
     await this.getOne(userId, projectId, milestoneId);
     await this.prisma.$transaction([

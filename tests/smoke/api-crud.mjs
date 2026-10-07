@@ -116,7 +116,8 @@ await expectStatus('a milestone of another project is not found', 404, admin, 'G
 const plan = await ok(admin, 'POST', `${P}/plans`, { title: 'Release plan', testCaseIds: [caseA.id, caseB.id], milestoneId: ms.id });
 const msRun = await ok(admin, 'POST', `${P}/runs`, { title: 'Milestone run', planId: plan.id, milestoneId: ms.id });
 check('filter plans and runs by milestone', total(await call(admin, 'GET', `${P}/plans?milestoneId=${ms.id}`)) === 1 && total(await call(admin, 'GET', `${P}/runs?milestoneId=${ms.id}`)) === 1);
-await expectStatus('delete a milestone', 204, admin, 'DELETE', `${P}/milestones/${ms.id}`);
+await expectStatus('a tester cannot delete a milestone', 403, tester, 'DELETE', `${P}/milestones/${ms.id}`);
+await expectStatus('an admin deletes a milestone', 204, admin, 'DELETE', `${P}/milestones/${ms.id}`);
 check('its plan and run are kept without a milestone',
   (await ok(admin, 'GET', `${P}/plans/${plan.id}`)).milestoneId === null && (await ok(admin, 'GET', `${P}/runs/${msRun.id}`)).milestoneId === null);
 await expectStatus('the milestone is gone', 404, admin, 'GET', `${P}/milestones/${ms.id}`);
