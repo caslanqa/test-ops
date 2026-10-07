@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from "@nestjs/swagger";
 import { IsArray, IsEnum, IsOptional, IsString } from "class-validator";
 import { RunSource } from "@prisma/client";
 
@@ -36,6 +37,7 @@ export class CreateRunDto {
   tags?: string[];
 
   @IsOptional()
+  @ApiPropertyOptional({ enum: RunSource, enumName: "RunSource" })
   @IsEnum(RunSource)
   source?: RunSource;
 

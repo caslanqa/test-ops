@@ -55,12 +55,14 @@
 - [ ] **First framework reporter (Playwright or pytest).** No reporter package has been written yet.
 - [ ] **Attachment upload/download UI.** The API side is complete (`attachments.controller.ts`), but the web app has no file upload/download screen — it is only possible through the backend REST API.
 - [ ] **Run history / dashboard.** Currently only the progress of a single run is shown; there are no project-wide past runs, pass-rate trend or recent failed tests (FR-060, FR-061).
+- [ ] **Per-case execution history and failure summary (FR-018, FR-019).** Add a paginated, newest-first endpoint and a Run history section in the case detail view. Group results by run while preserving each retry; show run link, timestamp, status, source, duration, environment/build, comments, failed steps, evidence and linked defects. Summarize the latest result and consecutive failures across distinct completed runs (retries do not count as separate runs). Keep this separate from case-definition change history. Existing `RunCase`, `Result`, `StepResult`, `caseSnapshot` and attachment/defect relations should supply the initial data; assess whether a schema change is needed only if a required field is missing.
 - [ ] **Advanced filtering/search.** FR-061: filtering by case/requirement/run/date/status/user/tag/milestone — currently missing.
 - [ ] **API rate limit + idempotency improvements.** (Can be handled together with item 0.) _(The rate limit part was done on 2 October 2026; the idempotency race is still open in section 0.)_
+- [x] **API reference (FR-070, part of FR-077).** _(4 October 2026: the `@nestjs/swagger` CLI plugin documents every DTO field from its type and class-validator rules (34 schemas, none empty); Prisma enums are declared explicitly. Security mirrors AuthGuard — every operation requires the bearer token unless its handler is `@Public()`, so "Try it out" works after **Authorize**. The description covers authentication, the error format and rate limits with `Retry-After`. `GET /api/v1/system/info` returns the running version (`APP_VERSION` build arg). `tests/smoke/openapi.mjs` in CI guards all of this.)_ Remaining: response schemas (services return Prisma types, which need response DTOs), per-endpoint error responses, the `RateLimit-Policy` header.
 
 ## 2. Phase 3 — Integration and team scale
 
-- [ ] **Jira/GitHub issue links (a real adapter).** Currently `Defect.externalProvider/externalIssueId/externalUrl` are just free-text fields; the adapter architecture from FR-053 (automatic issue creation, status sync) is missing.
+- [ ] **Jira/GitHub issue links (a real adapter).** Currently `Defect.externalProvider/externalIssueId/externalUrl` are just free-text fields; the adapter architecture from FR-053 (automatic issue creation, status sync) is missing. _(4 October 2026: GitHub first, moved forward into the API parity plan below; Jira stays here.)_
 - [ ] **Webhook infrastructure.** FR-079: subscriptions to run completion, result creation and defect change events + retries/visibility of failed deliveries — missing.
 - [ ] **Chat notification integrations** (Slack/Teams/Discord/Mattermost) — depend on the webhook infrastructure, not available yet.
 - [ ] **UI for custom fields.** The backend already has `TestCase.customFields` (Json), but there is no UI for defining/displaying a per-project field schema.
@@ -83,15 +85,17 @@
 - [ ] Step-level result entry — currently a single status per case.
 - [ ] Editing/archiving/deleting — the web app never calls `PATCH`/`DELETE`; cases, requirements, plans, runs and defects can only be created (FR-011).
 - [x] Requirement coverage view (FR-022, flow 5.1 step 3). _(A "no tests" label and a latest-results strip in the requirement list.)_
-- [ ] Case change history (FR-015) — API exists, no UI.
+- [ ] Case-definition change history (FR-015) — API exists, no UI; keep it distinct from execution history (FR-018/FR-019).
 - [x] The UI language is English. _(2 October 2026: all UI text, API error messages, and seed and startup script output are in English. 3 October 2026: the rest of the repository (code comments, docs, smoke tests, scripts, CI) was translated to English as well. Dates use `en-US`; search ignores the i/ı/İ distinction. There is no multi-language (i18n) infrastructure — if a second language is needed, the strings should be moved into a dictionary.)_
 - [x] Light/dark theme. _(System / Light / Dark choice in the top bar and on the sign-in screen; the preference is stored in the browser and synced across tabs; `public/theme-init.js` applies it before the first paint (a separate file because the CSP does not allow inline scripts). Axe scans of 11 pages are clean in both themes.)_
+- [x] **Help & support page.** _(4 October 2026: sidebar link on every page; API reference and OpenAPI spec links, copyable API base URL, a CI example for sending results, troubleshooting / bug report / release notes links and the running version. axe: no violations in light and dark; no horizontal scrolling from 320 px.)_
+- [ ] **Installation branding Settings page (FR-088, FR-089, FR-094, FR-095).** Add Settings → Branding for Installation Admins; let them edit the display name, upload/replace a brand icon, or restore the `TestOps` defaults after installation. Keep the icon independent from the name, support light/dark themes, validate/sanitize assets, store them persistently and serve only approved public assets through the branding endpoint. Preserve settings/assets across upgrades; do not add branding prompts to the installer.
 
 ## 4. Release — container registry publish
 
 **Reproducible build:** `package.json` `packageManager: pnpm@12.8.1` — Docker (corepack), CI (`pnpm/action-setup`) and local pnpm all use the same version; the version is recorded in the lockfile with its integrity hash.
 
-**Current state (2 October 2026):** No manual steps. On every push/merge to master (except when only `.md` files change), `release.yml` runs CI, computes the version with `scripts/next-version.sh` (the first version comes from `package.json`; after that `feat:` → minor, `type!:` / `BREAKING CHANGE:` → major, everything else → patch), publishes the image to `ghcr.io/caslanqa/testops`, verifies that it can be pulled anonymously, and then creates the `vX.Y.Z` tag + a GitHub Release (automatic notes). Because the tag is created with `GITHUB_TOKEN`, it does not trigger other workflows; the release happens within the same run.
+**Current state (2 October 2026):** No manual steps. On every push/merge to master that changes the image's inputs (`apps/**`, `Dockerfile`, `package.json`, `pnpm-*`; since 3 October 2026), `release.yml` runs CI, computes the version with `scripts/next-version.sh` (the first version comes from `package.json`; after that `feat:` → minor, `type!:` / `BREAKING CHANGE:` → major, everything else → patch), publishes the image to `ghcr.io/caslanqa/testops`, verifies that it can be pulled anonymously, and then creates the `vX.Y.Z` tag + a GitHub Release (automatic notes). Because the tag is created with `GITHUB_TOKEN`, it does not trigger other workflows; the release happens within the same run.
 
 - [x] **The repo is not on git/GitHub yet** — the workflow can never run. _(2 October 2026: `github.com/caslanqa/test-ops`; the first `v0.1.0` is released automatically on the first merge to master.)_
 - [x] **No quality gate before publish.** _(`ci.yml` is called as a reusable workflow.)_ The image is published without build/typecheck/test having passed → a separate CI job and `needs:` on publish.
@@ -102,6 +106,73 @@
 - [x] **Automatic versioning and release.** _(No manual tags; see the flow above and `scripts/next-version.sh`.)_
 - [x] **Pull-based installation.** _(3 October 2026: one-command installer `install.sh` (`curl … | bash`): checks Docker and the port before writing anything, creates `.env` with random secrets, starts the stack, creates the first admin on a fresh database and prints its password; re-running upgrades without touching `.env` or data; options `TESTOPS_DIR/PORT/VERSION/ADMIN_EMAIL`; ShellCheck in CI. 2 October 2026: `docker-compose.yml` now uses only `image:` (default `ghcr.io/caslanqa/testops:latest`); the build and Postgres's host port are in `docker-compose.override.yml`, which is loaded automatically inside the repo. `README.md`: quick start, first sign-in, day-to-day commands, configuration table, reverse proxy, installation with `docker run`, troubleshooting. If `DATABASE_URL` is missing, the image exits with an explanatory message; it retries migrations until the DB is ready, and Node runs as PID 1. GHCR 0.2.0 and a candidate image were installed in a clean folder by following the README steps, and the smoke tests passed.)_ The current `docker-compose.yml` contains `build:`; a release compose file that uses only `image:` + an install/upgrade/backup README (together with the backup item in section 0).
 - [ ] **Image hardening.** Non-root user (with a migration step for existing root-owned volumes), SBOM/provenance (`sbom: true`), optional cosign signing.
+
+## 5. API parity with Qase (planned 4 October 2026)
+
+Goal from the owner: the public API must cover everything, not only CI result upload. Reference: Qase TestOps API v1 has 89 endpoints (spec: github.com/qase-tms/specs, `testops-api/v1`); v2 adds only result upload and custom field reads. Qase's API has no requirement or workspace endpoints; TestOps keeps and extends its own.
+
+**Step 1 — complete CRUD (one PR, no schema change):**
+- [x] Pagination (`limit`/`offset`, total in `X-Total-Count`, responses stay arrays so the UI and CI clients don't break) and filters on every list endpoint (FR-072, FR-061). _(8 October 2026; member lists and the case/requirement coverage endpoints are not paged yet.)_
+- [x] Requirements: keep CRUD + case linking + coverage; add pagination/filters and list the linked cases of a requirement.
+- [x] Suites: get one. Milestones: get, update, delete. Runs: delete. Defects: delete. Workspaces: delete (needs the exact name; runs are deleted first because `run_cases` reference cases without a cascade).
+- [x] Results: update, delete, and a project-wide list with filters (status, run, case, date).
+- [x] Attachments: list and delete.
+- [x] Test cases: bulk create.
+- [x] Projects: one list of all projects the user can access.
+- [x] System fields: the fixed values (priorities, severities, types, statuses, roles) from one endpoint.
+- [x] A smoke test for every new endpoint; OpenAPI guard (`tests/smoke/openapi.mjs`) stays green.
+
+**Step 2 — defects ↔ GitHub issues (owner request):**
+- [ ] Link an existing GitHub issue to a defect (URL or `owner/repo#number`), validated against the GitHub API; unlink.
+- [ ] Create a GitHub issue from a defect (title, description, linked failed results).
+- [ ] Status sync: closing the issue resolves the defect (webhook, with polling as fallback).
+- [ ] Design first: where the GitHub credentials live (per project/workspace, token vs GitHub App), how they are stored (encrypted, never returned by the API), and permissions (who may link/create). Replaces today's free-text `Defect.externalProvider/externalIssueId/externalUrl`.
+
+**Step 3 — Qase features TestOps doesn't have yet (one PR each: model + API + UI):**
+- [ ] Environments (today free-text `environment` on plans/runs)
+- [ ] Custom field definitions (today untyped `TestCase.customFields` JSON)
+- [ ] Shared steps
+- [ ] Configurations (today free-text `configuration`)
+- [ ] Shared parameters / parameterized tests
+- [ ] Test case reviews
+- [ ] Search across entities (Qase has QQL; start from the step 1 filters)
+
+## 6. Phase 4 — AI-assisted QA workflows (proposed)
+
+Goal: provide a traceable, optional QA workflow from requirement review through test-run analysis, using the existing Requirement → TestCase → TestPlan/TestRun → Result → Defect domain. This is a staged assistant with explicit human approval, not an unconstrained autonomous agent. The core product must continue to work with AI unconfigured.
+
+**Step 1 — provider and workflow foundation:**
+- [ ] Implement the currently missing audit-log writes before enabling AI workflows; record the initiating user, approval decisions and domain mutations without storing provider secrets.
+- [ ] Add an Installation Admin role, separate from workspace roles; grant it to the first seeded administrator and restrict further grants/revocations to Installation Admins.
+- [ ] Add the authenticated system Settings → AI page for Installation Admins. Configure provider, model, optional endpoint and credential after installation; include enable/disable, configured status and a connection test that sends no project content. Do not put provider/model/API-key prompts in the installer.
+- [ ] Add a provider adapter boundary for hosted providers and, where supported, an operator-managed local endpoint. Keep provider requests and credentials on the server; no configured provider means AI is disabled and the rest of the app keeps working.
+- [ ] Store credentials encrypted at rest with a stable installation-level encryption key generated and preserved by the installer. Mask saved values, never return/log them, and allow replacement. Keep the encryption key distinct from the provider API key.
+- [ ] Use one configured default model across specialist workflow roles for the first release; roles differ by versioned skill, scoped context and output schema. Defer per-role model routing until quality/cost measurements justify the extra configuration.
+- [ ] Disclose the selected provider and what project content is sent before enabling AI. Record the provider/model used by each workflow run; initially apply one installation-level configuration to all workspaces.
+- [ ] Add persisted workflow definitions/versions, workflow runs, step runs, artifacts and approval state. Record status, timestamps, initiator, provider/model and skill version, validated inputs/outputs, errors and bounded retry/cancel state.
+- [ ] Run long AI steps in a background worker rather than inside a request. Start with PostgreSQL-backed jobs/state so Redis is not a required deployment dependency; define safe claiming/retry behavior for multiple app processes.
+- [ ] Define agents as focused roles with versioned skills/instructions, allowlisted project-scoped tools and strict output schemas. The orchestrator, rather than a free-form coordinator agent, determines step order and approval gates.
+- [ ] Add configurable timeouts, per-user/project rate and usage limits, secret-safe logging, provider data disclosure, and audit records for workflow actions and approved mutations.
+
+**Step 2 — requirement to reviewed test cases:**
+- [ ] Requirement Reviewer: check clarity, testability, risks and acceptance criteria; return structured findings and questions.
+- [ ] Test Designer: draft positive, negative and boundary cases in the existing TestCase/steps shape.
+- [ ] Coverage Auditor: map drafts to criteria, identify uncovered areas and likely duplicates, and allow at most a bounded revision.
+- [ ] Add a UI/API to review, edit, accept or reject the generated artifact. Persist accepted cases and requirement links through existing permission-checked services only after explicit confirmation.
+
+**Step 3 — run planning and analysis:**
+- [ ] Test Planner: propose a plan/run scope from approved coverage and risk; require user confirmation to create the plan/run. Initial implementation uses existing manual and CI execution paths and does not run arbitrary test code.
+- [ ] Trigger Run Analyzer after a run is completed. Analyze run cases, result attempts, step results and comments; return a report with failure clusters and possible causes clearly marked as hypotheses.
+- [ ] Defect Writer: produce defect drafts linked to failed results; require authorized user approval before creating a defect or sending anything to an external tracker.
+- [ ] Add workflow history, step detail, generated-artifact review, resume, retry and cancellation views/API. Evaluate attachment/log extraction separately; the first analyzer should use structured results and comments.
+
+**Acceptance criteria:**
+- [ ] A user can start a requirement review and receive schema-validated findings and editable case drafts scoped to a project.
+- [ ] Draft artifacts may be stored with the workflow, but no case/plan/run/defect domain record is created until approval; normal RBAC and project-scope checks apply at approval time.
+- [ ] Completing a run can start an asynchronous analysis whose report and defect drafts are persisted, attributable to the initiating user and reviewable later.
+- [ ] Provider outage, invalid output or disabled AI does not prevent manual case management, run completion or CI result ingestion.
+- [ ] Workflow steps cannot issue arbitrary SQL/shell/network calls; provider secrets do not appear in the browser or application logs.
+- [ ] Only Installation Admins can edit/test AI provider settings; encrypted credentials are never returned to the UI, and a saved key can be replaced without displaying its old value.
 
 ## Recommended next step
 

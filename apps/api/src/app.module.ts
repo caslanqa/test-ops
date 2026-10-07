@@ -20,6 +20,7 @@ import { AttachmentsModule } from "./attachments/attachments.module";
 import { AttachmentFilesModule } from "./attachments/attachment-files.module";
 import { SystemFieldsModule } from "./system-fields/system-fields.module";
 import { ApiTokensModule } from "./api-tokens/api-tokens.module";
+import { SystemModule } from "./system/system.module";
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { ApiTokensModule } from "./api-tokens/api-tokens.module";
     AttachmentFilesModule,
     SystemFieldsModule,
     ApiTokensModule,
+    SystemModule,
   ],
 })
 export class AppModule {}

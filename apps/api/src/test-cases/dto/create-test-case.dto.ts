@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
   IsArray,
@@ -32,18 +33,22 @@ export class CreateTestCaseDto {
   description?: string;
 
   @IsOptional()
+  @ApiPropertyOptional({ enum: CasePriority, enumName: "CasePriority" })
   @IsEnum(CasePriority)
   priority?: CasePriority;
 
   @IsOptional()
+  @ApiPropertyOptional({ enum: CaseSeverity, enumName: "CaseSeverity" })
   @IsEnum(CaseSeverity)
   severity?: CaseSeverity;
 
   @IsOptional()
+  @ApiPropertyOptional({ enum: CaseType, enumName: "CaseType" })
   @IsEnum(CaseType)
   type?: CaseType;
 
   @IsOptional()
+  @ApiPropertyOptional({ enum: AutomationStatus, enumName: "AutomationStatus" })
   @IsEnum(AutomationStatus)
   automationStatus?: AutomationStatus;
 

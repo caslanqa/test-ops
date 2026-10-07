@@ -5,10 +5,11 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { ConfigService } from "@nestjs/config";
 import { ValidationPipe, Logger } from "@nestjs/common";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
 import type { Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module";
+import { buildOpenApiDocument } from "./openapi";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -38,15 +39,10 @@ async function bootstrap() {
     }),
   );
 
-  // FR-070: documented REST API under /api/v1 + OpenAPI schema
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle("TestOps API")
-    .setDescription("TestOps public REST API (v1)")
-    .setVersion("1.0")
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup("api/docs", app, document);
+  // FR-070: documented REST API under /api/v1 + OpenAPI schema (see openapi.ts)
+  SwaggerModule.setup("api/docs", app, buildOpenApiDocument(app), {
+    customSiteTitle: "TestOps API reference",
+  });
 
   // SPA fallback: routes GET requests outside /api, /health, /ready that match no
   // static file to index.html (React Router client-side routing).

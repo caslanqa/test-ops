@@ -79,6 +79,7 @@ jobs:
 
       - name: Smoke tests
         run: |
+          node tests/smoke/openapi.mjs
           node tests/smoke/scope.mjs
           node tests/smoke/api-crud.mjs
           node tests/smoke/users.mjs

@@ -20,6 +20,8 @@ Qase's product scope and public documentation are used as a functional reference
 - PostgreSQL is the only supported database.
 - The contents of ZIP, JPEG and similar attachment files are not written to PostgreSQL; PostgreSQL holds the attachment metadata, and the files are stored in a persistent Docker volume.
 - The application, API and background jobs start out as a modular monolith; microservices are not a goal in the first phase.
+- AI-assisted QA workflows are an optional, later-phase capability. They run through a provider adapter and a persisted workflow engine in the modular monolith; no AI provider is required to install or use the core product.
+- Each installation may customize its user-facing name and brand icon after setup; the defaults are `TestOps` and the built-in TestOps mark. This does not change API paths or internal product identifiers.
 - Each installation can host one or more workspaces, with multiple projects within each workspace.
 - The issue area focuses on test-driven defect tracking; a Jira-like general-purpose issue tracker will not be built.
 - The public API and ingestion of automated test results are among the core capabilities of the first release.
@@ -28,6 +30,7 @@ Qase's product scope and public documentation are used as a functional reference
 
 | Role | Core permissions |
 | --- | --- |
+| Installation Admin | Manages installation-wide settings, including AI provider configuration, and grants/revokes Installation Admin access. This role is separate from workspace/project membership. |
 | Workspace Admin | Manages members, workspace settings and projects. |
 | Project Admin / QA Lead | Manages the repository, requirements, plans, runs, fields and project settings. |
 | Tester | Executes the runs assigned to them; adds results, comments and evidence. |
@@ -72,6 +75,26 @@ The distinction between plan and run is preserved: a plan is reusable test scope
 
 A tester or an integration creates a defect from a failed result; the steps, expected/actual result, evidence and the related case/run are linked automatically. The defect can be tracked in the internal system and later linked by reference to systems such as Jira/GitHub.
 
+### 5.4 AI-assisted QA workflow
+
+AI assistance is organized as a versioned workflow, not as an unconstrained autonomous agent. A deterministic workflow orchestrator owns ordering, retries, approvals and persistence. Agent roles are focused steps with versioned skills/instructions, a bounded tool set and a validated output schema. Commands or UI actions start a workflow or an individual step. Initially, all roles use one operator-selected default provider/model; each role gets a different skill, context and output schema. Model-per-role routing can be considered later if usage shows a clear quality or cost benefit.
+
+1. A user starts a requirement review. The Requirement Reviewer checks clarity, testability, acceptance criteria and risk, and returns findings and questions scoped to that project.
+2. After the user resolves or accepts the review, the Test Designer proposes positive, negative and boundary test cases using the existing case fields (preconditions, steps and expected results).
+3. The Coverage Auditor maps proposed cases to acceptance criteria, flags gaps and likely duplicates, and may request one bounded revision of the draft.
+4. The user reviews and edits the cases. Only after confirmation are cases saved through the normal permission-checked API; approved cases can then be linked to the requirement.
+5. The Test Planner may propose a plan/run scope using requirement risk and existing coverage. A user or existing CI integration creates and executes the run; AI does not execute arbitrary test code.
+6. When a run is completed, the Run Analyzer reviews run cases, result attempts, step results and comments. It returns a summary, failure clusters and possible causes, each marked as a hypothesis rather than a confirmed diagnosis.
+7. The Defect Writer can prepare defect drafts linked to failed results. A user reviews and confirms each defect before it is persisted or sent to an external issue tracker.
+
+Workflow runs are asynchronous and resumable. Each run and step records its status, timestamps, versioned skill/agent definition, validated input/output artifacts, provider/model metadata, and errors. Approval, rejection, retry and cancellation are explicit transitions. If a provider is unavailable or unconfigured, the existing manual and CI flows continue to work.
+
+### 5.5 Test case execution history
+
+When a user opens a case from the repository, its detail view provides a **Run history** section alongside (and clearly separate from) the case-definition change history. It shows the case's executions across runs, newest run first, grouped by run with each retry/attempt preserved. A row shows the run name/link, date, result status, attempt, source, duration and available environment/build context. Expanding a failed result shows its recorded comment, failed step results, evidence attachments and linked defects.
+
+The case view also summarizes the latest result and a consecutive failed-run count. Consecutive failures are calculated across distinct completed runs; retries within one run remain attempts of that run and do not inflate the streak. A failure summary must distinguish stored evidence (for example, a tester comment or failed step) from an optional AI-generated explanation. AI explanations are hypotheses linked to the relevant run/result and never replace or rewrite the underlying result.
+
 ## 6. Functional requirements
 
 ### 6.1 Workspace and project
@@ -87,9 +110,11 @@ A tester or an integration creates a defect from a failed result; the steps, exp
 - **FR-012:** Case steps must be stored as action/expected result pairs; preconditions and a description must be supported.
 - **FR-013:** Priority, severity, type, automation status, tags and custom fields must be definable.
 - **FR-014:** The case ID must remain unchanged; the link to automation results must be preserved even if the case's name or suite changes.
-- **FR-015:** Change history and a basic audit log must be viewable.
+- **FR-015:** Case-definition change history and a basic audit log must be viewable; definition changes must remain distinguishable from execution results across runs.
 - **FR-016:** Shared steps and parameterized test data must remain extensible in the data model for a later phase.
 - **FR-017:** Automation results must be matched to cases first by case ID and, if no match is found, by name/suite path. If neither matches, the system must automatically create a new case and mark it as automation-sourced; which result statuses (e.g. only passed, or all statuses) trigger automatic case creation must be configurable in the project settings.
+- **FR-018:** A case detail view and API must expose paginated execution history across runs, newest first, preserving every result attempt and linking each entry to its run. Entries must include status, timestamp, source, duration and available run environment/build metadata; failed entries must expose their comments, step results, evidence and linked defects.
+- **FR-019:** Case history must summarize the latest result and consecutive failures across distinct completed runs. Retries within one run count as attempts, not separate runs. Any AI-generated failure explanation must be optional, identify its supporting run/result evidence and be presented as a hypothesis separate from stored facts.
 
 ### 6.3 Requirements traceability
 
@@ -145,6 +170,31 @@ A tester or an integration creates a defect from a failed result; the steps, exp
 - **FR-078:** The initial automation inputs are the generic REST API and JUnit XML import. Framework-specific reporter packages will be added in later phases.
 - **FR-079:** Webhook infrastructure for events such as run completion, result creation and defect changes may be added in a later phase; retries and visibility into failed deliveries are required.
 
+### 6.9 AI-assisted QA workflows (later phase)
+
+- **FR-080:** AI assistance must be optional and provider-independent. If no provider is configured, AI features are disabled while core product flows remain available. Provider credentials are server-side configuration/secrets and must never be returned to or stored by the browser.
+- **FR-081:** Every AI workflow operation must enforce the same workspace/project access checks as the underlying resource APIs; the model receives only the minimum project-scoped data required for that step.
+- **FR-082:** A requirement review must return structured findings, questions, risks and acceptance-criteria observations. Test-case generation must return drafts using the existing test-case shape, and coverage review must identify which criteria each draft covers and which remain uncovered.
+- **FR-083:** AI-generated cases, plans/runs and defects may be persisted as workflow draft artifacts, but must not be written to domain records until a suitably authorized user explicitly approves them. Approval saves through the normal domain service and permission checks.
+- **FR-084:** A workflow must support asynchronous execution, persisted run/step states, bounded retries, cancellation, resumable human-approval gates and versioned skills/agent definitions. Generated artifacts and step outcomes must be reviewable.
+- **FR-085:** On a completed run, the Run Analyzer may summarize results, group related failures and suggest possible causes from available result comments, step results and history. These are recommendations, not authoritative pass/fail changes.
+- **FR-086:** Agent tools must be explicitly allowlisted and project-scoped. AI workflows must not have arbitrary SQL, shell, unrestricted network or unreviewed mutation tools. Structured model output must be schema-validated before use.
+- **FR-087:** An Installation Admin must configure the AI provider, default model, and (where needed) endpoint and credential in the authenticated system Settings page after installation. The page must support enable/disable and a connection test. One installation-level provider/model applies to all workspaces initially. AI usage must have configurable request/token or cost limits, timeouts and rate limits. The UI must disclose what project data is sent to the selected provider.
+
+### 6.10 Installation branding
+
+- **FR-088:** After installation, an Installation Admin must be able to set the user-facing application name in system Settings → Branding. If unset or blank, it defaults to `TestOps`. The value is stored as installation-level configuration and is preserved across upgrades; it is not an installer prompt or environment setting.
+- **FR-089:** The configured display name must appear consistently in user-facing branding, including sign-in/registration, the application shell, browser page titles and help/support. The web client obtains the name from a safe public branding/configuration response that contains no release version or secret. API paths, database identifiers, installer internals and image/package names remain stable.
+- **FR-094:** Installation Admins must be able to upload, replace and reset the built-in brand icon from system Settings → Branding. The icon is independent of the display-name text so changing the name does not require editing the artwork. Branding must work in light and dark themes; optional theme-specific assets may be provided.
+- **FR-095:** Branding assets must be validated by file type, size and dimensions, stored in persistent storage and served only through the public branding asset route. If SVG is accepted, it must be sanitized; otherwise only safe raster formats are allowed. Public branding responses contain only the display name and approved public asset references.
+
+### 6.11 Installation-level settings and AI credentials
+
+- **FR-090:** Installation Admin is a separate authorization role from Workspace Admin. On a fresh install, the first seeded administrator receives Installation Admin access; only an Installation Admin can grant or revoke this role.
+- **FR-091:** AI provider settings are configured after installation in system Settings, not in the installer. The page must identify configured provider/model and connection status, accept provider/model/optional endpoint/credential, allow connection testing without sending project content, and enable/disable AI without revealing a saved credential. If no provider is configured, AI features remain unavailable and core workflows continue.
+- **FR-092:** Provider credentials saved through Settings must be encrypted at rest with a stable installation-level encryption key, never returned by APIs or logged, and replaceable without exposing the old value. The encryption key is created and preserved as a deployment secret; it is not the provider/API key.
+- **FR-093:** Provider/model configuration is installation-wide initially, so every workspace uses the same selected provider/model and its usage limits. A workflow run records the provider/model configuration used for reproducibility. Per-workspace credentials and model routing are deferred.
+
 ## 7. Architecture and deployment requirements
 
 - The application is published as a single-versioned OCI/Docker image; the container runs stateless.
@@ -153,9 +203,12 @@ A tester or an integration creates a defect from a failed result; the steps, exp
 - In the first release, attachment files must be written not to the application container's file system but to a persistent Docker volume mounted into the application (e.g. `/data/attachments`). PostgreSQL must hold only the file metadata and the storage key; attachments must not be written to the database as BLOBs.
 - A separate object storage service is not required for the first release. In the future, it must be possible to point the same storage interface at S3-compatible storage.
 - Configuration is supplied via environment variables/secrets; DB passwords and API tokens are not baked into the image.
+- Branding is managed after installation in the authenticated system Settings → Branding page by Installation Admins. The default display name and mark are `TestOps` and the built-in icon. Persist branding settings and uploaded assets across upgrades. Expose only the configured name and approved asset references through a public branding endpoint for pre-authentication pages; keep release/version details on the existing authenticated system-info endpoint. Branding assets must be included in backups.
+- AI is not bundled into the image, and no model/provider choice is required during installation. The first configuration path is the authenticated system Settings page, restricted to Installation Admins; it configures provider, model, optional endpoint and credential, provides connection testing and allows AI to be disabled. A local inference server may be configured by endpoint. The backend calls the provider through adapters; credentials never pass through the browser. Provider credentials are encrypted at rest using a stable deployment encryption key generated/preserved by the installer, never returned or logged. No configuration means AI is unavailable while core product features continue to work.
 - The application waits in a controlled manner until the DB is ready; schema migrations are versioned and published together with backup/upgrade guidelines.
 - Health/readiness endpoints and a configurable log level are provided.
 - The first release does not require horizontal scaling; the API and the worker must be able to use the same PostgreSQL data safely.
+- AI workflows use a provider adapter and a background worker; provider calls do not hold an API request open. The first implementation may use PostgreSQL-backed jobs and workflow state, avoiding a mandatory Redis/service dependency. Workflow definitions and artifacts are versioned and persisted for review and resume.
 
 ## 8. Security, reliability and quality
 
@@ -166,6 +219,9 @@ A tester or an integration creates a defect from a failed result; the steps, exp
 - Critical user actions must be written to the audit log.
 - The backup and restore procedure for PostgreSQL and the attachment volume must be documented; it must be possible to back up both before an upgrade.
 - API responses, migration errors and integration errors must be observable; silently lost test results are not acceptable.
+- AI workflow steps, approvals, cancellations and resulting domain mutations must be attributable to the initiating user and auditable. Provider failures must not block normal product workflows.
+- AI inputs must be minimized and project-scoped; provider secrets must be protected, output must be validated, and generated changes must pass through explicit human approval.
+- Provider choice is an installation-level Installation Admin decision initially. The installation must disclose which provider receives project content; per-workspace provider credentials and model routing are deferred until tenant-level isolation and credential encryption are designed.
 
 ## 9. MVP acceptance criteria
 
@@ -186,7 +242,7 @@ A tester or an integration creates a defect from a failed result; the steps, exp
 
 **Phase 3 - Integrations and team scale:** Jira/GitHub issue links, webhooks (e.g. run completion and defect notifications to channels such as Slack/Microsoft Teams/Discord/Mattermost), advanced filtering/search, custom fields, case review, report sharing and additional reporters.
 
-**Outside the MVP:** A general-purpose issue tracker, hosting test frameworks/runners, numerous bidirectional integrations, AI-based case generation and advanced enterprise analytics. These will be evaluated once the core flows have been validated.
+**Outside the MVP:** A general-purpose issue tracker, hosting test frameworks/runners, numerous bidirectional integrations, AI-assisted QA workflows and advanced enterprise analytics. AI-assisted requirement review, case drafting and run analysis are candidates for a later phase after the core flows have been validated. Autonomous test execution and unreviewed AI mutations remain out of scope.
 
 ## 11. Assumptions and open decisions
 

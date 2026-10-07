@@ -40,6 +40,10 @@ WORKDIR /app/apps/api
 # exposed host port can be chosen freely with `docker run -p <YOUR_PORT>:3000`.
 ENV PORT=3000
 EXPOSE 3000
+# Release version shown on the Help & support page (/api/v1/system/info). Declared last so a
+# new version only rebuilds this layer; docker-publish.yml passes it, local builds report "dev".
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 HEALTHCHECK --interval=10s --timeout=5s --retries=10 CMD curl -f http://localhost:${PORT}/health || exit 1
 # Checks DATABASE_URL, retries migrate deploy until the DB is ready, then starts
 # the single API+UI process (see apps/api/docker-entrypoint.sh)

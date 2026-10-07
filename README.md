@@ -1,39 +1,62 @@
 # TestOps
 
-A test management tool you can run on your own server, bringing test case management, test runs and automation results together in one place. The API and the web UI ship in a single Docker image; data is stored in a separate PostgreSQL database.
+A self-hosted test management tool for requirements, test cases, manual and automated runs, results, and defects. The web app and REST API run in one container; PostgreSQL stores application data and a persistent volume stores attachments.
 
-- Image: `ghcr.io/caslanqa/testops` (linux/amd64 and linux/arm64, public)
-- Requirements: Docker Engine 24+ and Docker Compose v2 (check with `docker compose version`)
+## Contents
 
-## Quick start (recommended)
+- [What is TestOps?](#what-is-testops)
+- [Install](#install)
+- [First sign-in](#first-sign-in)
+- [Operations and backups](#operations-and-backups)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+- [API](#api)
+- [Development](#development)
 
-One command installs TestOps; Docker is the only requirement.
+## What is TestOps?
+
+TestOps brings these QA activities together:
+
+- Organize test cases in suites and link them to requirements.
+- Create reusable plans and manual or automated test runs.
+- Record results, retries, comments, step results, and evidence.
+- Track defects and link them to failed results.
+- Submit automation results through the REST API.
+
+TestOps is self-hosted. The app image is published at [ghcr.io/caslanqa/testops](https://github.com/caslanqa/test-ops/pkgs/container/testops) for `linux/amd64` and `linux/arm64`.
+
+## Install
+
+You need Docker Engine 24 or later and Docker Compose v2.
+
+### Recommended: installer
+
+Run this on the machine where TestOps should be hosted:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/caslanqa/test-ops/master/install.sh | bash
 ```
 
-The [installer](install.sh):
+The installer creates `~/testops`, generates the required secrets, starts PostgreSQL and TestOps, waits for the app to become ready, then creates the first admin account and starter workspace. It prints the initial password once.
 
-1. checks that Docker and Docker Compose v2 are installed and running, and that the port is free;
-2. creates `~/testops` with `docker-compose.yml` and a `.env` file holding random secrets;
-3. pulls the images, starts PostgreSQL and TestOps and waits until they are ready;
-4. creates the first admin account, with a starter workspace and demo project, and prints its password.
+On the same machine, open **http://localhost:8080** and sign in with the credentials shown by the installer. From another device, use the server's hostname or IP address and the selected port.
 
-When it finishes, open **http://localhost:8080** and sign in with the printed account. The password is shown only once; change it on the **Account** page.
-
-Options are environment variables placed before `bash`, for example `curl -fsSL …/install.sh | TESTOPS_PORT=9090 bash`:
+Common installer options:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TESTOPS_DIR` | `~/testops` | Install directory |
-| `TESTOPS_PORT` | `8080` | Port the web UI is published on; also changes the port of an existing install |
-| `TESTOPS_VERSION` | `latest` | Image version to run, e.g. `0.3.0`; the install stays pinned to it until you run the installer with `TESTOPS_VERSION=latest` |
-| `TESTOPS_ADMIN_EMAIL` | `admin@testops.local` | Email of the first admin account |
+| `TESTOPS_DIR` | `~/testops` | Installation directory |
+| `TESTOPS_PORT` | `8080` | Host port for the web app; also updates an existing installation |
+| `TESTOPS_VERSION` | `latest` | Image version, such as `0.3.0` |
+| `TESTOPS_ADMIN_EMAIL` | `admin@testops.local` | First admin account email |
 
-**Upgrading:** run the same command again. It refreshes `docker-compose.yml` (a changed copy is kept as `docker-compose.yml.bak`), pulls the newer image and restarts TestOps; `.env` and your data are left as they are.
+For example, to use port 9090:
 
-**Reading the script first:** download it, review it, then run it:
+```bash
+curl -fsSL https://raw.githubusercontent.com/caslanqa/test-ops/master/install.sh | TESTOPS_PORT=9090 bash
+```
+
+To review the script before running it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/caslanqa/test-ops/master/install.sh -o install.sh
@@ -41,136 +64,135 @@ less install.sh
 bash install.sh
 ```
 
-**Uninstalling:** `cd ~/testops && docker compose down -v`, then delete the folder. This **deletes all data**; take a [backup](#day-to-day-operations) first if you need it.
+### Manual Docker Compose install
 
-> `.env` holds the generated secrets; `cat ~/testops/.env` shows them. Neither is a sign-in password: `JWT_SECRET` signs sessions and `POSTGRES_PASSWORD` is only used by the app to reach its database. Keep a copy of the file (e.g. in your password manager): the database password cannot be recovered without it, and it must not be changed after the first installation (see [Troubleshooting](#troubleshooting)).
-
-### First sign-in
-
-The installer creates the first admin account. Everyone else either signs up with the **Create one** link on the sign-in screen, or is added by a workspace admin under **Members**; the person who creates a workspace becomes its admin. With `SELF_REGISTRATION=false` in `.env`, only the second way is available.
-
-### Manual installation
-
-The same setup without the installer, for example to review every step:
+Use this if you want to manage each setup step yourself:
 
 ```bash
-mkdir testops && cd testops
+mkdir testops
+cd testops
 
-# 1. Download the Compose file (PostgreSQL + TestOps)
 curl -fsSLO https://raw.githubusercontent.com/caslanqa/test-ops/master/docker-compose.yml
 
-# 2. Create the .env file containing the two required secrets (nothing is printed)
+(umask 077
 cat > .env <<EOF
 JWT_SECRET=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
 EOF
+)
 
-# 3. Start it; --wait blocks until the app is ready (images are downloaded the first time)
 docker compose up -d --wait
-
-# 4. Create the first admin account with a starter workspace and demo project
-docker compose exec -e SEED_ADMIN_PASSWORD="$(openssl rand -base64 18)" app node prisma/seed.js
+docker compose exec -T -e SEED_ADMIN_PASSWORD="$(openssl rand -base64 18)" app node prisma/seed.js
 ```
 
-Step 4 prints the sign-in details on the `Seed complete. Sign in with: admin@testops.local / …` line; the email can be changed with `SEED_ADMIN_EMAIL`. Running it again is safe: it does not touch existing records or the user's password, and its output says so. Instead of step 4 you can also sign up with **Create one**.
+The seed command prints the first admin credentials. Set `SEED_ADMIN_EMAIL` as an additional `-e` value to choose another email. Running the seed again does not reset an existing account's password. You can also create the first account from the sign-in page if self-registration is enabled.
 
-## Day-to-day operations
+## First sign-in
 
-Run the commands in the folder that contains `docker-compose.yml`.
+The installer creates an admin account with a starter workspace and demo project. Change the initial password from **Account** after signing in.
+
+By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; workspace admins can still add members.
+
+## Operations and backups
+
+Run commands from the installation directory, usually `~/testops`.
 
 | Task | Command |
 |---|---|
-| Status | `docker compose ps` |
-| Logs | `docker compose logs -f app` |
-| Stop (data is kept) | `docker compose down` |
-| Restart | `docker compose up -d --wait` |
-| Update | Run the [install command](#quick-start-recommended) again, or `docker compose pull && docker compose up -d --wait` |
-| Database backup | `docker compose exec -T postgres pg_dump -U testops testops > testops.sql` |
-| Attachment backup | `docker compose cp app:/data/attachments ./attachments-backup` |
-| Delete everything (**including data**) | `docker compose down -v` |
+| Check containers | `docker compose ps` |
+| Follow app logs | `docker compose logs -f app` |
+| Stop services and keep data | `docker compose down` |
+| Start services | `docker compose up -d --wait` |
+| Upgrade using the installer | Run the same installer command again |
+| Pull the selected image and restart | `docker compose pull && docker compose up -d --wait` |
 
-When you update, database migrations are applied automatically as the app starts. To stay on a specific version, add `APP_IMAGE=ghcr.io/caslanqa/testops:0.2.0` to the `.env` file. Published tags: `latest`, `X.Y.Z`, `X.Y` and `sha-<commit>`. Versions and changes are listed on the [Releases](https://github.com/caslanqa/test-ops/releases) page.
+Upgrades preserve `.env` and the database/attachment volumes. Database migrations are applied when the app starts. To pin a release, set `APP_IMAGE=ghcr.io/caslanqa/testops:0.3.0` in `.env`. Run the installer with `TESTOPS_VERSION=latest` to switch a pinned installation back to the latest image.
+
+A full backup includes the database, attachments, and `.env` file:
+
+```bash
+docker compose exec -T postgres pg_dump -U testops testops > testops.sql
+docker compose cp app:/data/attachments ./attachments-backup
+```
+
+The commands above use the default database user and name. Keep the database dump and attachment backup together with a secure copy of `.env`; it contains the JWT and database secrets.
+
+**Uninstalling deletes data:** `docker compose down -v` removes the database and attachment volumes. Make and verify your backups before running it.
 
 ## Configuration
 
-Settings are read from the `.env` file; after changing them, apply them with `docker compose up -d --wait`. A list of all variables with descriptions is in [`.env.example`](.env.example).
+The installer creates `.env` with secure values. Keep it private and keep a backup. Do not change `POSTGRES_PASSWORD` after the database volume has been created.
 
-| Variable | Default | Description |
+| Variable | Default | Purpose |
 |---|---|---|
-| `JWT_SECRET` | — (required) | Signs session tokens. At least 32 characters; `openssl rand -hex 32`. Changing it signs everyone out. |
-| `POSTGRES_PASSWORD` | — (required) | Database password. Postgres stores it when the volume is first created. |
-| `POSTGRES_USER`, `POSTGRES_DB` | `testops` | Database user and name. |
-| `APP_PORT` | `8080` | Host port on which the UI is exposed. |
-| `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Image to run; use it to pin a version. |
-| `JWT_EXPIRES_IN` | `8h` | Session duration. |
-| `SELF_REGISTRATION` | `true` | If `false`, users can only be added by workspace admins. |
-| `RATE_LIMIT_PER_MINUTE` | `600` | Request limit per minute per user (or anonymous IP); `0` turns it off. |
-| `AUTH_RATE_LIMIT_PER_MINUTE` | `10` | Per-account limit for sign-in, registration and password change. |
-| `AUTH_IP_RATE_LIMIT_PER_MINUTE` | `60` | Limit on authentication attempts from a single IP across all accounts. |
-| `TRUST_PROXY` | off | `true` or the hop count (e.g. `1`) if you are behind a reverse proxy; see below. |
-| `ATTACHMENT_MAX_FILE_SIZE_BYTES` | 32 MB | Size limit for a single attachment. |
-| `ATTACHMENT_MAX_REQUEST_SIZE_BYTES` | 128 MB | Total upload limit for a single request. |
-| `ATTACHMENT_MAX_FILES_PER_REQUEST` | `20` | Number of files in a single request. |
-| `ATTACHMENT_ALLOWED_EXTENSIONS` | images, video, text, pdf, archives | Comma-separated extensions, e.g. `png,jpg,log,zip`. |
+| `JWT_SECRET` | Generated by installer | Signs sessions. Changing it signs users out. |
+| `POSTGRES_PASSWORD` | Generated by installer | App-to-database password. Keep the original value for the lifetime of the database. |
+| `APP_PORT` | `8080` | Host port published for the web app and API. |
+| `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Container image; set a version tag to pin releases. |
+| `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up. |
+| `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
 
-### Reverse proxy and HTTPS
+Rate limits and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
 
-On its own, TestOps serves plain HTTP. If you are going to expose it to the internet, put a TLS-terminating reverse proxy (nginx, Caddy, Traefik) in front of it and point the proxy at `http://localhost:8080`. In that case, add `TRUST_PROXY=1` to the `.env` file. Otherwise the app treats every request as coming from the proxy's IP, and all users share the same rate limit counter. If the app is exposed directly to the internet, leave `TRUST_PROXY` empty; otherwise clients can bypass the limit by forging the `X-Forwarded-For` header.
+### HTTPS and reverse proxies
 
-## Without Compose (`docker run`)
-
-The image does not include a database; you first need to start PostgreSQL on the same Docker network. The app container listens on port **3000** internally, so the port mapping must be `-p <host-port>:3000`.
-
-```bash
-PGPW=$(openssl rand -hex 16)      # keep these two values; a reinstall needs the same ones
-JWT=$(openssl rand -hex 32)
-
-docker network create testops
-
-docker run -d --name testops-db --network testops --restart unless-stopped \
-  -e POSTGRES_USER=testops -e POSTGRES_PASSWORD="$PGPW" -e POSTGRES_DB=testops \
-  -v testops-pgdata:/var/lib/postgresql/data \
-  postgres:16-alpine
-
-docker run -d --name testops --network testops --restart unless-stopped \
-  -e DATABASE_URL="postgresql://testops:$PGPW@testops-db:5432/testops?schema=public" \
-  -e JWT_SECRET="$JWT" \
-  -e ATTACHMENTS_DIR=/data/attachments -v testops-attachments:/data/attachments \
-  -p 8080:3000 \
-  ghcr.io/caslanqa/testops:latest
-```
-
-The app retries migrations until the database accepts connections. You can check that it is ready with `docker inspect -f '{{.State.Health.Status}}' testops` (`healthy`) or with `curl http://localhost:8080/ready`.
+TestOps serves HTTP on its own. Before exposing it outside a trusted network, put a TLS reverse proxy such as Caddy, nginx, or Traefik in front of it. If there is one trusted proxy hop, set `TRUST_PROXY=1`; use the correct hop count if your setup has more than one proxy.
 
 ## Troubleshooting
 
-First look at the output of `docker compose logs app` (or `docker logs testops`).
+Start with the app logs:
 
-| Symptom | Cause and fix |
+```bash
+cd ~/testops
+docker compose ps
+docker compose logs --tail 100 app
+```
+
+| Symptom | What to check |
 |---|---|
-| `TestOps: DATABASE_URL is not set` or `Environment variable not found: DATABASE_URL` | The image was run on its own, without a database. Use the Compose setup from the [Quick start](#quick-start-recommended) section, or start PostgreSQL as well and pass `DATABASE_URL` as shown in the [Without Compose](#without-compose-docker-run) section. |
-| `JWT_SECRET is not set; add it to .env (scripts/start.sh generates one)` (compose) or `JWT_SECRET is not set / is a placeholder / is too short` | Put a value generated with `JWT_SECRET=$(openssl rand -hex 32)` into the `.env` file. |
-| The container is `healthy` but the page does not open in the browser | Wrong port mapping: the container listens on 3000. Use `-p 8080:3000` (not `-p 8080:8080`). |
-| `Port 8080 is already in use` (installer), `port is already allocated` / `address already in use` | Port 8080 is used by another application. Run the installer with e.g. `TESTOPS_PORT=9090`, or put `APP_PORT=9090` in the `.env` file, and use http://localhost:9090. |
-| `P1000: Authentication failed against database server` | `POSTGRES_PASSWORD` was changed after the first installation; Postgres keeps using the old password. Switch back to the old password. If you are willing to lose the data, run `docker compose down -v` and then start again. |
-| `pull access denied for testops` | An old `APP_IMAGE=testops:local` line is left in `.env`; delete that line. |
-| `docker: invalid reference format` or `--name: command not found` | In a multi-line command, `\` must be the last character on the line; if whitespace follows it, the command gets split. |
-| `Too many attempts. Try again in N seconds.` on sign-in | Too many attempts were made in a short time; wait for the stated amount of time. The limits are in the table above. |
+| Installer says port 8080 is in use | Choose another port with `TESTOPS_PORT=9090` and rerun the installer. |
+| App does not become ready | Check `docker compose ps` and `docker compose logs app`. The app listens on port 3000 inside the container; Compose publishes it on `APP_PORT` (8080 by default). |
+| `JWT_SECRET` missing, too short, or rejected | Check that `.env` contains the generated secret and that it has not been replaced with the example value. |
+| `P1000: Authentication failed against database server` | The password in `.env` no longer matches the password stored in the existing PostgreSQL volume. Restore the original `.env`; changing the password in the file alone does not change the database password. |
+| `pull access denied` | Check `APP_IMAGE` in `.env`. For a public release, use `ghcr.io/caslanqa/testops:latest` or a published version tag. |
+| `Too many attempts. Try again in N seconds.` | Wait for the stated interval. Sign-in and registration have separate rate limits. |
+| API returns `401 Unauthorized` | Use an API token from **Account → API tokens** in the `Authorization: Bearer <token>` header. |
 
-Health endpoints: `/health` (is the process up) and `/ready` (is the database reachable). The API documentation is at `/api/docs`.
+Health checks are available at `/health` and `/ready`. `/health` confirms the process is running; `/ready` confirms the database is reachable.
+
+## API
+
+The REST API base path is `/api/v1`. Open the interactive reference at **http://localhost:8080/api/docs** (replace the port if you changed `APP_PORT`). The OpenAPI documents are available at `/api/docs-json` and `/api/docs-yaml`.
+
+Create a token under **Account → API tokens**, then send it as:
+
+```http
+Authorization: Bearer <token>
+```
+
+The **Help & support** page also links to the API reference and includes an example for submitting automation results from CI.
 
 ## Development
 
-Running from source requires Node 20+, pnpm (the version is in the `packageManager` field of `package.json`) and Docker.
+Requirements: Node.js 20 or later, pnpm 12.8.1, and Docker.
 
 ```bash
-git clone https://github.com/caslanqa/test-ops.git && cd test-ops
+git clone https://github.com/caslanqa/test-ops.git
+cd test-ops
 pnpm install
-pnpm start        # prepares .env, builds the image from source, loads the demo data and opens the browser
-pnpm test:smoke   # smoke tests against the running stack
+pnpm start
 ```
 
-`docker compose` commands run inside the repo also load `docker-compose.override.yml` automatically. That file builds the image from the working copy instead of pulling it from the registry (`testops:local`) and exposes PostgreSQL to the host on `127.0.0.1:5432`. Installation only needs `docker-compose.yml`.
+`pnpm start` prepares the local environment, builds and starts the Docker stack, seeds demo data, and opens the app. Run the smoke checks against the running stack with:
 
-- Monorepo: `apps/api` (NestJS + Prisma), `apps/web` (React + Vite). Design: [`design-doc.md`](design-doc.md), roadmap: [`PLAN.md`](PLAN.md).
-- Every change to the image's inputs (`apps/**`, `Dockerfile`, `package.json`, `pnpm-*`) merged into `master` is versioned automatically after it passes CI; the image is pushed to GHCR, and a git tag and a GitHub Release are created. Changes that leave the image identical (docs, CI, tests, `install.sh`, `docker-compose.yml`) do not cut a release; their commits count towards the next one. The version is determined from the commit message: `feat:` bumps minor, `fix:` and everything else bump patch, `feat!:` or `BREAKING CHANGE:` bumps major.
+```bash
+pnpm test:smoke
+```
+
+The repository is a pnpm workspace:
+
+- `apps/api` — NestJS API and Prisma data layer.
+- `apps/web` — React and Vite UI.
+- [Design document](design-doc.md) · [Development plan](PLAN.md).
+
+Compose commands run inside the repository also load `docker-compose.override.yml`, which builds the local image and exposes PostgreSQL only on `127.0.0.1:5432`. The installer uses `docker-compose.yml` alone.
