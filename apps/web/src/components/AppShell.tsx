@@ -17,6 +17,7 @@ function Breadcrumbs() {
   const workspaceId = workspaceMatch?.params.workspaceId;
   const onWorkspaceMembers = workspaceMatch?.params['*'] === 'members';
   const onAccount = useMatch('/account') !== null;
+  const onSupport = useMatch('/support') !== null;
   const projectMatch = useMatch('/projects/:projectId/:section/*');
   const projectId = projectMatch?.params.projectId;
   const section = PROJECT_SECTIONS.find((s) => s.path === projectMatch?.params.section);
@@ -26,9 +27,13 @@ function Breadcrumbs() {
   const { data: info } = useProjectInfo(projectId);
 
   const crumbs: Crumb[] = [
-    { label: 'Workspaces', to: workspaceId || projectId || onAccount ? '/workspaces' : undefined },
+    {
+      label: 'Workspaces',
+      to: workspaceId || projectId || onAccount || onSupport ? '/workspaces' : undefined,
+    },
   ];
   if (onAccount) crumbs.push({ label: 'Account' });
+  if (onSupport) crumbs.push({ label: 'Help & support' });
   if (workspace) {
     crumbs.push({
       label: workspace.name,

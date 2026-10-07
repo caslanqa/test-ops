@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from "@nestjs/swagger";
 import { IsArray, IsEnum, IsOptional, IsString } from "class-validator";
 import { DefectSeverity } from "@prisma/client";
 
@@ -10,6 +11,7 @@ export class CreateDefectDto {
   description?: string;
 
   @IsOptional()
+  @ApiPropertyOptional({ enum: DefectSeverity, enumName: "DefectSeverity" })
   @IsEnum(DefectSeverity)
   severity?: DefectSeverity;
 

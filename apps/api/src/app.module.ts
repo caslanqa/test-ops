@@ -18,6 +18,7 @@ import { RunsModule } from "./runs/runs.module";
 import { DefectsModule } from "./defects/defects.module";
 import { AttachmentsModule } from "./attachments/attachments.module";
 import { ApiTokensModule } from "./api-tokens/api-tokens.module";
+import { SystemModule } from "./system/system.module";
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { ApiTokensModule } from "./api-tokens/api-tokens.module";
     DefectsModule,
     AttachmentsModule,
     ApiTokensModule,
+    SystemModule,
   ],
 })
 export class AppModule {}

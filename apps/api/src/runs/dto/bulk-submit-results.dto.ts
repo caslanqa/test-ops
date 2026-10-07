@@ -1,3 +1,4 @@
+import { ApiProperty } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
   ArrayMaxSize,
@@ -11,6 +12,8 @@ import { SubmitResultDto } from "./submit-result.dto";
 export const BULK_RESULTS_MAX_ITEMS = 500;
 
 export class BulkSubmitResultsDto {
+  // The CLI plugin doesn't translate the array size rules, so the limits are stated here.
+  @ApiProperty({ type: [SubmitResultDto], minItems: 1, maxItems: BULK_RESULTS_MAX_ITEMS })
   @IsArray()
   @ArrayNotEmpty()
   @ArrayMaxSize(BULK_RESULTS_MAX_ITEMS)

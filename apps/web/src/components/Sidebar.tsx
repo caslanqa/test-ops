@@ -2,6 +2,7 @@ import { Link, NavLink, useLocation, useMatch } from 'react-router-dom';
 import {
   ChevronLeft,
   LayoutGrid,
+  LifeBuoy,
   LogOut,
   Boxes,
 } from 'lucide-react';
@@ -102,6 +103,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </ul>
         </nav>
       )}
+
+      {/* Same place in every context, so help is always one step away (WCAG 3.2.6). */}
+      <nav aria-label="Help" className="sidebar-help">
+        <ul className="side-nav">
+          <li>
+            <NavLink to="/support" onClick={onNavigate}>
+              <LifeBuoy size={18} aria-hidden="true" />
+              Help &amp; support
+            </NavLink>
+          </li>
+        </ul>
+      </nav>
 
       {user && (
         <div className="sidebar-footer">

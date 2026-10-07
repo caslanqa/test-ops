@@ -691,6 +691,15 @@ input[type='checkbox'] {
   background: #fff;
 }
 
+/* Help link sits just above the user block; the auto margin moves here from the footer. */
+.sidebar-help {
+  margin-top: auto;
+}
+
+.sidebar-help + .sidebar-footer {
+  margin-top: 0;
+}
+
 .sidebar-footer {
   display: flex;
   align-items: center;
@@ -2258,6 +2267,132 @@ code {
   color: var(--ink-muted);
   font-size: var(--text-sm);
   text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+ * Help & support
+ * ----------------------------------------------------------------------- */
+/* minmax(0, …) lets columns shrink below the code block's longest line; the block
+   scrolls inside instead of widening the page (WCAG 1.4.10). */
+.support-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'api' 'ci' 'help' 'about';
+  gap: 1.25rem;
+  align-items: start;
+}
+
+/* Wide screens: API docs beside the help and version cards, the CI example full width below. */
+@media (min-width: 64rem) {
+  .support-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'api help'
+      'api about'
+      'ci ci';
+  }
+}
+
+.support-api {
+  grid-area: api;
+}
+
+.support-help {
+  grid-area: help;
+}
+
+.support-about {
+  grid-area: about;
+}
+
+.support-ci {
+  grid-area: ci;
+}
+
+.support-spec {
+  font-size: var(--text-sm);
+}
+
+.support-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.support-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.support-steps code {
+  overflow-wrap: anywhere;
+}
+
+.support-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  max-width: 75ch;
+  margin: 0;
+  padding-inline-start: 1.25rem;
+  font-size: var(--text-sm);
+}
+
+.external-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.copy-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 40rem;
+}
+
+.copy-field input {
+  flex: 1;
+  min-width: min(100%, 16rem);
+}
+
+.mono,
+.code-block {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Long lines scroll inside the block; code is exempt from reflow (WCAG 1.4.10). */
+.code-block {
+  margin: 0;
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-hover);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  white-space: pre;
 }
 
 /* --------------------------------------------------------------------------
