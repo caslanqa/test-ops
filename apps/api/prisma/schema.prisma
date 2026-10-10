@@ -424,6 +424,11 @@ model Result {
   attachments Attachment[]
   defects     DefectResult[]
 
+  // Parallel CI jobs must not create the same attempt twice or a second result for an
+  // external test ID (FR-043, FR-075). Exactly one isLatest row per run case is kept by
+  // ResultsService, which writes results under a lock per run case.
+  @@unique([runCaseId, attemptNumber])
+  @@unique([runCaseId, externalTestId])
   @@index([runCaseId])
   @@index([externalTestId])
   @@map("results")

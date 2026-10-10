@@ -20,7 +20,8 @@ const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.AUTOMATION,
 ];
 
-function buildCaseSnapshot(testCase: {
+/** The copy of a case a run keeps, so its results stay readable when the case changes later. */
+export function buildCaseSnapshot(testCase: {
   title: string;
   preconditions: string | null;
   description: string | null;
@@ -264,9 +265,18 @@ export class RunsService {
     };
   }
 
-  /** Verifies, for the Results module, that the run exists and is not completed. */
-  async assertWritableRun(projectId: string, runId: string) {
-    const run = await this.prisma.testRun.findUnique({ where: { id: runId } });
+  /**
+   * Verifies, for the Results module, that the run exists and is not completed. Runs inside the
+   * caller's transaction and holds the run row FOR SHARE until it ends: completing the run waits
+   * for results that are being written, and no result is written after completion (FR-035).
+   */
+  async assertWritableRun(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    runId: string,
+  ) {
+    const [run] = await tx.$queryRaw<{ projectId: string; status: RunStatus }[]>`
+      SELECT "projectId", "status" FROM "test_runs" WHERE "id" = ${runId} FOR SHARE`;
     if (!run || run.projectId !== projectId) {
       throw new NotFoundException("Run not found");
     }
@@ -275,7 +285,6 @@ export class RunsService {
         "This run is completed; new results can't be added (FR-035)",
       );
     }
-    return run;
   }
 
   /** Deletes the run with its results and their attachments (project admins only). */
