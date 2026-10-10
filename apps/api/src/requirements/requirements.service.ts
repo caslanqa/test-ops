@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, ProjectRole } from "@prisma/client";
+import { Prisma, ProjectRole, ResultStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRequirementDto } from "./dto/create-requirement.dto";
@@ -24,7 +24,7 @@ export class RequirementsService {
     );
     const where: Prisma.RequirementWhereInput = {
       projectId,
-      archivedAt: null,
+      archivedAt: query.includeArchived ? undefined : null,
       title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
     };
     const [items, total] = await this.prisma.$transaction([
@@ -94,6 +94,20 @@ export class RequirementsService {
     });
   }
 
+  /** Brings an archived requirement back into the lists. */
+  async restore(userId: string, projectId: string, requirementId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.getOne(userId, projectId, requirementId);
+    return this.prisma.requirement.update({
+      where: { id: requirementId },
+      data: { archivedAt: null },
+    });
+  }
+
   async linkCases(
     userId: string,
     projectId: string,
@@ -134,7 +148,8 @@ export class RequirementsService {
     }
   }
 
-  // FR-022: coverage report showing untested requirements and their latest test status
+  // FR-022: coverage report showing untested requirements and the latest status of their cases.
+  // Linked cases without any result are left out of the breakdown; clients count them as untested.
   async coverage(userId: string, projectId: string) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
@@ -142,36 +157,47 @@ export class RequirementsService {
     );
     const requirements = await this.prisma.requirement.findMany({
       where: { projectId, archivedAt: null },
-      include: { cases: { include: { testCase: true } } },
+      select: { id: true, title: true, cases: { select: { testCaseId: true } } },
     });
+    const latestStatus = await this.latestStatusByCase(projectId, [
+      ...new Set(requirements.flatMap((r) => r.cases.map((rc) => rc.testCaseId))),
+    ]);
 
-    const result = [];
-    for (const requirement of requirements) {
-      const caseIds = requirement.cases.map((rc) => rc.testCaseId);
-      let lastStatuses: Record<string, number> = {};
-      if (caseIds.length > 0) {
-        const latestResults = await this.prisma.result.findMany({
-          where: { runCase: { testCaseId: { in: caseIds } } },
-          orderBy: { createdAt: "desc" },
-          take: 200,
-          select: { status: true, runCase: { select: { testCaseId: true } } },
-        });
-        const seen = new Set<string>();
-        for (const r of latestResults) {
-          if (seen.has(r.runCase.testCaseId)) continue;
-          seen.add(r.runCase.testCaseId);
-          lastStatuses[r.status] = (lastStatuses[r.status] ?? 0) + 1;
+    return requirements.map((requirement) => {
+      const lastResultStatusBreakdown: Record<string, number> = {};
+      for (const { testCaseId } of requirement.cases) {
+        const status = latestStatus.get(testCaseId);
+        if (status) {
+          lastResultStatusBreakdown[status] = (lastResultStatusBreakdown[status] ?? 0) + 1;
         }
       }
-      result.push({
+      return {
         requirementId: requirement.id,
         title: requirement.title,
-        caseCount: caseIds.length,
-        hasCoverage: caseIds.length > 0,
-        lastResultStatusBreakdown: lastStatuses,
-      });
-    }
-    return result;
+        caseCount: requirement.cases.length,
+        hasCoverage: requirement.cases.length > 0,
+        lastResultStatusBreakdown,
+      };
+    });
+  }
+
+  /**
+   * The status of each case's most recent result across the project's runs, in one query. Every
+   * case is ranked on its own, so a case that runs often can't push the others out of the report.
+   * Only the latest attempt in each run is a candidate, so a retry wins over the attempts it replaced.
+   */
+  private async latestStatusByCase(projectId: string, testCaseIds: string[]) {
+    if (testCaseIds.length === 0) return new Map<string, ResultStatus>();
+    const rows = await this.prisma.$queryRaw<{ testCaseId: string; status: ResultStatus }[]>`
+      SELECT DISTINCT ON (rc."testCaseId") rc."testCaseId", r."status"
+      FROM "results" r
+      JOIN "run_cases" rc ON rc."id" = r."runCaseId"
+      JOIN "test_runs" tr ON tr."id" = rc."runId"
+      WHERE tr."projectId" = ${projectId}
+        AND rc."testCaseId" = ANY(${testCaseIds})
+        AND r."isLatest"
+      ORDER BY rc."testCaseId", r."createdAt" DESC, r."attemptNumber" DESC, r."id" DESC`;
+    return new Map(rows.map((row) => [row.testCaseId, row.status]));
   }
 
   /** The test cases linked to a requirement, as a paged list of cases. */

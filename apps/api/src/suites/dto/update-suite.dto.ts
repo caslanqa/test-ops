@@ -1,4 +1,5 @@
-import { IsInt, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
+import { MAX_INT32 } from "../../common/limits";
 
 export class UpdateSuiteDto {
   @IsOptional()
@@ -12,9 +13,12 @@ export class UpdateSuiteDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   parentId?: string;
 
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(MAX_INT32)
   position?: number;
 }

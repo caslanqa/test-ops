@@ -34,6 +34,7 @@ model User {
   attachmentsUploaded  Attachment[]      @relation("AttachmentUploader")
   auditLogEntries      AuditLog[]
   testCaseHistory      TestCaseHistory[]
+  sentInvitations      WorkspaceInvitation[]
 
   @@map("users")
 }
@@ -50,9 +51,10 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members  WorkspaceMember[]
-  projects Project[]
-  auditLog AuditLog[]
+  members     WorkspaceMember[]
+  invitations WorkspaceInvitation[]
+  projects    Project[]
+  auditLog    AuditLog[]
 
   @@map("workspaces")
 }
@@ -69,6 +71,28 @@ model WorkspaceMember {
 
   @@unique([workspaceId, userId])
   @@map("workspace_members")
+}
+
+// People join a workspace through an invitation link (FR-002): the account with the invited
+// email accepts it, or the link holder creates that account. Only the token's hash is stored;
+// the link is shown once, to the admin who created it.
+model WorkspaceInvitation {
+  id          String        @id @default(uuid())
+  workspaceId String
+  email       String // lowercase
+  role        WorkspaceRole @default(MEMBER)
+  tokenHash   String        @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("workspace_invitations")
 }
 
 enum ProjectRole {
@@ -424,6 +448,11 @@ model Result {
   attachments Attachment[]
   defects     DefectResult[]
 
+  // Parallel CI jobs must not create the same attempt twice or a second result for an
+  // external test ID (FR-043, FR-075). Exactly one isLatest row per run case is kept by
+  // ResultsService, which writes results under a lock per run case.
+  @@unique([runCaseId, attemptNumber])
+  @@unique([runCaseId, externalTestId])
   @@index([runCaseId])
   @@index([externalTestId])
   @@map("results")

@@ -3,6 +3,7 @@ import { Prisma, ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreatePlanDto } from "./dto/create-plan.dto";
+import { AddPlanCasesDto } from "./dto/add-plan-cases.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
 import { ListPlansQueryDto } from "./dto/list-plans-query.dto";
 import { pageArgs } from "../common/pagination";
@@ -23,7 +24,7 @@ export class PlansService {
     );
     const where: Prisma.TestPlanWhereInput = {
       projectId,
-      archivedAt: null,
+      archivedAt: query.includeArchived ? undefined : null,
       milestoneId: query.milestoneId,
       title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
     };
@@ -46,7 +47,7 @@ export class PlansService {
     );
     const plan = await this.prisma.testPlan.findUnique({
       where: { id: planId },
-      include: { items: { include: { testCase: true } } },
+      include: { items: { include: { testCase: true }, orderBy: { position: "asc" } } },
     });
     if (!plan || plan.projectId !== projectId) {
       throw new NotFoundException("Plan not found");
@@ -68,6 +69,7 @@ export class PlansService {
       projectId,
       dto.milestoneId,
     );
+    await this.accessControl.assertAssignableUser(projectId, dto.assigneeId);
     return this.prisma.testPlan.create({
       data: {
         projectId,
@@ -79,9 +81,10 @@ export class PlansService {
         createdById: userId,
         items: dto.testCaseIds
           ? {
-              create: dto.testCaseIds.map((testCaseId, index) => ({
+              create: [...new Set(dto.testCaseIds)].map((testCaseId, index) => ({
                 testCaseId,
                 position: index,
+                assigneeId: dto.assigneeId,
               })),
             }
           : undefined,
@@ -122,11 +125,25 @@ export class PlansService {
     });
   }
 
+  /** Brings an archived plan back into the lists. */
+  async restore(userId: string, projectId: string, planId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.getOne(userId, projectId, planId);
+    return this.prisma.testPlan.update({
+      where: { id: planId },
+      data: { archivedAt: null },
+    });
+  }
+
   async addCases(
     userId: string,
     projectId: string,
     planId: string,
-    testCaseIds: string[],
+    dto: AddPlanCasesDto,
   ) {
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
@@ -134,12 +151,51 @@ export class PlansService {
       WRITE_ROLES,
     );
     await this.getOne(userId, projectId, planId);
-    await this.accessControl.assertCasesInProject(projectId, testCaseIds);
+    await this.accessControl.assertCasesInProject(projectId, dto.testCaseIds);
+    await this.accessControl.assertAssignableUser(projectId, dto.assigneeId);
+    // Added cases go to the end, in the order given; cases already in the plan stay as they are.
+    const last = await this.prisma.planCase.aggregate({
+      where: { planId },
+      _max: { position: true },
+    });
+    const start = (last._max.position ?? -1) + 1;
     await this.prisma.planCase.createMany({
-      data: testCaseIds.map((testCaseId) => ({ planId, testCaseId })),
+      data: [...new Set(dto.testCaseIds)].map((testCaseId, index) => ({
+        planId,
+        testCaseId,
+        position: start + index,
+        assigneeId: dto.assigneeId,
+      })),
       skipDuplicates: true,
     });
     return this.getOne(userId, projectId, planId);
+  }
+
+  /** Sets or clears who tests a case of the plan; runs started from the plan take it over. */
+  async assignCase(
+    userId: string,
+    projectId: string,
+    planId: string,
+    testCaseId: string,
+    assigneeId: string | null,
+  ) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.getOne(userId, projectId, planId);
+    await this.accessControl.assertAssignableUser(projectId, assigneeId);
+    const { count } = await this.prisma.planCase.updateMany({
+      where: { planId, testCaseId },
+      data: { assigneeId },
+    });
+    if (count === 0) {
+      throw new NotFoundException("Test case is not in this plan");
+    }
+    return this.prisma.planCase.findUniqueOrThrow({
+      where: { planId_testCaseId: { planId, testCaseId } },
+    });
   }
 
   async removeCase(
@@ -171,7 +227,10 @@ export class PlansService {
     );
     const plan = await this.prisma.testPlan.findUnique({
       where: { id: planId },
-      select: { projectId: true, items: { select: { testCaseId: true } } },
+      select: {
+        projectId: true,
+        items: { select: { testCaseId: true }, orderBy: { position: "asc" } },
+      },
     });
     if (!plan || plan.projectId !== projectId) {
       throw new NotFoundException("Plan not found");

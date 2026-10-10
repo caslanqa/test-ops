@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { PlansService } from "./plans.service";
 import { CreatePlanDto } from "./dto/create-plan.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
 import { AddPlanCasesDto } from "./dto/add-plan-cases.dto";
+import { AssignCaseDto } from "../common/dto/assign-case.dto";
 import {
   CurrentUser,
   AuthenticatedUser,
@@ -74,6 +75,17 @@ export class PlansController {
     return this.plansService.archive(user.id, projectId, planId);
   }
 
+  /** Brings an archived plan back into the lists. */
+  @Post(":planId/restore")
+  @HttpCode(200)
+  restore(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("planId") planId: string,
+  ) {
+    return this.plansService.restore(user.id, projectId, planId);
+  }
+
   @Post(":planId/cases")
   addCases(
     @CurrentUser() user: AuthenticatedUser,
@@ -81,12 +93,19 @@ export class PlansController {
     @Param("planId") planId: string,
     @Body() dto: AddPlanCasesDto,
   ) {
-    return this.plansService.addCases(
-      user.id,
-      projectId,
-      planId,
-      dto.testCaseIds,
-    );
+    return this.plansService.addCases(user.id, projectId, planId, dto);
+  }
+
+  /** Sets or clears who tests a case of the plan; runs started from the plan take it over. */
+  @Patch(":planId/cases/:caseId")
+  assignCase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("planId") planId: string,
+    @Param("caseId") caseId: string,
+    @Body() dto: AssignCaseDto,
+  ) {
+    return this.plansService.assignCase(user.id, projectId, planId, caseId, dto.assigneeId);
   }
 
   @Delete(":planId/cases/:caseId")

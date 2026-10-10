@@ -6,6 +6,12 @@ import {
   ATTACHMENT_DEFAULT_MAX_REQUEST_SIZE_BYTES,
 } from "../attachments/attachments.constants";
 
+/**
+ * Default for the largest JSON request body: room for a bulk upload of 500 results with their
+ * failure messages (FR-074). Express's own 100 KB default rejected realistic CI uploads.
+ */
+const JSON_DEFAULT_MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
+
 /** Normalizes a comma-separated extension list ("png, .JPG,log"); undefined if empty. */
 function parseExtensionList(value: string | undefined): string[] | undefined {
   const list = (value ?? "")
@@ -51,7 +57,7 @@ export default () => ({
   // Set at image build time from the release version (Dockerfile ARG APP_VERSION); "dev" for local builds.
   version: process.env.APP_VERSION?.trim() || "dev",
   auth: {
-    // Self-registration; on closed installs only workspace admins create accounts.
+    // Self-registration; on closed installs people join through workspace invitation links.
     selfRegistration: process.env.SELF_REGISTRATION?.trim().toLowerCase() !== "false",
   },
   // Per-minute request limits; 0 disables that limit (see common/rate-limit.ts).
@@ -63,6 +69,13 @@ export default () => ({
     authPerMinute: intFromEnv("AUTH_RATE_LIMIT_PER_MINUTE", 10, { allowZero: true }),
     // Attempts against different accounts from the same IP (credential stuffing, mass sign-up).
     authIpPerMinute: intFromEnv("AUTH_IP_RATE_LIMIT_PER_MINUTE", 60, { allowZero: true }),
+  },
+  http: {
+    // JSON bodies only; multipart attachment uploads have their own limits below.
+    maxJsonBodyBytes: intFromEnv(
+      "JSON_MAX_REQUEST_SIZE_BYTES",
+      JSON_DEFAULT_MAX_REQUEST_SIZE_BYTES,
+    ),
   },
   jwt: {
     secret: resolveJwtSecret(),

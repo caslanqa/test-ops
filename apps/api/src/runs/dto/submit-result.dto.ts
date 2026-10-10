@@ -7,9 +7,12 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
+  Min,
   ValidateNested,
 } from "class-validator";
 import { ResultSource, ResultStatus } from "@prisma/client";
+import { MAX_INT32 } from "../../common/limits";
 import { StepResultDto } from "./step-result.dto";
 
 export class SubmitResultDto {
@@ -43,6 +46,8 @@ export class SubmitResultDto {
 
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(MAX_INT32)
   durationMs?: number;
 
   // External test ID for idempotency of automation results (FR-075)

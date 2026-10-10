@@ -169,6 +169,20 @@ export class TestCasesService {
     });
   }
 
+  /** Brings an archived case back into the lists. */
+  async restore(userId: string, projectId: string, caseId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.getOne(userId, projectId, caseId);
+    return this.prisma.testCase.update({
+      where: { id: caseId },
+      data: { archivedAt: null },
+    });
+  }
+
   async history(userId: string, projectId: string, caseId: string) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,

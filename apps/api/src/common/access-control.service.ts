@@ -1,10 +1,22 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+
+export const ARCHIVED_PROJECT_MESSAGE =
+  "This project is archived, so it is read-only. A project admin can restore it.";
+
+export interface ProjectWriteOptions {
+  /**
+   * Also allow the write while the project is archived: restoring it, and deciding who can
+   * read it (members, turning a public run link off).
+   */
+  allowArchived?: boolean;
+}
 
 // FR-003: every query must be limited to the workspace/project the user is authorized for.
 // Membership is verified on every access to prevent data leaks through guessed object IDs.
@@ -71,17 +83,33 @@ export class AccessControlService {
     return member?.role === WorkspaceRole.ADMIN;
   }
 
-  /** Workspace admins can act as ADMIN in every project of their own workspace. */
+  /**
+   * Access check for changes to a project. Workspace admins can act as ADMIN in every project
+   * of their own workspace. An archived project is read-only: after the role check, changes
+   * get 409 unless `allowArchived` is set.
+   */
   async requireProjectRoleOrWorkspaceAdmin(
     userId: string,
     projectId: string,
     roles: ProjectRole[],
+    { allowArchived = false }: ProjectWriteOptions = {},
   ) {
     if (await this.isWorkspaceAdminOfProject(userId, projectId)) {
+      if (!allowArchived) await this.assertProjectNotArchived(projectId);
       return { role: ProjectRole.ADMIN, viaWorkspaceAdmin: true };
     }
     const member = await this.requireProjectRole(userId, projectId, roles);
+    if (!allowArchived) await this.assertProjectNotArchived(projectId);
     return { ...member, viaWorkspaceAdmin: false };
+  }
+
+  /** Runs after the role check, so people without access can't learn that a project is archived. */
+  private async assertProjectNotArchived(projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { archivedAt: true },
+    });
+    if (project?.archivedAt) throw new ConflictException(ARCHIVED_PROJECT_MESSAGE);
   }
 
   /** Verifies access to the project with any role (at least VIEWER), falling back to workspace admin. */
@@ -159,6 +187,30 @@ export class AccessControlService {
     if (member) return;
     if (await this.isWorkspaceAdminOfProject(assigneeId, projectId)) return;
     throw new NotFoundException("The assignee is not a member of this project");
+  }
+
+  /** Of the given users, those who can still be assigned in the project (members and workspace admins). */
+  async assignableUserIds(projectId: string, userIds: string[]) {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) return new Set<string>();
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        members: { where: { userId: { in: ids } }, select: { userId: true } },
+        workspace: {
+          select: {
+            members: {
+              where: { userId: { in: ids }, role: WorkspaceRole.ADMIN },
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+    return new Set([
+      ...(project?.members ?? []).map((m) => m.userId),
+      ...(project?.workspace.members ?? []).map((m) => m.userId),
+    ]);
   }
 
   async assertProjectMemberRecord(projectId: string, memberId: string) {

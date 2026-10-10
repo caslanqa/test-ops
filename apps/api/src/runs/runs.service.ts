@@ -20,7 +20,8 @@ const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.AUTOMATION,
 ];
 
-function buildCaseSnapshot(testCase: {
+/** The copy of a case a run keeps, so its results stay readable when the case changes later. */
+export function buildCaseSnapshot(testCase: {
   title: string;
   preconditions: string | null;
   description: string | null;
@@ -57,6 +58,7 @@ export class RunsService {
       planId: query.planId,
       milestoneId: query.milestoneId,
       title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
+      runCases: query.assigneeId ? { some: { assigneeId: query.assigneeId } } : undefined,
     };
     const [runs, total] = await this.prisma.$transaction([
       this.prisma.testRun.findMany({
@@ -122,49 +124,79 @@ export class RunsService {
       dto.milestoneId,
     );
 
-    let caseIds: string[] = [];
+    // The run's cases in order, with who tests each.
+    let items: { testCaseId: string; assigneeId: string | null }[] = [];
+    let plan: { milestoneId: string | null; environment: string | null; configuration: string | null } | null = null;
     if (dto.planId) {
-      const plan = await this.prisma.testPlan.findUnique({
+      const found = await this.prisma.testPlan.findUnique({
         where: { id: dto.planId },
-        include: { items: true },
+        include: {
+          // Cases archived since they were planned are left out of new runs.
+          items: { where: { testCase: { archivedAt: null } }, orderBy: { position: "asc" } },
+        },
       });
-      if (!plan || plan.projectId !== projectId) {
+      if (!found || found.projectId !== projectId) {
         throw new NotFoundException("Plan not found");
       }
-      caseIds = plan.items.map((i) => i.testCaseId);
+      if (found.archivedAt) {
+        throw new BadRequestException("This plan is archived; restore it to start runs from it.");
+      }
+      plan = found;
+      // The plan's assignments carry over, except for people who lost access to the project since.
+      const assignable = await this.accessControl.assignableUserIds(
+        projectId,
+        found.items.flatMap((i) => (i.assigneeId ? [i.assigneeId] : [])),
+      );
+      items = found.items.map((i) => ({
+        testCaseId: i.testCaseId,
+        assigneeId: i.assigneeId && assignable.has(i.assigneeId) ? i.assigneeId : null,
+      }));
     } else if (dto.testCaseIds) {
       // IDs from another project are rejected rather than silently dropped; otherwise
       // the client would not notice the run was created with missing test cases.
       await this.accessControl.assertCasesInProject(projectId, dto.testCaseIds);
-      caseIds = dto.testCaseIds;
+      const archived = await this.prisma.testCase.findMany({
+        where: { id: { in: dto.testCaseIds }, archivedAt: { not: null } },
+        select: { id: true },
+      });
+      if (archived.length > 0) {
+        throw new BadRequestException(
+          `Archived test cases can't be added to a run: ${archived.map((c) => c.id).join(", ")}`,
+        );
+      }
+      items = [...new Set(dto.testCaseIds)].map((testCaseId) => ({ testCaseId, assigneeId: null }));
     }
 
     const testCases =
-      caseIds.length > 0
+      items.length > 0
         ? await this.prisma.testCase.findMany({
-            where: { id: { in: caseIds }, projectId },
+            where: { id: { in: items.map((i) => i.testCaseId) }, projectId },
             include: { steps: { orderBy: { position: "asc" } } },
           })
         : [];
+    const caseById = new Map(testCases.map((tc) => [tc.id, tc]));
 
     return this.prisma.testRun.create({
       data: {
         projectId,
         planId: dto.planId,
-        milestoneId: dto.milestoneId,
+        // A run started from a plan takes the plan's milestone, environment and configuration
+        // unless the request sets them.
+        milestoneId: dto.milestoneId ?? plan?.milestoneId,
         title: dto.title,
         description: dto.description,
         tags: dto.tags ?? [],
-        environment: dto.environment,
+        environment: dto.environment ?? plan?.environment,
         build: dto.build,
-        configuration: dto.configuration,
+        configuration: dto.configuration ?? plan?.configuration,
         source: dto.source,
         createdById: userId,
         runCases: {
-          create: testCases.map((tc, index) => ({
-            testCaseId: tc.id,
+          create: items.map((item, index) => ({
+            testCaseId: item.testCaseId,
+            assigneeId: item.assigneeId,
             position: index,
-            caseSnapshot: buildCaseSnapshot(tc) as Prisma.InputJsonValue,
+            caseSnapshot: buildCaseSnapshot(caseById.get(item.testCaseId)!) as Prisma.InputJsonValue,
           })),
         },
       },
@@ -185,6 +217,32 @@ export class RunsService {
     );
     await this.getOne(userId, projectId, runId);
     return this.prisma.testRun.update({ where: { id: runId }, data: dto });
+  }
+
+  /** Sets or clears who tests a case in the run (project admins and testers). */
+  async assignCase(
+    userId: string,
+    projectId: string,
+    runId: string,
+    runCaseId: string,
+    assigneeId: string | null,
+  ) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, [
+      ProjectRole.ADMIN,
+      ProjectRole.TESTER,
+    ]);
+    const run = await this.prisma.testRun.findFirst({
+      where: { id: runId, projectId },
+      select: { id: true },
+    });
+    if (!run) throw new NotFoundException("Run not found");
+    await this.accessControl.assertAssignableUser(projectId, assigneeId);
+    const { count } = await this.prisma.runCase.updateMany({
+      where: { id: runCaseId, runId },
+      data: { assigneeId },
+    });
+    if (count === 0) throw new NotFoundException("Test case is not in this run");
+    return this.prisma.runCase.findUniqueOrThrow({ where: { id: runCaseId } });
   }
 
   async complete(userId: string, projectId: string, runId: string) {
@@ -220,10 +278,12 @@ export class RunsService {
     runId: string,
     enabled: boolean,
   ) {
+    // A public link can still be turned off after the project is archived.
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       WRITE_ROLES,
+      { allowArchived: !enabled },
     );
     await this.getOne(userId, projectId, runId);
     return this.prisma.testRun.update({
@@ -264,9 +324,18 @@ export class RunsService {
     };
   }
 
-  /** Verifies, for the Results module, that the run exists and is not completed. */
-  async assertWritableRun(projectId: string, runId: string) {
-    const run = await this.prisma.testRun.findUnique({ where: { id: runId } });
+  /**
+   * Verifies, for the Results module, that the run exists and is not completed. Runs inside the
+   * caller's transaction and holds the run row FOR SHARE until it ends: completing the run waits
+   * for results that are being written, and no result is written after completion (FR-035).
+   */
+  async assertWritableRun(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    runId: string,
+  ) {
+    const [run] = await tx.$queryRaw<{ projectId: string; status: RunStatus }[]>`
+      SELECT "projectId", "status" FROM "test_runs" WHERE "id" = ${runId} FOR SHARE`;
     if (!run || run.projectId !== projectId) {
       throw new NotFoundException("Run not found");
     }
@@ -275,7 +344,6 @@ export class RunsService {
         "This run is completed; new results can't be added (FR-035)",
       );
     }
-    return run;
   }
 
   /** Deletes the run with its results and their attachments (project admins only). */
