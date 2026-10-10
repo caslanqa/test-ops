@@ -50,6 +50,9 @@ export function LoginPage() {
     <AuthLayout>
       <form className="login-form" onSubmit={onSubmit}>
         <h1>Sign in</h1>
+        {searchParams.get('expired') && (
+          <p className="login-notice" role="status">Your session has ended. Sign in again to continue where you left off.</p>
+        )}
         <p className="login-hint">
           {config?.selfRegistration
             ? 'Sign in with your TestOps account.'

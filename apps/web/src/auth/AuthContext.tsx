@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { api, getToken, setToken } from '../api/client';
+import { api, getToken, onSessionExpired, setToken } from '../api/client';
 import { clearProjectInfoCache } from '../lib/projectInfo';
 
 export interface CurrentUser {
@@ -22,6 +22,8 @@ interface SessionResponse {
 interface AuthContextValue {
   user: CurrentUser | null;
   loading: boolean;
+  /** The last session ended on its own (expired or revoked), not by signing out. */
+  sessionExpired: boolean;
   login: (email: string, password: string) => Promise<void>;
   /** With an invitation link's token, the new account joins that workspace. */
   register: (email: string, displayName: string, password: string, inviteToken?: string) => Promise<void>;
@@ -36,6 +38,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   // Without a token no session check is needed; the initial state is "loaded" right away.
   const [loading, setLoading] = useState(() => getToken() !== null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Any request answered with 401 ends the session here too, so the app goes to sign-in
+  // instead of showing errors on every page.
+  useEffect(() => {
+    onSessionExpired(() => {
+      clearProjectInfoCache();
+      setUser(null);
+      setSessionExpired(true);
+    });
+    return () => onSessionExpired(null);
+  }, []);
 
   useEffect(() => {
     if (!getToken()) return;
@@ -50,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearProjectInfoCache();
     setToken(session.accessToken);
     setUser(session.user);
+    setSessionExpired(false);
   }
 
   async function login(email: string, password: string) {
@@ -66,10 +81,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearProjectInfoCache();
     setToken(null);
     setUser(null);
+    setSessionExpired(false);
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, updateUser: setUser, logout }}>
+    <AuthContext.Provider value={{ user, loading, sessionExpired, login, register, updateUser: setUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

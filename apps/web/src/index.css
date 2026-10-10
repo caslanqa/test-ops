@@ -1586,6 +1586,55 @@ input[type='checkbox'] {
   font-weight: 650;
 }
 
+/* Result entry with a comment and evidence in the run case panel. */
+.record-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.record-result .btn {
+  align-self: flex-start;
+}
+
+/* Attempts of a case in a run, newest first. */
+.result-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result-history > li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.result-history-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--text-xs);
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment-list .btn {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 /* --------------------------------------------------------------------------
  * Run detail
  * ----------------------------------------------------------------------- */
@@ -2016,6 +2065,15 @@ input[type='checkbox'] {
 .login-hint {
   margin-top: -0.5rem;
   color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+/* Why the user is back on the sign-in page, e.g. after the session expired. */
+.login-notice {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--blocked-bg);
+  color: var(--blocked-ink);
   font-size: var(--text-sm);
 }
 
