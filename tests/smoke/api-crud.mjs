@@ -105,6 +105,32 @@ check('linked cases of a requirement are listed and paged', reqCases.status === 
 check('requirements can be searched', total(await call(admin, 'GET', `${P}/requirements?q=sign in`)) === 1 && total(await call(admin, 'GET', `${P}/requirements?q=nothing`)) === 0);
 await expectStatus('linked cases of a foreign requirement are not listed', 404, admin, 'GET', `${other}/requirements/${req.id}/cases`);
 
+// ---------- requirement coverage
+console.log('--- Requirement coverage (FR-022) ---');
+const { cases: [busy, failing, retried, fixedLater, neverRun] } = await ok(admin, 'POST', `${P}/cases/bulk`, {
+  cases: ['busy', 'failing', 'retried', 'fixed later', 'never run'].map((name) => ({ title: `Coverage: ${name}` })),
+});
+const covered = await ok(admin, 'POST', `${P}/requirements`, { title: 'Checkout is covered' });
+await ok(admin, 'POST', `${P}/requirements/${covered.id}/cases`, { testCaseIds: ids([busy, failing, retried, fixedLater, neverRun]) });
+const uncovered = await ok(admin, 'POST', `${P}/requirements`, { title: 'Refunds are covered' });
+const older = await ok(admin, 'POST', `${P}/runs`, { title: 'Coverage history', testCaseIds: ids([failing, retried, fixedLater]) });
+for (const [testCase, status] of [[failing, 'FAILED'], [retried, 'FAILED'], [retried, 'PASSED'], [fixedLater, 'FAILED']]) {
+  await ok(admin, 'POST', `${P}/runs/${older.id}/results`, { testCaseId: testCase.id, status });
+}
+const newer = await ok(admin, 'POST', `${P}/runs`, { title: 'Coverage nightly', testCaseIds: ids([busy, fixedLater]) });
+await ok(admin, 'POST', `${P}/runs/${newer.id}/results`, { testCaseId: fixedLater.id, status: 'PASSED' });
+// More recent results for one case than the report used to read for a whole requirement (200).
+await ok(admin, 'POST', `${P}/runs/${newer.id}/results/bulk`, { results: Array.from({ length: 220 }, () => ({ testCaseId: busy.id, status: 'PASSED' })) });
+const coverage = await ok(admin, 'GET', `${P}/requirements/coverage`);
+const breakdown = coverage.find((r) => r.requirementId === covered.id)?.lastResultStatusBreakdown ?? {};
+check('a failing case stays visible next to a frequently run one', breakdown.FAILED === 1, JSON.stringify(breakdown));
+check('each case counts with its latest attempt in its latest run', breakdown.PASSED === 3, JSON.stringify(breakdown));
+check('a case that never ran is not counted as executed', Object.values(breakdown).reduce((a, b) => a + b, 0) === 4
+  && coverage.find((r) => r.requirementId === covered.id)?.caseCount === 5, JSON.stringify(breakdown));
+const empty = coverage.find((r) => r.requirementId === uncovered.id);
+check('a requirement without cases has no coverage', empty?.hasCoverage === false && empty.caseCount === 0
+  && Object.keys(empty.lastResultStatusBreakdown).length === 0, JSON.stringify(empty));
+
 // ---------- suites and milestones
 console.log('--- Suites and milestones ---');
 check('get one suite', (await ok(admin, 'GET', `${P}/suites/${suite.id}`)).name === 'Bulk suite');
