@@ -275,6 +275,29 @@ const afterLeaving = await ok(admin, 'POST', `${P}/runs`, { title: 'After leavin
 check('an assignee who left the project is not assigned in new runs', afterLeaving.runCases.every((rc) => rc.assigneeId === null));
 await ok(admin, 'POST', `${P}/members`, { email: testerEmail, role: 'TESTER' });
 
+// ---------- archive and restore: cases, requirements, plans
+console.log('--- Archiving and restoring ---');
+const arCase = await ok(admin, 'POST', `${P}/cases`, { title: 'To archive' });
+const arReq = await ok(admin, 'POST', `${P}/requirements`, { title: 'To archive' });
+const arPlan = await ok(admin, 'POST', `${P}/plans`, { title: 'To archive', testCaseIds: [arCase.id] });
+const archivable = [
+  ['case', `${P}/cases`, arCase.id],
+  ['requirement', `${P}/requirements`, arReq.id],
+  ['plan', `${P}/plans`, arPlan.id],
+];
+for (const [label, list, id] of archivable) {
+  await ok(tester, 'DELETE', `${list}/${id}`);
+  const hidden = !(await ok(tester, 'GET', list)).some((x) => x.id === id);
+  const shown = (await ok(tester, 'GET', `${list}?includeArchived=true`)).some((x) => x.id === id && x.archivedAt);
+  check(`an archived ${label} leaves the list and shows with includeArchived`, hidden && shown);
+}
+await expectStatus('an archived plan starts no runs', 400, admin, 'POST', `${P}/runs`, { title: 'x', planId: arPlan.id });
+for (const [label, list, id] of archivable) {
+  const restored = await expectStatus(`a tester restores the ${label}`, 200, tester, 'POST', `${list}/${id}/restore`);
+  check(`...which is back in the list`, restored.json?.archivedAt === null && (await ok(tester, 'GET', list)).some((x) => x.id === id));
+}
+await expectStatus('a restored plan starts runs again', 201, admin, 'POST', `${P}/runs`, { title: 'After restore', planId: arPlan.id });
+
 // ---------- invalid input and parallel requests get 4xx, not 500
 console.log('--- Invalid input and races ---');
 const vSuite = await ok(admin, 'POST', `${P}/suites`, { name: 'Validation' });

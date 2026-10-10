@@ -138,6 +138,9 @@ export class RunsService {
       if (!found || found.projectId !== projectId) {
         throw new NotFoundException("Plan not found");
       }
+      if (found.archivedAt) {
+        throw new BadRequestException("This plan is archived; restore it to start runs from it.");
+      }
       plan = found;
       // The plan's assignments carry over, except for people who lost access to the project since.
       const assignable = await this.accessControl.assignableUserIds(

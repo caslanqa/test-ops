@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { TestCasesService } from "./test-cases.service";
 import { CreateTestCaseDto } from "./dto/create-test-case.dto";
@@ -72,6 +72,17 @@ export class TestCasesController {
     @Param("caseId") caseId: string,
   ) {
     return this.testCasesService.archive(user.id, projectId, caseId);
+  }
+
+  /** Brings an archived case back into the lists. */
+  @Post(":caseId/restore")
+  @HttpCode(200)
+  restore(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("caseId") caseId: string,
+  ) {
+    return this.testCasesService.restore(user.id, projectId, caseId);
   }
 
   /** Creates up to 500 cases at once; all or none are created. */

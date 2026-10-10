@@ -1,4 +1,5 @@
-import { IsOptional, IsString, MaxLength } from "class-validator";
+import { Transform } from "class-transformer";
+import { IsBoolean, IsOptional, IsString, MaxLength } from "class-validator";
 import { PageQueryDto } from "../../common/pagination";
 
 export class ListPlansQueryDto extends PageQueryDto {
@@ -12,4 +13,10 @@ export class ListPlansQueryDto extends PageQueryDto {
   @IsOptional()
   @IsString()
   milestoneId?: string;
+
+  /** Include archived ones (excluded by default). */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === "true")
+  @IsBoolean()
+  includeArchived?: boolean;
 }
