@@ -14,10 +14,11 @@ import { buildOpenApiDocument } from "./openapi";
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const logger = new Logger("Bootstrap");
+  const config = app.get(ConfigService);
 
   // The rate limit identifies the client by req.ip; behind a reverse proxy the real
   // client address is read from X-Forwarded-For only if the proxy is declared trusted.
-  app.set("trust proxy", app.get(ConfigService).get("rateLimit.trustProxy"));
+  app.set("trust proxy", config.get("rateLimit.trustProxy"));
 
   app.use(helmet());
   // Browsers only expose these response headers to cross-origin scripts when listed here.
@@ -30,6 +31,10 @@ async function bootstrap() {
       "X-RateLimit-Reset",
     ],
   });
+  // FR-074: bulk uploads need more than Express's 100 KB JSON default. Registered after helmet and
+  // CORS, so a 413 still carries their headers, and before the app initializes, so Nest skips its
+  // own default JSON parser instead of adding a second one.
+  app.useBodyParser("json", { limit: config.get<number>("http.maxJsonBodyBytes") });
   app.setGlobalPrefix("api/v1", { exclude: ["health", "ready"] });
   app.useGlobalPipes(
     new ValidationPipe({

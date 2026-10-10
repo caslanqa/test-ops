@@ -6,6 +6,12 @@ import {
   ATTACHMENT_DEFAULT_MAX_REQUEST_SIZE_BYTES,
 } from "../attachments/attachments.constants";
 
+/**
+ * Default for the largest JSON request body: room for a bulk upload of 500 results with their
+ * failure messages (FR-074). Express's own 100 KB default rejected realistic CI uploads.
+ */
+const JSON_DEFAULT_MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
+
 /** Normalizes a comma-separated extension list ("png, .JPG,log"); undefined if empty. */
 function parseExtensionList(value: string | undefined): string[] | undefined {
   const list = (value ?? "")
@@ -63,6 +69,13 @@ export default () => ({
     authPerMinute: intFromEnv("AUTH_RATE_LIMIT_PER_MINUTE", 10, { allowZero: true }),
     // Attempts against different accounts from the same IP (credential stuffing, mass sign-up).
     authIpPerMinute: intFromEnv("AUTH_IP_RATE_LIMIT_PER_MINUTE", 60, { allowZero: true }),
+  },
+  http: {
+    // JSON bodies only; multipart attachment uploads have their own limits below.
+    maxJsonBodyBytes: intFromEnv(
+      "JSON_MAX_REQUEST_SIZE_BYTES",
+      JSON_DEFAULT_MAX_REQUEST_SIZE_BYTES,
+    ),
   },
   jwt: {
     secret: resolveJwtSecret(),

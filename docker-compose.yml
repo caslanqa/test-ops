@@ -35,6 +35,8 @@ services:
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}
       AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-}
       TRUST_PROXY: ${TRUST_PROXY:-}
+      # FR-074: largest JSON request body in bytes (e.g. a bulk result upload); if left empty, 10 MiB
+      JSON_MAX_REQUEST_SIZE_BYTES: ${JSON_MAX_REQUEST_SIZE_BYTES:-}
       ATTACHMENTS_DIR: /data/attachments
       # FR-045: if left empty, the app defaults are used (32 MB / 128 MB / 20 files)
       ATTACHMENT_MAX_FILE_SIZE_BYTES: ${ATTACHMENT_MAX_FILE_SIZE_BYTES:-}

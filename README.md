@@ -132,7 +132,7 @@ The installer creates `.env` with secure values. Keep it private and keep a back
 | `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up. |
 | `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
 
-Rate limits and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
+Rate limits, the largest JSON request size (10 MiB by default, enough for a bulk upload of 500 results) and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
 
 ### HTTPS and reverse proxies
 
