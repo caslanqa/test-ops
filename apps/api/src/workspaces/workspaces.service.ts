@@ -9,6 +9,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { PageQueryDto, pageArgs } from "../common/pagination";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
+import { UpdateWorkspaceDto } from "./dto/update-workspace.dto";
 import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
 // People join a workspace through invitations (see InvitationsService); nobody is added directly.
@@ -65,13 +66,13 @@ export class WorkspacesService {
     return { ...workspace, currentUserRole: member.role };
   }
 
-  async update(userId: string, workspaceId: string, name: string) {
+  async update(userId: string, workspaceId: string, dto: UpdateWorkspaceDto) {
     await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
       WorkspaceRole.ADMIN,
     ]);
     return this.prisma.workspace.update({
       where: { id: workspaceId },
-      data: { name },
+      data: { name: dto.name },
     });
   }
 

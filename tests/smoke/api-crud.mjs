@@ -228,6 +228,37 @@ check('system fields list the allowed values',
   fields.status === 200 && fields.json.result.status.includes('PASSED') && fields.json.testCase.priority.includes('HIGH') && fields.json.roles.project.includes('TESTER'), JSON.stringify(fields.json));
 await expectStatus('system fields require sign-in', 401, null, 'GET', '/system-fields');
 
+// ---------- invalid input and parallel requests get 4xx, not 500
+console.log('--- Invalid input and races ---');
+const vSuite = await ok(admin, 'POST', `${P}/suites`, { name: 'Validation' });
+const vCase = await ok(admin, 'POST', `${P}/cases`, { title: 'Validation case' });
+const vRun = await ok(admin, 'POST', `${P}/runs`, { title: 'Validation run', testCaseIds: [vCase.id] });
+const tooBig = 3_000_000_000;
+await expectStatus('an empty parent suite ID is rejected', 400, admin, 'POST', `${P}/suites`, { name: 'x', parentId: '' });
+await expectStatus('an empty suite ID on a case is rejected', 400, admin, 'POST', `${P}/cases`, { title: 'x', suiteId: '' });
+await expectStatus('an empty milestone ID on a run is rejected', 400, admin, 'POST', `${P}/runs`, { title: 'x', milestoneId: '', testCaseIds: [vCase.id] });
+await expectStatus('an empty assignee is rejected instead of stored', 400, admin, 'POST', `${P}/defects`, { title: 'x', assigneeId: '' });
+await expectStatus('a duration beyond the integer range is rejected', 400, admin, 'POST', `${P}/runs/${vRun.id}/results`, { testCaseId: vCase.id, status: 'PASSED', durationMs: tooBig });
+await expectStatus('a negative duration is rejected', 400, admin, 'POST', `${P}/runs/${vRun.id}/results`, { testCaseId: vCase.id, status: 'PASSED', durationMs: -5 });
+await expectStatus('a suite position beyond the integer range is rejected', 400, admin, 'PATCH', `${P}/suites/${vSuite.id}`, { position: tooBig });
+const nul = await expectStatus('a NUL character in text is rejected', 400, admin, 'POST', `${P}/cases`, { title: 'a\u0000b' });
+check('...with a message that says so', /NUL/.test(nul.json?.message ?? ''), JSON.stringify(nul.json));
+await expectStatus('a NUL character in the URL is rejected', 400, admin, 'GET', '/projects/%00');
+await expectStatus('an empty workspace name is rejected', 400, admin, 'PATCH', `/workspaces/${ws.id}`, { name: '' });
+await expectStatus('a workspace name that is not text is rejected', 400, admin, 'PATCH', `/workspaces/${ws.id}`, { name: 123 });
+await expectStatus('unknown workspace fields are rejected', 400, admin, 'PATCH', `/workspaces/${ws.id}`, { name: ws.name, foo: 1 });
+check('a workspace can still be renamed', (await ok(admin, 'PATCH', `/workspaces/${ws.id}`, { name: `${ws.name} renamed` })).name === `${ws.name} renamed`);
+await ok(admin, 'PATCH', `/workspaces/${ws.id}`, { name: ws.name }); // the deletion check below confirms with this name
+const statuses = (responses) => responses.map((r) => r.status).sort().join(',');
+const slugRace = await Promise.all(Array.from({ length: 5 }, () => call(admin, 'POST', '/workspaces', { name: 'Race', slug: `race-${sfx}` })));
+check('parallel workspaces with one slug: one 201, the rest 409', statuses(slugRace) === '201,409,409,409,409', statuses(slugRace));
+const keyRace = await Promise.all(Array.from({ length: 5 }, () => call(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'RACE', name: 'Race' })));
+check('parallel projects with one key: one 201, the rest 409', statuses(keyRace) === '201,409,409,409,409', statuses(keyRace));
+const delRace = await Promise.all(Array.from({ length: 3 }, () => call(admin, 'DELETE', `${P}/suites/${vSuite.id}`)));
+check('parallel deletes of one suite: one succeeds, the rest 404', statuses(delRace) === '200,404,404', statuses(delRace));
+const raceWs = slugRace.find((r) => r.status === 201)?.json;
+if (raceWs) await ok(admin, 'DELETE', `/workspaces/${raceWs.id}`, { confirmName: raceWs.name });
+
 // ---------- archived projects: read-only until restored
 console.log('--- Archived projects ---');
 const pid = P.split('/')[2];

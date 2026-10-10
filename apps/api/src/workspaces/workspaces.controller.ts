@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res
 import { ApiTags } from "@nestjs/swagger";
 import { WorkspacesService } from "./workspaces.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
+import { UpdateWorkspaceDto } from "./dto/update-workspace.dto";
 import { UpdateWorkspaceMemberRoleDto } from "./dto/update-member-role.dto";
 import {
   CurrentUser,
@@ -46,9 +47,9 @@ export class WorkspacesController {
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param("workspaceId") workspaceId: string,
-    @Body("name") name: string,
+    @Body() dto: UpdateWorkspaceDto,
   ) {
-    return this.workspacesService.update(user.id, workspaceId, name);
+    return this.workspacesService.update(user.id, workspaceId, dto);
   }
 
   @Get(":workspaceId/members")

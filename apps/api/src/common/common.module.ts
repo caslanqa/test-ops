@@ -1,11 +1,12 @@
 import { Global, Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { ConfigModule, ConfigService } from "@nestjs/config";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD } from "@nestjs/core";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { AuthGuard } from "./guards/auth.guard";
 import { AccessControlService } from "./access-control.service";
 import { AppThrottlerGuard, AuthFailureLimiter, throttlerOptions } from "./rate-limit";
+import { PrismaExceptionFilter } from "./prisma-exception.filter";
 
 @Global()
 @Module({
@@ -31,6 +32,8 @@ import { AppThrottlerGuard, AuthFailureLimiter, throttlerOptions } from "./rate-
     // Requests AuthGuard rejects never reach AppThrottlerGuard; AuthFailureLimiter counts them.
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
+    // Database errors caused by the request answer 4xx instead of 500.
+    { provide: APP_FILTER, useClass: PrismaExceptionFilter },
   ],
   exports: [AccessControlService, JwtModule],
 })

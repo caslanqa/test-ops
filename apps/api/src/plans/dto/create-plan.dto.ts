@@ -1,4 +1,4 @@
-import { IsArray, IsOptional, IsString } from "class-validator";
+import { IsArray, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class CreatePlanDto {
   @IsString()
@@ -10,6 +10,7 @@ export class CreatePlanDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   milestoneId?: string;
 
   @IsOptional()

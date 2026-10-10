@@ -6,8 +6,10 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
   Min,
 } from "class-validator";
+import { MAX_INT32 } from "../../common/limits";
 
 /** Fields of a result that can be corrected after it was submitted; omitted fields are kept. */
 export class UpdateResultDto {
@@ -35,5 +37,6 @@ export class UpdateResultDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(MAX_INT32)
   durationMs?: number;
 }
