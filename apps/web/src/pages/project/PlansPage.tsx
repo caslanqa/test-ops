@@ -7,6 +7,7 @@ import { Dialog } from '../../components/Dialog';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { formatDate, formatDateTime } from '../../lib/format';
 import { useProjectPermissions } from '../../lib/permissions';
+import { useProjectMembers } from '../../lib/members';
 import { useProjectInfo } from '../../lib/projectInfo';
 import type { Suite } from '../../lib/suites';
 import { usePageTitle, useResource } from '../../lib/useResource';
@@ -52,10 +53,13 @@ function CreatePlanForm({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [caseIds, setCaseIds] = useState<string[]>([]);
+  const [assigneeId, setAssigneeId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const titleId = useId();
   const descriptionId = useId();
+  const assigneeFieldId = useId();
+  const members = useProjectMembers(projectId);
   const cases = useResource(() => api.get<ChecklistCase[]>(`/projects/${projectId}/cases`), [projectId]);
   const suites = useResource(() => api.get<Suite[]>(`/projects/${projectId}/suites`), [projectId]);
 
@@ -68,6 +72,7 @@ function CreatePlanForm({
         title,
         description: description.trim() || undefined,
         testCaseIds: caseIds,
+        assigneeId: assigneeId || undefined,
       });
       onCreated();
     } catch (err) {
@@ -86,6 +91,16 @@ function CreatePlanForm({
       <div className="field">
         <label htmlFor={descriptionId} className="field-label">Description</label>
         <textarea id={descriptionId} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </div>
+      <div className="field">
+        <label htmlFor={assigneeFieldId} className="field-label">Assign the cases to</label>
+        <select id={assigneeFieldId} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+          <option value="">Nobody yet</option>
+          {(members.data ?? []).map((m) => (
+            <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
+          ))}
+        </select>
+        <p className="field-hint">Runs started from this plan take over the assignment.</p>
       </div>
       {cases.data && suites.data ? (
         <CaseChecklist cases={cases.data} suites={suites.data} selected={caseIds} onChange={setCaseIds} />

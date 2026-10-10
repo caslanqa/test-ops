@@ -15,6 +15,8 @@ import {
   type ResultStatus,
 } from '../../lib/status';
 import { useProjectPermissions } from '../../lib/permissions';
+import { useProjectMembers } from '../../lib/members';
+import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
 
 interface CaseSnapshot {
@@ -27,6 +29,7 @@ interface CaseSnapshot {
 interface RunCase {
   id: string;
   testCaseId: string;
+  assigneeId: string | null;
   status: string;
   position: number;
   caseSnapshot: CaseSnapshot | null;
@@ -41,6 +44,7 @@ interface RunDetail {
   source: string;
   environment: string | null;
   build: string | null;
+  configuration: string | null;
   createdAt: string;
   completedAt: string | null;
   runCases: RunCase[];
@@ -158,13 +162,16 @@ export function RunDetailPage() {
     [projectId, runId],
   );
   const run = runRes.data;
-  const { execute } = useProjectPermissions(projectId);
+  const { execute, editRepository } = useProjectPermissions(projectId);
+  const members = useProjectMembers(projectId);
+  const { user } = useAuth();
   usePageTitle(run?.title);
 
   const [openCaseId, setOpenCaseId] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; defectLink?: boolean } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [onlyMine, setOnlyMine] = useState(false);
 
   const latestResultByCase = new Map(
     (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r.id]),
@@ -190,6 +197,16 @@ export function RunDetailPage() {
       setActionError(err instanceof Error ? err.message : "Couldn't save the result");
     } finally {
       setPending(null);
+    }
+  }
+
+  async function assign(rc: RunCase, assigneeId: string) {
+    setActionError(null);
+    try {
+      await api.patch(`/projects/${projectId}/runs/${runId}/cases/${rc.id}`, { assigneeId: assigneeId || null });
+      runRes.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't change the assignee");
     }
   }
 
@@ -231,6 +248,10 @@ export function RunDetailPage() {
   const done = total - counts.UNTESTED;
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   const openCase = runCases.find((rc) => rc.id === openCaseId) ?? null;
+  // Admins and testers assign cases; a tester can narrow the list to their own.
+  const canAssign = editRepository;
+  const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
+  const shownCases = onlyMine ? runCases.filter((rc) => rc.assigneeId === user?.id) : runCases;
 
   function closePanel() {
     const id = openCaseId;
@@ -262,6 +283,12 @@ export function RunDetailPage() {
               <div>
                 <dt>Build</dt>
                 <dd>{run.build}</dd>
+              </div>
+            )}
+            {run.configuration && (
+              <div>
+                <dt>Configuration</dt>
+                <dd>{run.configuration}</dd>
               </div>
             )}
             <div>
@@ -320,6 +347,11 @@ export function RunDetailPage() {
         <StatusLegend counts={counts} />
       </section>
 
+      <div className="segmented" role="group" aria-label="Filter cases by assignee">
+        <button type="button" aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>All cases</button>
+        <button type="button" aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>Assigned to me</button>
+      </div>
+
       <div className={`run-body${openCase ? ' run-body--with-panel' : ''}`}>
         <div className="surface table-wrap">
           <table className="data-table data-table--interactive">
@@ -333,9 +365,9 @@ export function RunDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {runCases.map((rc, index) => (
+              {shownCases.map((rc) => (
                 <tr key={rc.id} className={rc.id === openCaseId ? 'is-selected' : undefined}>
-                  <td className="col-index muted num hide-sm">{index + 1}</td>
+                  <td className="col-index muted num hide-sm">{runCases.indexOf(rc) + 1}</td>
                   <td>
                     <button
                       type="button"
@@ -346,6 +378,28 @@ export function RunDetailPage() {
                     >
                       {rc.caseSnapshot?.title ?? rc.testCase.title}
                     </button>
+                    <div className="runcase-assignee">
+                      {canAssign ? (
+                        <select
+                          className="inline-select"
+                          aria-label={`Assignee for ${rc.caseSnapshot?.title ?? rc.testCase.title}`}
+                          value={rc.assigneeId ?? ''}
+                          onChange={(e) => assign(rc, e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {rc.assigneeId && !memberName.has(rc.assigneeId) && (
+                            <option value={rc.assigneeId}>Assigned</option>
+                          )}
+                          {(members.data ?? []).map((m) => (
+                            <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="muted">
+                          {rc.assigneeId ? memberName.get(rc.assigneeId) ?? 'Assigned' : 'Unassigned'}
+                        </span>
+                      )}
+                    </div>
                     {canRecord && (
                       <div className="show-sm cell-actions-sm">
                         <ResultActions runCase={rc} pending={pending === rc.id} onMark={markResult} onDefect={createDefect} />
@@ -364,6 +418,9 @@ export function RunDetailPage() {
           </table>
           {runCases.length === 0 && (
             <p className="table-empty">This run has no cases. Start a new run from a plan or by picking cases.</p>
+          )}
+          {runCases.length > 0 && shownCases.length === 0 && (
+            <p className="table-empty">No cases in this run are assigned to you.</p>
           )}
         </div>
         {openCase && <RunCasePanel runCase={openCase} onClose={closePanel} />}

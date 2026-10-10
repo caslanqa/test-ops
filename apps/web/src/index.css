@@ -427,6 +427,27 @@ main:focus,
   background: var(--surface);
 }
 
+/* Who tests a case in a run, shown under its title. */
+.runcase-assignee {
+  margin-top: 0.25rem;
+  font-size: var(--text-xs);
+}
+
+/* .inline-select sets its size with !important; the more specific selector wins. */
+.runcase-assignee .inline-select {
+  /* A percentage width keeps the select from widening the table; it fills the title's column. */
+  width: 100% !important;
+  min-width: 0;
+  max-width: 12rem;
+  min-height: 1.75rem !important;
+  font-size: var(--text-xs) !important;
+}
+
+/* Two filter groups side by side (e.g. run status and assignee). */
+.segmented + .segmented {
+  margin-left: 0.5rem;
+}
+
 .segmented button {
   min-height: 1.875rem;
   padding: 0 0.75rem;

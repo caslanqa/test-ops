@@ -189,6 +189,30 @@ export class AccessControlService {
     throw new NotFoundException("The assignee is not a member of this project");
   }
 
+  /** Of the given users, those who can still be assigned in the project (members and workspace admins). */
+  async assignableUserIds(projectId: string, userIds: string[]) {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) return new Set<string>();
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        members: { where: { userId: { in: ids } }, select: { userId: true } },
+        workspace: {
+          select: {
+            members: {
+              where: { userId: { in: ids }, role: WorkspaceRole.ADMIN },
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+    return new Set([
+      ...(project?.members ?? []).map((m) => m.userId),
+      ...(project?.workspace.members ?? []).map((m) => m.userId),
+    ]);
+  }
+
   async assertProjectMemberRecord(projectId: string, memberId: string) {
     const member = await this.prisma.projectMember.findFirst({
       where: { id: memberId, projectId },

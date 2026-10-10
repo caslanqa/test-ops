@@ -228,6 +228,53 @@ check('system fields list the allowed values',
   fields.status === 200 && fields.json.result.status.includes('PASSED') && fields.json.testCase.priority.includes('HIGH') && fields.json.roles.project.includes('TESTER'), JSON.stringify(fields.json));
 await expectStatus('system fields require sign-in', 401, null, 'GET', '/system-fields');
 
+// ---------- plans → runs: fields, order, archived cases and assignments (FR-030, FR-032)
+console.log('--- Plans and runs ---');
+const testerId = (await ok(tester, 'GET', '/auth/me')).id;
+const c1 = await ok(admin, 'POST', `${P}/cases`, { title: 'Plan case 1' });
+const c2 = await ok(admin, 'POST', `${P}/cases`, { title: 'Plan case 2' });
+const c3 = await ok(admin, 'POST', `${P}/cases`, { title: 'Plan case 3' });
+const release2 = await ok(admin, 'POST', `${P}/milestones`, { name: 'Release 2' });
+const release2Plan = await ok(admin, 'POST', `${P}/plans`, {
+  title: 'Release 2 regression', milestoneId: release2.id, environment: 'staging', configuration: 'chrome',
+  testCaseIds: [c2.id, c1.id], assigneeId: testerId,
+});
+await ok(admin, 'POST', `${P}/plans/${release2Plan.id}/cases`, { testCaseIds: [c3.id] });
+const planNow = await ok(admin, 'GET', `${P}/plans/${release2Plan.id}`);
+check('a release2Plan keeps its case order, added cases go last',
+  planNow.items.map((i) => i.testCaseId).join() === [c2.id, c1.id, c3.id].join(), JSON.stringify(planNow.items.map((i) => i.testCaseId)));
+check('the case-ids endpoint returns the release2Plan order',
+  (await ok(admin, 'GET', `${P}/plans/${release2Plan.id}/case-ids`)).testCaseIds.join() === [c2.id, c1.id, c3.id].join());
+check('a release2Plan can assign its cases', planNow.items.filter((i) => i.assigneeId === testerId).length === 2);
+await expectStatus('a single release2Plan case can be assigned', 200, admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases/${c3.id}`, { assigneeId: testerId });
+await expectStatus('only people with access to the project can be assigned', 404, admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases/${c3.id}`, { assigneeId: 'not-a-user' });
+await ok(admin, 'DELETE', `${P}/cases/${c3.id}`); // archived after it was planned
+const fromPlan = await ok(admin, 'POST', `${P}/runs`, { title: 'Release 2 run', planId: release2Plan.id });
+check('a run from a release2Plan takes its milestone, environment and configuration',
+  fromPlan.milestoneId === release2.id && fromPlan.environment === 'staging' && fromPlan.configuration === 'chrome', JSON.stringify(fromPlan));
+const fromPlanCases = [...fromPlan.runCases].sort((a, b) => a.position - b.position);
+check('...lists the cases in release2Plan order and leaves archived ones out',
+  fromPlanCases.map((rc) => rc.testCaseId).join() === [c2.id, c1.id].join(), JSON.stringify(fromPlanCases.map((rc) => rc.testCaseId)));
+check('...and takes over the assignments', fromPlanCases.every((rc) => rc.assigneeId === testerId));
+const overridden = await ok(admin, 'POST', `${P}/runs`, { title: 'Prod check', planId: release2Plan.id, environment: 'production' });
+check('values in the request win over the release2Plan', overridden.environment === 'production' && overridden.configuration === 'chrome');
+const adHoc = await ok(admin, 'POST', `${P}/runs`, { title: 'Ad hoc', testCaseIds: [c2.id, c1.id, c2.id] });
+check('an ad hoc run keeps the given order and ignores repeats',
+  [...adHoc.runCases].sort((a, b) => a.position - b.position).map((rc) => rc.testCaseId).join() === [c2.id, c1.id].join());
+await expectStatus('an ad hoc run cannot include an archived case', 400, admin, 'POST', `${P}/runs`, { title: 'x', testCaseIds: [c1.id, c3.id] });
+const adHocCase = adHoc.runCases[0];
+await expectStatus('a tester can take a case in a run', 200, tester, 'PATCH', `${P}/runs/${adHoc.id}/cases/${adHocCase.id}`, { assigneeId: testerId });
+await expectStatus('...and give it back', 200, tester, 'PATCH', `${P}/runs/${adHoc.id}/cases/${adHocCase.id}`, { assigneeId: null });
+const assignedRuns = await ok(tester, 'GET', `${P}/runs?assigneeId=${testerId}`);
+check('runs can be filtered to the ones with cases assigned to someone',
+  assignedRuns.some((r) => r.id === fromPlan.id) && !assignedRuns.some((r) => r.id === adHoc.id), JSON.stringify(assignedRuns.map((r) => r.title)));
+// Someone who left the project is not assigned in new runs.
+const testerMembership = (await ok(admin, 'GET', `${P}/members`)).find((m) => m.user.email === testerEmail);
+await ok(admin, 'DELETE', `${P}/members/${testerMembership.id}`);
+const afterLeaving = await ok(admin, 'POST', `${P}/runs`, { title: 'After leaving', planId: release2Plan.id });
+check('an assignee who left the project is not assigned in new runs', afterLeaving.runCases.every((rc) => rc.assigneeId === null));
+await ok(admin, 'POST', `${P}/members`, { email: testerEmail, role: 'TESTER' });
+
 // ---------- invalid input and parallel requests get 4xx, not 500
 console.log('--- Invalid input and races ---');
 const vSuite = await ok(admin, 'POST', `${P}/suites`, { name: 'Validation' });

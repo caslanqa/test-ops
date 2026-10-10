@@ -10,6 +10,7 @@ import { Tag } from '../../components/StatusChip';
 import { formatDate, formatDateTime } from '../../lib/format';
 import { RUN_SOURCE_LABEL, RUN_STATUS_LABEL, labelOf } from '../../lib/labels';
 import { useProjectPermissions } from '../../lib/permissions';
+import { useAuth } from '../../auth/AuthContext';
 import { useProjectInfo } from '../../lib/projectInfo';
 import { normalizeCounts } from '../../lib/status';
 import type { Suite } from '../../lib/suites';
@@ -149,15 +150,17 @@ export function RunsPage() {
   const { data: info } = useProjectInfo(projectId);
   const { execute } = useProjectPermissions(projectId);
   usePageTitle(info ? `Runs (${info.project.name})` : 'Runs');
+  const { user } = useAuth();
   const [filter, setFilter] = useState<StatusFilter>('ALL');
+  const [onlyMine, setOnlyMine] = useState(false);
   const [creating, setCreating] = useState(false);
-  const { data: runs, error, loading, reload } = useResource(
-    () =>
-      api.get<RunRow[]>(
-        `/projects/${projectId}/runs${filter === 'ALL' ? '' : `?status=${filter}`}`,
-      ),
-    [projectId, filter],
-  );
+  const { data: runs, error, loading, reload } = useResource(() => {
+    const params = new URLSearchParams();
+    if (filter !== 'ALL') params.set('status', filter);
+    if (onlyMine && user) params.set('assigneeId', user.id);
+    const query = params.toString();
+    return api.get<RunRow[]>(`/projects/${projectId}/runs${query ? `?${query}` : ''}`);
+  }, [projectId, filter, onlyMine, user?.id]);
 
   const createButton = execute ? (
     <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
@@ -185,12 +188,16 @@ export function RunsPage() {
           </button>
         ))}
       </div>
+      <div className="segmented" role="group" aria-label="Filter runs by assignee">
+        <button type="button" aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>All runs</button>
+        <button type="button" aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>Assigned to me</button>
+      </div>
       {error && <LoadError message={error} onRetry={reload} />}
       {loading && <Loading />}
       {runs && runs.length === 0 && (
         <div className="surface">
-          <EmptyState icon={PlayCircle} title={filter === 'ALL' ? 'No runs yet' : 'No runs match this filter'} action={filter === 'ALL' ? createButton : undefined}>
-            {filter === 'ALL'
+          <EmptyState icon={PlayCircle} title={filter === 'ALL' && !onlyMine ? 'No runs yet' : 'No runs match this filter'} action={filter === 'ALL' && !onlyMine ? createButton : undefined}>
+            {filter === 'ALL' && !onlyMine
               ? 'Start a run from a plan or from cases you pick; results appear here.'
               : 'Try another filter.'}
           </EmptyState>
