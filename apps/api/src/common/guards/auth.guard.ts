@@ -7,8 +7,11 @@ import {
 import { Reflector } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
 import * as crypto from "crypto";
+import type { Request, Response } from "express";
 import { PrismaService } from "../../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
+import { AuthenticatedUser } from "../decorators/current-user.decorator";
+import { AuthFailureLimiter } from "../rate-limit";
 
 // A single Authorization: Bearer <value> scheme accepts both the web session JWT
 // and automation/CI API tokens (FR: API operations are subject to the user's
@@ -19,6 +22,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly authFailures: AuthFailureLimiter,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -30,8 +34,24 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest();
-    const authHeader: string | undefined = request.headers["authorization"];
+    const http = context.switchToHttp();
+    const request = http.getRequest();
+    try {
+      request.user = await this.authenticate(request, http.getResponse());
+      return true;
+    } catch (error) {
+      // Requests that fail to authenticate count against the client's address (FR-077).
+      if (error instanceof UnauthorizedException) {
+        const wait = await this.authFailures.recordFailure(request);
+        if (wait > 0) this.authFailures.reject(http.getResponse(), wait);
+      }
+      throw error;
+    }
+  }
+
+  /** The user behind the request's bearer token; 401 when it is missing or not valid. */
+  private async authenticate(request: Request, response: Response): Promise<AuthenticatedUser> {
+    const authHeader = request.headers["authorization"];
     if (!authHeader?.startsWith("Bearer ")) {
       throw new UnauthorizedException("Missing bearer token");
     }
@@ -47,17 +67,21 @@ export class AuthGuard implements CanActivate {
         if (!user || !user.isActive) {
           throw new UnauthorizedException("User not found or inactive");
         }
-        request.user = {
+        return {
           id: user.id,
           email: user.email,
           displayName: user.displayName,
           authMethod: "jwt",
         };
-        return true;
       } catch {
         throw new UnauthorizedException("Invalid or expired session token");
       }
     }
+
+    // An address over its failure limit gets no API token lookups, so a flood of guessed tokens
+    // can't keep the database busy. Valid web sessions (above) are still served.
+    const wait = this.authFailures.retryAfter(request);
+    if (wait > 0) this.authFailures.reject(response, wait);
 
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const apiToken = await this.prisma.apiToken.findUnique({
@@ -71,12 +95,11 @@ export class AuthGuard implements CanActivate {
       where: { id: apiToken.id },
       data: { lastUsedAt: new Date() },
     });
-    request.user = {
+    return {
       id: apiToken.user.id,
       email: apiToken.user.email,
       displayName: apiToken.user.displayName,
       authMethod: "api-token",
     };
-    return true;
   }
 }

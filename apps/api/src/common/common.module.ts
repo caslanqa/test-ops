@@ -5,7 +5,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { AuthGuard } from "./guards/auth.guard";
 import { AccessControlService } from "./access-control.service";
-import { AppThrottlerGuard, throttlerOptions } from "./rate-limit";
+import { AppThrottlerGuard, AuthFailureLimiter, throttlerOptions } from "./rate-limit";
 
 @Global()
 @Module({
@@ -26,7 +26,9 @@ import { AppThrottlerGuard, throttlerOptions } from "./rate-limit";
   ],
   providers: [
     AccessControlService,
+    AuthFailureLimiter,
     // Order matters: the rate limit identity is read from request.user, set by AuthGuard.
+    // Requests AuthGuard rejects never reach AppThrottlerGuard; AuthFailureLimiter counts them.
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
   ],
