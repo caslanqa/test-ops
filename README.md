@@ -91,7 +91,7 @@ The seed command prints the first admin credentials. Set `SEED_ADMIN_EMAIL` as a
 
 The installer creates an admin account with a starter workspace and demo project. Change the initial password from **Account** after signing in.
 
-By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; workspace admins can still add members.
+By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account.
 
 ## Operations and backups
 

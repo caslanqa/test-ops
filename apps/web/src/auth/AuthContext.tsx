@@ -23,7 +23,8 @@ interface AuthContextValue {
   user: CurrentUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, displayName: string, password: string) => Promise<void>;
+  /** With an invitation link's token, the new account joins that workspace. */
+  register: (email: string, displayName: string, password: string, inviteToken?: string) => Promise<void>;
   /** Refreshes the name shown in the sidebar after a profile update. */
   updateUser: (user: CurrentUser) => void;
   logout: () => void;
@@ -55,9 +56,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     startSession(await api.post<SessionResponse>('/auth/login', { email, password }));
   }
 
-  async function register(email: string, displayName: string, password: string) {
+  async function register(email: string, displayName: string, password: string, inviteToken?: string) {
     startSession(
-      await api.post<SessionResponse>('/auth/register', { email, displayName, password }),
+      await api.post<SessionResponse>('/auth/register', { email, displayName, password, inviteToken }),
     );
   }
 

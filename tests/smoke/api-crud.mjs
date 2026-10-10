@@ -48,7 +48,8 @@ const tester = (await ok(null, 'POST', '/auth/register', { email: testerEmail, d
 const ws = await ok(admin, 'POST', '/workspaces', { name: `CRUD ${sfx}`, slug: `crud-${sfx}` });
 const P = `/projects/${(await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'CR', name: 'CRUD project' })).id}`;
 const other = `/projects/${(await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'OT', name: 'Other project' })).id}`;
-await ok(admin, 'POST', `/workspaces/${ws.id}/members`, { email: testerEmail, role: 'MEMBER' });
+const testerInvitation = await ok(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: testerEmail, role: 'MEMBER' });
+await ok(tester, 'POST', `/invitations/${testerInvitation.token}/accept`);
 await ok(admin, 'POST', `${P}/members`, { email: testerEmail, role: 'TESTER' });
 
 // ---------- pagination

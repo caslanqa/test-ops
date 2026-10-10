@@ -2178,6 +2178,14 @@ input[type='checkbox'] {
   gap: 1.25rem;
 }
 
+/* Pending invitations, under the member table with their own heading. */
+.members-invitations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
 .settings-section {
   display: flex;
   flex-direction: column;

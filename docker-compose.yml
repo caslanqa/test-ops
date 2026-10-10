@@ -29,7 +29,7 @@ services:
       # No default: compose stops if it is empty; the app does not start with the example/a short value.
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is not set; add it to .env (scripts/start.sh generates one)}"
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
-      # Self-registration ("Create one" link on the login screen); if false, only workspace admins create accounts.
+      # Self-registration ("Create one" link on the login screen); if false, people join through workspace invitation links.
       SELF_REGISTRATION: ${SELF_REGISTRATION:-true}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-}
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}

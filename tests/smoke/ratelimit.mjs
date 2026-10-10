@@ -98,7 +98,15 @@ if (!(authLimit > 0)) {
   check(`[${again.status}] other accounts from the same IP are not locked`, again.status === 200, JSON.stringify(again.json));
 
   // 4) Password change: per-user limit (password guessing with a hijacked session).
-  const reg = await call(null, 'POST', '/auth/register', { email: `rl-user-${sfx}@test.local`, displayName: 'Rate Limit', password: 'FirstPass123' });
+  const register = () => call(null, 'POST', '/auth/register', { email: `rl-user-${sfx}@test.local`, displayName: 'Rate Limit', password: 'FirstPass123' });
+  let reg = await register();
+  if (reg.status === 429) {
+    // Sign-ups have their own per-IP limit, and the earlier suites create their accounts the same way.
+    const wait = num(reg.headers, 'retry-after') ?? 60;
+    console.log(`.. per-IP sign-up budget is used up; waiting ${wait} s`);
+    await new Promise((resolve) => setTimeout(resolve, (wait + 1) * 1000));
+    reg = await register();
+  }
   check(`[${reg.status}] registration`, reg.status === 201, JSON.stringify(reg.json));
   const user = reg.json?.accessToken;
   const pw = await exhaust(authLimit, () =>

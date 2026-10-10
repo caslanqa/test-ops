@@ -8,18 +8,16 @@ import { WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { PageQueryDto, pageArgs } from "../common/pagination";
-import { AuthService } from "../auth/auth.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
-import { AddWorkspaceMemberDto } from "./dto/add-workspace-member.dto";
 import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
+// People join a workspace through invitations (see InvitationsService); nobody is added directly.
 @Injectable()
 export class WorkspacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
     private readonly attachmentFiles: AttachmentFilesService,
-    private readonly authService: AuthService,
   ) {}
 
   async create(userId: string, dto: CreateWorkspaceDto) {
@@ -85,48 +83,6 @@ export class WorkspacesService {
         user: { select: { id: true, email: true, displayName: true } },
       },
       orderBy: { createdAt: "asc" },
-    });
-  }
-
-  async addMember(
-    userId: string,
-    workspaceId: string,
-    dto: AddWorkspaceMemberDto,
-  ) {
-    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
-      WorkspaceRole.ADMIN,
-    ]);
-
-    let targetUser = await this.authService.findUserByEmail(dto.email);
-    if (!targetUser) {
-      if (!dto.displayName || !dto.password) {
-        throw new ConflictException(
-          "No account exists for this email; displayName and password are required to create one",
-        );
-      }
-      targetUser = await this.prisma.user.create({
-        data: {
-          email: dto.email.trim().toLowerCase(),
-          displayName: dto.displayName,
-          passwordHash: await this.authService.hashPassword(dto.password),
-        },
-      });
-    }
-
-    // Re-adding an existing member updates their role; the last admin cannot be demoted this way either.
-    const existing = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId: targetUser.id } },
-    });
-    if (existing && dto.role !== WorkspaceRole.ADMIN) {
-      await this.assertNotLastAdmin(workspaceId, existing.id);
-    }
-
-    return this.prisma.workspaceMember.upsert({
-      where: {
-        workspaceId_userId: { workspaceId, userId: targetUser.id },
-      },
-      create: { workspaceId, userId: targetUser.id, role: dto.role },
-      update: { role: dto.role },
     });
   }
 
