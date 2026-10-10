@@ -5,13 +5,24 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { JwtService } from "@nestjs/jwt";
+import { JwtService, TokenExpiredError } from "@nestjs/jwt";
 import * as crypto from "crypto";
 import type { Request, Response } from "express";
 import { PrismaService } from "../../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 import { AuthenticatedUser } from "../decorators/current-user.decorator";
 import { AuthFailureLimiter } from "../rate-limit";
+
+/**
+ * A session token this server signed that no longer works: it expired, or its user is gone or
+ * deactivated. It can't be a guess, so it gets 401 even from a blocked address and doesn't count
+ * as a failure; the web app sees the 401 and sends the user to sign in.
+ */
+class SessionEndedException extends UnauthorizedException {
+  constructor() {
+    super("Your session has ended; sign in again.");
+  }
+}
 
 // A single Authorization: Bearer <value> scheme accepts both the web session JWT
 // and automation/CI API tokens (FR: API operations are subject to the user's
@@ -41,7 +52,7 @@ export class AuthGuard implements CanActivate {
       return true;
     } catch (error) {
       // Requests that fail to authenticate count against the client's address (FR-077).
-      if (error instanceof UnauthorizedException) {
+      if (error instanceof UnauthorizedException && !(error instanceof SessionEndedException)) {
         const wait = await this.authFailures.recordFailure(request);
         if (wait > 0) this.authFailures.reject(http.getResponse(), wait);
       }
@@ -73,7 +84,12 @@ export class AuthGuard implements CanActivate {
           displayName: user.displayName,
           authMethod: "jwt",
         };
-      } catch {
+      } catch (error) {
+        // The signature is checked before the expiry, and the user only after both; either way
+        // the server signed this token, so the session ended rather than being guessed.
+        if (error instanceof TokenExpiredError || error instanceof UnauthorizedException) {
+          throw new SessionEndedException();
+        }
         throw new UnauthorizedException("Invalid or expired session token");
       }
     }
