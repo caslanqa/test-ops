@@ -8,6 +8,7 @@ import { CommonModule } from "./common/common.module";
 import { HealthModule } from "./health/health.module";
 import { AuthModule } from "./auth/auth.module";
 import { WorkspacesModule } from "./workspaces/workspaces.module";
+import { InvitationsModule } from "./invitations/invitations.module";
 import { ProjectsModule } from "./projects/projects.module";
 import { SuitesModule } from "./suites/suites.module";
 import { TestCasesModule } from "./test-cases/test-cases.module";
@@ -36,6 +37,7 @@ import { SystemModule } from "./system/system.module";
     HealthModule,
     AuthModule,
     WorkspacesModule,
+    InvitationsModule,
     ProjectsModule,
     SuitesModule,
     TestCasesModule,

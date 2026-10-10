@@ -7,11 +7,12 @@ import {
 import { Prisma, ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
-import { PageQueryDto, pageArgs } from "../common/pagination";
+import { pageArgs } from "../common/pagination";
 import { CreateProjectDto } from "./dto/create-project.dto";
 import { UpdateProjectDto } from "./dto/update-project.dto";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { ListProjectsQueryDto } from "./dto/list-projects-query.dto";
+import { ListWorkspaceProjectsQueryDto } from "./dto/list-workspace-projects-query.dto";
 
 @Injectable()
 export class ProjectsService {
@@ -29,7 +30,9 @@ export class ProjectsService {
     });
     if (existing) {
       throw new ConflictException(
-        "A project with this key already exists in this workspace",
+        existing.archivedAt
+          ? "An archived project in this workspace already uses this key; restore it or choose another key."
+          : "A project with this key already exists in this workspace",
       );
     }
     return this.prisma.project.create({
@@ -43,7 +46,11 @@ export class ProjectsService {
     });
   }
 
-  async listForWorkspace(userId: string, workspaceId: string, query: PageQueryDto) {
+  async listForWorkspace(
+    userId: string,
+    workspaceId: string,
+    query: ListWorkspaceProjectsQueryDto,
+  ) {
     const member = await this.accessControl.requireWorkspaceMembership(
       userId,
       workspaceId,
@@ -52,7 +59,7 @@ export class ProjectsService {
     // belong to (not even the names of projects they cannot access are listed).
     const where: Prisma.ProjectWhereInput = {
       workspaceId,
-      archivedAt: null,
+      archivedAt: query.archived ? { not: null } : null,
       ...(member.role === WorkspaceRole.ADMIN
         ? {}
         : { members: { some: { userId } } }),
@@ -91,15 +98,35 @@ export class ProjectsService {
     return this.prisma.project.update({ where: { id: projectId }, data: dto });
   }
 
+  /**
+   * Archives the project: it leaves the project lists and becomes read-only (see
+   * AccessControlService). Archiving again keeps the original date.
+   */
   async archive(userId: string, projectId: string) {
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       [ProjectRole.ADMIN],
+      { allowArchived: true },
+    );
+    await this.prisma.project.updateMany({
+      where: { id: projectId, archivedAt: null },
+      data: { archivedAt: new Date() },
+    });
+    return this.prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+  }
+
+  /** Brings an archived project back to the lists and makes it writable again. */
+  async restore(userId: string, projectId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      [ProjectRole.ADMIN],
+      { allowArchived: true },
     );
     return this.prisma.project.update({
       where: { id: projectId },
-      data: { archivedAt: new Date() },
+      data: { archivedAt: null },
     });
   }
 
@@ -118,10 +145,12 @@ export class ProjectsService {
   }
 
   async addMember(userId: string, projectId: string, dto: AddProjectMemberDto) {
+    // Members can still be managed while the project is archived: it decides who can read it.
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       [ProjectRole.ADMIN],
+      { allowArchived: true },
     );
     const project = await this.prisma.project.findUniqueOrThrow({
       where: { id: projectId },
@@ -164,6 +193,7 @@ export class ProjectsService {
       userId,
       projectId,
       [ProjectRole.ADMIN],
+      { allowArchived: true },
     );
     await this.accessControl.assertProjectMemberRecord(projectId, memberId);
     return this.prisma.projectMember.update({
@@ -177,6 +207,7 @@ export class ProjectsService {
       userId,
       projectId,
       [ProjectRole.ADMIN],
+      { allowArchived: true },
     );
     await this.accessControl.assertProjectMemberRecord(projectId, memberId);
     await this.prisma.projectMember.delete({ where: { id: memberId } });

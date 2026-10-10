@@ -1,15 +1,19 @@
 import { ExecutionContext, Injectable, SetMetadata } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
+  InjectThrottlerStorage,
   ThrottlerException,
   ThrottlerGuard,
   ThrottlerLimitDetail,
   ThrottlerModuleOptions,
   ThrottlerOptions,
   ThrottlerRequest,
+  ThrottlerStorage,
+  normalizeIp,
   seconds,
 } from "@nestjs/throttler";
 import * as crypto from "crypto";
+import type { Request, Response } from "express";
 
 /** Auth attempt kind; determines which identity (email, IP, user) is counted. */
 export type AuthAttemptKind = "login" | "register" | "password-change";
@@ -138,5 +142,84 @@ export class AppThrottlerGuard extends ThrottlerGuard {
   /** The @RateLimitAuthAttempt marker on the handler. */
   private authAttemptKind(context: ExecutionContext): AuthAttemptKind | undefined {
     return this.reflector.get<AuthAttemptKind | undefined>(AUTH_ATTEMPT_KEY, context.getHandler());
+  }
+}
+
+/** Requests to protected endpoints that fail to authenticate, counted per client address. */
+export const AUTH_FAILURE_THROTTLER = "auth-failure";
+
+/** Above this many blocked addresses, expired entries are dropped from the local cache. */
+const MAX_TRACKED_BLOCKS = 10_000;
+
+/**
+ * Limits requests without valid credentials. AuthGuard rejects them before AppThrottlerGuard
+ * runs, so the regular limits never see them, and each guessed API token costs a database
+ * lookup. They count per client address (the address the rate limit uses) against the general
+ * per-minute limit. An address over the limit gets 429 until its block ends, and AuthGuard
+ * skips its API token lookups; valid web sessions from the address keep working, so one client
+ * can't lock out everyone behind the same NAT.
+ *
+ * Counts live in the throttler's storage; the local cache only remembers which addresses are
+ * blocked, so AuthGuard can turn them away before looking up a token.
+ */
+@Injectable()
+export class AuthFailureLimiter {
+  private readonly limit: number;
+  private readonly blockedUntil = new Map<string, number>();
+
+  constructor(
+    @InjectThrottlerStorage() private readonly storage: ThrottlerStorage,
+    config: ConfigService,
+  ) {
+    this.limit = config.get<number>("rateLimit.perMinute", 600);
+  }
+
+  /** Seconds the client's address still has to wait, or 0 if it may authenticate. */
+  retryAfter(req: Request): number {
+    const key = this.key(req);
+    const until = this.blockedUntil.get(key);
+    if (until === undefined) return 0;
+    const wait = Math.ceil((until - Date.now()) / 1000);
+    if (wait > 0) return wait;
+    this.blockedUntil.delete(key);
+    return 0;
+  }
+
+  /** Counts a failed authentication; returns the seconds to wait once the address is over the limit. */
+  async recordFailure(req: Request): Promise<number> {
+    if (this.limit <= 0) return 0;
+    const key = this.key(req);
+    const window = seconds(60);
+    const { isBlocked, timeToBlockExpire } = await this.storage.increment(
+      key,
+      window,
+      this.limit,
+      window,
+      AUTH_FAILURE_THROTTLER,
+    );
+    if (!isBlocked) return 0;
+    const wait = Math.max(1, timeToBlockExpire);
+    if (this.blockedUntil.size >= MAX_TRACKED_BLOCKS) this.dropExpiredBlocks();
+    this.blockedUntil.set(key, Date.now() + wait * 1000);
+    return wait;
+  }
+
+  /** 429 with the standard Retry-After header, as the rate limit answers. */
+  reject(res: Response, wait: number): never {
+    res.setHeader("Retry-After", String(wait));
+    throw new ThrottlerException(
+      `Too many requests without valid credentials. Try again in ${wait} second${wait === 1 ? "" : "s"}.`,
+    );
+  }
+
+  private key(req: Request): string {
+    return `${AUTH_FAILURE_THROTTLER}:${normalizeIp(req.ip ?? "")}`;
+  }
+
+  private dropExpiredBlocks() {
+    const now = Date.now();
+    for (const [key, until] of this.blockedUntil) {
+      if (until <= now) this.blockedUntil.delete(key);
+    }
   }
 }

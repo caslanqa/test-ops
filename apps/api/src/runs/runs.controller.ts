@@ -5,6 +5,7 @@ import { RunsService } from "./runs.service";
 import { CreateRunDto } from "./dto/create-run.dto";
 import { UpdateRunDto } from "./dto/update-run.dto";
 import { ToggleShareDto } from "./dto/toggle-share.dto";
+import { AssignCaseDto } from "../common/dto/assign-case.dto";
 import {
   CurrentUser,
   AuthenticatedUser,
@@ -55,6 +56,18 @@ export class RunsController {
     @Body() dto: UpdateRunDto,
   ) {
     return this.runsService.update(user.id, projectId, runId, dto);
+  }
+
+  /** Sets or clears who tests a case in the run (project admins and testers). */
+  @Patch(":runId/cases/:runCaseId")
+  assignCase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Param("runCaseId") runCaseId: string,
+    @Body() dto: AssignCaseDto,
+  ) {
+    return this.runsService.assignCase(user.id, projectId, runId, runCaseId, dto.assigneeId);
   }
 
   @Post(":runId/complete")

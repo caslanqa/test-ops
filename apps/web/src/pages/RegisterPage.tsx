@@ -58,7 +58,7 @@ export function RegisterPage() {
         <div className="login-form">
           <h1>Sign-up is disabled</h1>
           <p className="login-hint">
-            On this server, accounts are created by workspace admins. Ask your admin for an account.
+            On this server, people join through an invitation link from a workspace admin. Ask your admin for one.
           </p>
           <Link to="/login" className="btn btn-secondary btn-block">Back to sign in</Link>
         </div>
@@ -71,7 +71,7 @@ export function RegisterPage() {
       <form className="login-form" onSubmit={onSubmit}>
         <h1>Create your account</h1>
         <p className="login-hint">
-          After signing up you can create your own workspace, or wait for an admin to add you to one.
+          After signing up you can create your own workspace, or join one through an invitation link.
         </p>
         <div className="field">
           <label htmlFor={ids.name} className="field-label">Full name</label>

@@ -91,7 +91,7 @@ The seed command prints the first admin credentials. Set `SEED_ADMIN_EMAIL` as a
 
 The installer creates an admin account with a starter workspace and demo project. Change the initial password from **Account** after signing in.
 
-By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; workspace admins can still add members.
+By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account.
 
 ## Operations and backups
 
@@ -106,7 +106,7 @@ Run commands from the installation directory, usually `~/testops`.
 | Upgrade using the installer | Run the same installer command again |
 | Pull the selected image and restart | `docker compose pull && docker compose up -d --wait` |
 
-Upgrades preserve `.env` and the database/attachment volumes. Database migrations are applied when the app starts. To pin a release, set `APP_IMAGE=ghcr.io/caslanqa/testops:0.3.0` in `.env`. Run the installer with `TESTOPS_VERSION=latest` to switch a pinned installation back to the latest image.
+Stopping or upgrading waits up to 30 seconds for running requests, such as uploads and CI result submissions, to finish. Upgrades preserve `.env` and the database/attachment volumes. Database migrations are applied when the app starts. To pin a release, set `APP_IMAGE=ghcr.io/caslanqa/testops:0.3.0` in `.env`. Run the installer with `TESTOPS_VERSION=latest` to switch a pinned installation back to the latest image.
 
 A full backup includes the database, attachments, and `.env` file:
 
@@ -132,7 +132,7 @@ The installer creates `.env` with secure values. Keep it private and keep a back
 | `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up. |
 | `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
 
-Rate limits and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
+Rate limits, the largest JSON request size (10 MiB by default, enough for a bulk upload of 500 results) and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
 
 ### HTTPS and reverse proxies
 
@@ -156,6 +156,7 @@ docker compose logs --tail 100 app
 | `P1000: Authentication failed against database server` | The password in `.env` no longer matches the password stored in the existing PostgreSQL volume. Restore the original `.env`; changing the password in the file alone does not change the database password. |
 | `pull access denied` | Check `APP_IMAGE` in `.env`. For a public release, use `ghcr.io/caslanqa/testops:latest` or a published version tag. |
 | `Too many attempts. Try again in N seconds.` | Wait for the stated interval. Sign-in and registration have separate rate limits. |
+| `Too many requests without valid credentials. Try again in N seconds.` | A client at this address sent many requests with a missing, expired or wrong token. Fix the token (in CI, check the secret) and wait for the stated interval. Signed-in browser sessions are not affected. |
 | API returns `401 Unauthorized` | Use an API token from **Account → API tokens** in the `Authorization: Bearer <token>` header. |
 
 Health checks are available at `/health` and `/ready`. `/health` confirms the process is running; `/ready` confirms the database is reachable.

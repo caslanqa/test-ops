@@ -43,6 +43,10 @@ export class ResultsController {
     return this.resultsService.submit(user.id, projectId, runId, dto);
   }
 
+  /**
+   * Submits up to 500 results in one request; all or none are saved. Re-sending an externalTestId
+   * updates its earlier result instead of adding an attempt, so a failed upload can be retried whole.
+   */
   @Post("bulk")
   bulkSubmit(
     @CurrentUser() user: AuthenticatedUser,

@@ -4,6 +4,7 @@ import { ProtectedRoute } from './routes/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { InvitePage } from './pages/InvitePage';
 import { AccountPage } from './pages/AccountPage';
 import { SupportPage } from './pages/SupportPage';
 import { WorkspaceMembersPage } from './pages/WorkspaceMembersPage';
@@ -23,6 +24,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* Open without signing in: the invited person may not have an account yet. */}
+        <Route path="/invite/:token" element={<InvitePage />} />
         <Route element={<ProtectedRoute />}>
           {/* Sidebar and top bar are shared by all signed-in pages; project navigation is in the sidebar. */}
           <Route element={<AppShell />}>

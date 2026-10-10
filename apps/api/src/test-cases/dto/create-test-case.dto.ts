@@ -3,6 +3,7 @@ import { Type } from "class-transformer";
 import {
   IsArray,
   IsEnum,
+  IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
@@ -19,6 +20,7 @@ import { TestCaseStepDto } from "./test-case-step.dto";
 export class CreateTestCaseDto {
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   suiteId?: string;
 
   @IsString()

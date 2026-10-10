@@ -42,9 +42,9 @@ const admin = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 const wb = await ok(admin, "POST", "/workspaces", { name: "Victim", slug: `victim-${sfx}` });
 const pb = await ok(admin, "POST", `/workspaces/${wb.id}/projects`, { key: "VIC", name: "Victim" });
 const attackerEmail = `attacker-${sfx}@test.local`;
-const outsiderEmail = `outsider-${sfx}@test.local`;
-await ok(admin, "POST", `/workspaces/${wb.id}/members`, { email: attackerEmail, displayName: "Attacker", password: "Password123!", role: "MEMBER" });
-await ok(admin, "POST", `/workspaces/${wb.id}/members`, { email: outsiderEmail, displayName: "Outsider", password: "Password123!", role: "MEMBER" });
+// The attacker creates their account with an invitation link and joins WB as a plain member.
+const invitation = await ok(admin, "POST", `/workspaces/${wb.id}/invitations`, { email: attackerEmail, role: "MEMBER" });
+const attacker = (await ok(null, "POST", "/auth/register", { email: attackerEmail, displayName: "Attacker", password: "Password123!", inviteToken: invitation.token })).accessToken;
 
 const P = `/projects/${pb.id}`;
 const sb = await ok(admin, "POST", `${P}/suites`, { name: "Secret suite" });
@@ -57,7 +57,6 @@ const reqB = await ok(admin, "POST", `${P}/requirements`, { title: "Secret requi
 await ok(admin, "POST", `${P}/requirements/${reqB.id}/cases`, { testCaseIds: [cb.id] });
 const db = await ok(admin, "POST", `${P}/defects`, { title: "Secret defect", resultIds: [resB.id] });
 
-const attacker = await login(attackerEmail, "Password123!");
 const wa = await ok(attacker, "POST", "/workspaces", { name: "Mine", slug: `mine-${sfx}` });
 const pa = await ok(attacker, "POST", `/workspaces/${wa.id}/projects`, { key: "MINE", name: "Mine" });
 const A = `/projects/${pa.id}`;
@@ -69,7 +68,6 @@ const wbMembers = await ok(attacker, "GET", `/workspaces/${wb.id}/members`);
 const attackerWbMember = wbMembers.find((m) => m.user.email === attackerEmail);
 const adminWbMember = wbMembers.find((m) => m.user.email === ADMIN_EMAIL);
 const pbMembers = await ok(admin, "GET", `${P}/members`);
-const outsider = wbMembers.find((m) => m.user.email === outsiderEmail);
 
 console.log("\n--- Records of another project must be rejected (404) ---");
 await expect("link a foreign case to a requirement", 404, attacker, "POST", `${A}/requirements/${reqA.id}/cases`, { testCaseIds: [cb.id] });
@@ -86,7 +84,7 @@ await expect("move a case into a foreign suite", 404, attacker, "PATCH", `${A}/c
 await expect("plan with a foreign milestone", 404, attacker, "POST", `${A}/plans`, { title: "x", milestoneId: mb.id });
 await expect("run with a foreign milestone", 404, attacker, "POST", `${A}/runs`, { title: "x", milestoneId: mb.id });
 await expect("ad hoc run with a foreign case", 404, attacker, "POST", `${A}/runs`, { title: "x", testCaseIds: [cb.id] });
-await expect("assign a defect to a user outside the project", 404, attacker, "POST", `${A}/defects`, { title: "x", assigneeId: outsider.user.id });
+await expect("assign a defect to a user outside the project", 404, attacker, "POST", `${A}/defects`, { title: "x", assigneeId: adminWbMember.user.id });
 
 console.log("\n--- Workspace/project membership scope (privilege escalation) ---");
 await expect("make own WB membership ADMIN via WA", 404, attacker, "PATCH", `/workspaces/${wa.id}/members/${attackerWbMember.id}`, { role: "ADMIN" });
@@ -119,9 +117,10 @@ await expect("link own result to a defect", 201, attacker, "POST", `${A}/defects
 await expect("remove a result link from a defect", 200, attacker, "DELETE", `${A}/defects/${dA.id}/results/${resA.id}`);
 await expect("move a case into own suite", 200, attacker, "PATCH", `${A}/cases/${ca.id}`, { suiteId: s2.id });
 await expect("move a suite to a valid parent", 200, attacker, "PATCH", `${A}/suites/${s2.id}`, { parentId: null });
-const pbM = await ok(admin, "POST", `${P}/members`, { email: outsiderEmail, role: "VIEWER" });
+// The admin manages roles in their own project and workspace; here the attacker is just a member.
+const pbM = await ok(admin, "POST", `${P}/members`, { email: attackerEmail, role: "VIEWER" });
 await expect("update a member role in own project", 200, admin, "PATCH", `${P}/members/${pbM.id}`, { role: "TESTER" });
-await expect("update a member role in own workspace", 200, admin, "PATCH", `/workspaces/${wb.id}/members/${outsider.id}`, { role: "ADMIN" });
+await expect("update a member role in own workspace", 200, admin, "PATCH", `/workspaces/${wb.id}/members/${attackerWbMember.id}`, { role: "ADMIN" });
 
 console.log(`\n${failures === 0 ? "ALL PASSED" : `${failures} CHECKS FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

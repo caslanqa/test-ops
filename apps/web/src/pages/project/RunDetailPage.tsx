@@ -1,11 +1,12 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Bug, CheckCheck, X } from 'lucide-react';
-import { api } from '../../api/client';
-import { LoadError, Loading, PageHeader } from '../../components/Page';
+import { Bug, CheckCheck, Paperclip, RotateCcw, X } from 'lucide-react';
+import { api, downloadFile } from '../../api/client';
+import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
+import { ConfirmDialog } from '../../components/Members';
 import { ResultRibbon, StatusLegend } from '../../components/ResultRibbon';
 import { StatusChip, Tag } from '../../components/StatusChip';
-import { formatDate } from '../../lib/format';
+import { formatBytes, formatDate, formatDateTime } from '../../lib/format';
 import { RUN_SOURCE_LABEL, RUN_STATUS_LABEL, labelOf } from '../../lib/labels';
 import {
   RESULT_CHOICES,
@@ -15,6 +16,8 @@ import {
   type ResultStatus,
 } from '../../lib/status';
 import { useProjectPermissions } from '../../lib/permissions';
+import { useProjectMembers } from '../../lib/members';
+import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
 
 interface CaseSnapshot {
@@ -27,6 +30,7 @@ interface CaseSnapshot {
 interface RunCase {
   id: string;
   testCaseId: string;
+  assigneeId: string | null;
   status: string;
   position: number;
   caseSnapshot: CaseSnapshot | null;
@@ -41,6 +45,7 @@ interface RunDetail {
   source: string;
   environment: string | null;
   build: string | null;
+  configuration: string | null;
   createdAt: string;
   completedAt: string | null;
   runCases: RunCase[];
@@ -52,8 +57,212 @@ interface ResultRow {
   runCase: { testCaseId: string };
 }
 
-/** Copy of the case taken when the run started (snapshot): the steps the tester will follow. */
-function RunCasePanel({ runCase, onClose }: { runCase: RunCase; onClose: () => void }) {
+interface ResultEntry {
+  id: string;
+  status: string;
+  comment: string | null;
+  attemptNumber: number;
+  source: string;
+  automationSourceLabel: string | null;
+  authorUserId: string | null;
+  createdAt: string;
+}
+
+interface AttachmentInfo {
+  id: string;
+  fileName: string;
+  sizeBytes: number;
+}
+
+/** A result with its comment, as entered in the case panel; files are uploaded after it is saved. */
+function RecordResultForm({
+  projectId,
+  runId,
+  runCase,
+  onSaved,
+}: {
+  projectId: string;
+  runId: string;
+  runCase: RunCase;
+  onSaved: (message: string) => void;
+}) {
+  const [status, setStatus] = useState<ResultStatus>('PASSED');
+  const [comment, setComment] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const statusId = useId();
+  const commentId = useId();
+  const filesId = useId();
+  const filesHintId = useId();
+  const title = runCase.caseSnapshot?.title ?? runCase.testCase.title;
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await api.post<{ id: string }>(`/projects/${projectId}/runs/${runId}/results`, {
+        testCaseId: runCase.testCaseId,
+        status,
+        comment: comment.trim() || undefined,
+        source: 'MANUAL',
+      });
+      let message = `${title} marked as ${STATUS_META[status].label.toLowerCase()}.`;
+      if (files.length > 0) {
+        const form = new FormData();
+        for (const file of files) form.append('files', file);
+        try {
+          await api.upload(`/projects/${projectId}/results/${result.id}/attachments`, form);
+        } catch (err) {
+          // The result stays; only the files are missing, so say exactly that.
+          setError(`The result was saved, but the files weren't: ${err instanceof Error ? err.message : 'upload failed'}`);
+          message = `${title} marked as ${STATUS_META[status].label.toLowerCase()}, without the files.`;
+          onSaved(message);
+          return;
+        }
+      }
+      setComment('');
+      setFiles([]);
+      if (fileInput.current) fileInput.current.value = '';
+      onSaved(message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save the result");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="record-result" onSubmit={onSubmit}>
+      <div className="field">
+        <label htmlFor={statusId} className="field-label">Result</label>
+        <select id={statusId} value={status} onChange={(e) => setStatus(e.target.value as ResultStatus)}>
+          {RESULT_CHOICES.map((choice) => (
+            <option key={choice} value={choice}>{STATUS_META[choice].label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor={commentId} className="field-label">Comment</label>
+        <textarea id={commentId} rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
+      </div>
+      <div className="field">
+        <label htmlFor={filesId} className="field-label">Evidence</label>
+        <input
+          id={filesId}
+          ref={fileInput}
+          type="file"
+          multiple
+          aria-describedby={filesHintId}
+          onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+        />
+        <p id={filesHintId} className="field-hint">Screenshots, logs or recordings; the server's size and type limits apply.</p>
+      </div>
+      <FormError message={error} />
+      <button type="submit" className="btn btn-primary" disabled={saving}>
+        {saving ? 'Saving…' : 'Save result'}
+      </button>
+    </form>
+  );
+}
+
+/** Earlier attempts of the case in this run, newest first, with comments and files (FR-043). */
+function ResultHistory({
+  projectId,
+  runId,
+  runCase,
+  memberName,
+  version,
+}: {
+  projectId: string;
+  runId: string;
+  runCase: RunCase;
+  memberName: Map<string, string>;
+  version: number;
+}) {
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const history = useResource(async () => {
+    const results = await api.get<ResultEntry[]>(
+      `/projects/${projectId}/results?runId=${runId}&testCaseId=${runCase.testCaseId}&limit=20`,
+    );
+    const files = await Promise.all(
+      results.map((r) => api.get<AttachmentInfo[]>(`/projects/${projectId}/attachments?resultId=${r.id}`)),
+    );
+    return results.map((r, i) => ({ ...r, attachments: files[i] }));
+  }, [projectId, runId, runCase.testCaseId, version]);
+
+  async function download(file: AttachmentInfo) {
+    setDownloadError(null);
+    try {
+      await downloadFile(`/projects/${projectId}/attachments/${file.id}`, file.fileName);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Couldn't download the file");
+    }
+  }
+
+  if (history.error) return <p className="form-error" role="alert">{history.error}</p>;
+  if (!history.data) return <Loading label="Loading results…" />;
+  if (history.data.length === 0) return <p className="muted">No results yet.</p>;
+  return (
+    <>
+      <FormError message={downloadError} />
+      <ol className="result-history">
+        {history.data.map((r) => (
+          <li key={r.id}>
+            <div className="result-history-head">
+              <StatusChip status={r.status} />
+              <span className="muted">
+                Attempt {r.attemptNumber} · {formatDateTime(r.createdAt)} ·{' '}
+                {r.source === 'CI'
+                  ? r.automationSourceLabel ?? 'Automation'
+                  : (r.authorUserId && memberName.get(r.authorUserId)) ?? 'A project member'}
+              </span>
+            </div>
+            {r.comment && <p className="prose">{r.comment}</p>}
+            {r.attachments.length > 0 && (
+              <ul className="attachment-list">
+                {r.attachments.map((file) => (
+                  <li key={file.id}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => download(file)}>
+                      <Paperclip size={14} aria-hidden="true" />
+                      {file.fileName}
+                      <span className="muted">{formatBytes(file.sizeBytes)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+/**
+ * The case's steps as they were when the run started (snapshot), the form for a result with a
+ * comment and evidence, and the case's results in this run.
+ */
+function RunCasePanel({
+  projectId,
+  runId,
+  runCase,
+  canRecord,
+  memberName,
+  onSaved,
+  onClose,
+}: {
+  projectId: string;
+  runId: string;
+  runCase: RunCase;
+  canRecord: boolean;
+  memberName: Map<string, string>;
+  onSaved: (message: string) => void;
+  onClose: () => void;
+}) {
+  const [version, setVersion] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
   const snapshot = runCase.caseSnapshot;
@@ -73,7 +282,7 @@ function RunCasePanel({ runCase, onClose }: { runCase: RunCase; onClose: () => v
           <X size={18} aria-hidden="true" />
         </button>
       </div>
-      <p className="detail-path">As it was when the run started</p>
+      <p className="detail-path">Steps as they were when the run started</p>
       <section className="detail-section">
         <h3>Preconditions</h3>
         <p className={snapshot?.preconditions ? 'prose' : 'muted'}>
@@ -98,6 +307,24 @@ function RunCasePanel({ runCase, onClose }: { runCase: RunCase; onClose: () => v
             ))}
           </ol>
         )}
+      </section>
+      {canRecord && (
+        <section className="detail-section">
+          <h3>Record a result</h3>
+          <RecordResultForm
+            projectId={projectId}
+            runId={runId}
+            runCase={runCase}
+            onSaved={(message) => {
+              setVersion((v) => v + 1);
+              onSaved(message);
+            }}
+          />
+        </section>
+      )}
+      <section className="detail-section">
+        <h3>Results in this run</h3>
+        <ResultHistory projectId={projectId} runId={runId} runCase={runCase} memberName={memberName} version={version} />
       </section>
     </aside>
   );
@@ -158,13 +385,17 @@ export function RunDetailPage() {
     [projectId, runId],
   );
   const run = runRes.data;
-  const { execute } = useProjectPermissions(projectId);
+  const { execute, editRepository, role, archived } = useProjectPermissions(projectId);
+  const members = useProjectMembers(projectId);
+  const { user } = useAuth();
   usePageTitle(run?.title);
 
   const [openCaseId, setOpenCaseId] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; defectLink?: boolean } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [confirmingComplete, setConfirmingComplete] = useState(false);
 
   const latestResultByCase = new Map(
     (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r.id]),
@@ -193,14 +424,32 @@ export function RunDetailPage() {
     }
   }
 
-  async function completeRun() {
+  async function assign(rc: RunCase, assigneeId: string) {
     setActionError(null);
     try {
-      await api.post(`/projects/${projectId}/runs/${runId}/complete`);
-      setNotice({ text: "Run completed. Completed runs don't accept new results." });
+      await api.patch(`/projects/${projectId}/runs/${runId}/cases/${rc.id}`, { assigneeId: assigneeId || null });
+      runRes.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't change the assignee");
+    }
+  }
+
+  // Errors are shown in the confirmation dialog, which stays open.
+  async function completeRun() {
+    await api.post(`/projects/${projectId}/runs/${runId}/complete`);
+    setConfirmingComplete(false);
+    setNotice({ text: "Run completed. Completed runs don't accept new results." });
+    reload();
+  }
+
+  async function reopenRun() {
+    setActionError(null);
+    try {
+      await api.post(`/projects/${projectId}/runs/${runId}/reopen`);
+      setNotice({ text: 'Run reopened; it accepts results again.' });
       reload();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't complete the run");
+      setActionError(err instanceof Error ? err.message : "Couldn't reopen the run");
     }
   }
 
@@ -224,6 +473,8 @@ export function RunDetailPage() {
   const isOpen = run.status === 'OPEN';
   // Result entry only on open runs and for roles with execute permission (Admin, Tester, Automation).
   const canRecord = isOpen && execute;
+  // Reopening is for project admins, as on the server.
+  const canReopen = !isOpen && role === 'ADMIN' && !archived;
   const runCases = [...run.runCases].sort((a, b) => a.position - b.position);
   const statuses = runCases.map((rc) => (isResultStatus(rc.status) ? rc.status : 'UNTESTED'));
   const counts = normalizeCounts(run.progress);
@@ -231,6 +482,10 @@ export function RunDetailPage() {
   const done = total - counts.UNTESTED;
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   const openCase = runCases.find((rc) => rc.id === openCaseId) ?? null;
+  // Admins and testers assign cases; a tester can narrow the list to their own.
+  const canAssign = editRepository;
+  const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
+  const shownCases = onlyMine ? runCases.filter((rc) => rc.assigneeId === user?.id) : runCases;
 
   function closePanel() {
     const id = openCaseId;
@@ -264,6 +519,12 @@ export function RunDetailPage() {
                 <dd>{run.build}</dd>
               </div>
             )}
+            {run.configuration && (
+              <div>
+                <dt>Configuration</dt>
+                <dd>{run.configuration}</dd>
+              </div>
+            )}
             <div>
               <dt>Started</dt>
               <dd className="num">{formatDate(run.createdAt)}</dd>
@@ -277,12 +538,17 @@ export function RunDetailPage() {
           </dl>
         }
         actions={
-          canRecord && (
-            <button type="button" className="btn btn-primary" onClick={completeRun}>
+          canRecord ? (
+            <button type="button" className="btn btn-primary" onClick={() => setConfirmingComplete(true)}>
               <CheckCheck size={16} aria-hidden="true" />
               Complete run
             </button>
-          )
+          ) : canReopen ? (
+            <button type="button" className="btn btn-secondary" onClick={reopenRun}>
+              <RotateCcw size={16} aria-hidden="true" />
+              Reopen run
+            </button>
+          ) : undefined
         }
       />
 
@@ -320,6 +586,11 @@ export function RunDetailPage() {
         <StatusLegend counts={counts} />
       </section>
 
+      <div className="segmented" role="group" aria-label="Filter cases by assignee">
+        <button type="button" aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>All cases</button>
+        <button type="button" aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>Assigned to me</button>
+      </div>
+
       <div className={`run-body${openCase ? ' run-body--with-panel' : ''}`}>
         <div className="surface table-wrap">
           <table className="data-table data-table--interactive">
@@ -333,9 +604,9 @@ export function RunDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {runCases.map((rc, index) => (
+              {shownCases.map((rc) => (
                 <tr key={rc.id} className={rc.id === openCaseId ? 'is-selected' : undefined}>
-                  <td className="col-index muted num hide-sm">{index + 1}</td>
+                  <td className="col-index muted num hide-sm">{runCases.indexOf(rc) + 1}</td>
                   <td>
                     <button
                       type="button"
@@ -346,6 +617,28 @@ export function RunDetailPage() {
                     >
                       {rc.caseSnapshot?.title ?? rc.testCase.title}
                     </button>
+                    <div className="runcase-assignee">
+                      {canAssign ? (
+                        <select
+                          className="inline-select"
+                          aria-label={`Assignee for ${rc.caseSnapshot?.title ?? rc.testCase.title}`}
+                          value={rc.assigneeId ?? ''}
+                          onChange={(e) => assign(rc, e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {rc.assigneeId && !memberName.has(rc.assigneeId) && (
+                            <option value={rc.assigneeId}>Assigned</option>
+                          )}
+                          {(members.data ?? []).map((m) => (
+                            <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="muted">
+                          {rc.assigneeId ? memberName.get(rc.assigneeId) ?? 'Assigned' : 'Unassigned'}
+                        </span>
+                      )}
+                    </div>
                     {canRecord && (
                       <div className="show-sm cell-actions-sm">
                         <ResultActions runCase={rc} pending={pending === rc.id} onMark={markResult} onDefect={createDefect} />
@@ -365,9 +658,36 @@ export function RunDetailPage() {
           {runCases.length === 0 && (
             <p className="table-empty">This run has no cases. Start a new run from a plan or by picking cases.</p>
           )}
+          {runCases.length > 0 && shownCases.length === 0 && (
+            <p className="table-empty">No cases in this run are assigned to you.</p>
+          )}
         </div>
-        {openCase && <RunCasePanel runCase={openCase} onClose={closePanel} />}
+        {openCase && (
+          <RunCasePanel
+            key={openCase.id}
+            projectId={projectId}
+            runId={runId}
+            runCase={openCase}
+            canRecord={canRecord}
+            memberName={memberName}
+            onSaved={(message) => {
+              setNotice({ text: message });
+              reload();
+            }}
+            onClose={closePanel}
+          />
+        )}
       </div>
+      <ConfirmDialog
+        open={confirmingComplete}
+        title="Complete this run?"
+        message={`Completed runs don't accept new results, from testers or from CI. ${
+          role === 'ADMIN' ? 'You can reopen it later.' : 'Only a project admin can reopen it.'
+        }`}
+        confirmLabel="Complete run"
+        onConfirm={completeRun}
+        onClose={() => setConfirmingComplete(false)}
+      />
     </>
   );
 }

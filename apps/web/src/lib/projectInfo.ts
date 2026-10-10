@@ -16,6 +16,8 @@ export interface Project {
   workspaceId: string;
   /** Only present in the single-project response; workspace admins appear as ADMIN. */
   currentUserRole?: 'ADMIN' | 'TESTER' | 'AUTOMATION' | 'VIEWER';
+  /** Set while the project is archived; it is read-only until an admin restores it. */
+  archivedAt?: string | null;
 }
 
 export interface ProjectInfo {

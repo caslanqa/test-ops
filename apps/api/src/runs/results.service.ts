@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, ProjectRole, ResultStatus } from "@prisma/client";
+import { Prisma, ProjectRole, ResultStatus, RunCase } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
-import { RunsService } from "./runs.service";
+import { RunsService, buildCaseSnapshot } from "./runs.service";
 import { SubmitResultDto } from "./dto/submit-result.dto";
 import { UpdateResultDto } from "./dto/update-result.dto";
 import { ListResultsQueryDto } from "./dto/list-results-query.dto";
@@ -14,6 +14,65 @@ const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.TESTER,
   ProjectRole.AUTOMATION,
 ];
+
+/**
+ * Result writes run in one transaction per request. A bulk upload of 500 results has to fit in
+ * it, including the wait for other CI jobs that hold locks on the same run cases.
+ */
+const WRITE_TRANSACTION = { maxWait: 10_000, timeout: 60_000 };
+
+type ResultWithSteps = Prisma.ResultGetPayload<{ include: { stepResults: true } }>;
+
+/** What writing a result needs to know about its run case; kept current during an upload. */
+interface AttemptState {
+  runCase: RunCase;
+  /** Highest attempt number so far; a new attempt continues after it, even past deleted ones. */
+  maxAttempt: number;
+  /** The latest attempt when the upload started, and as of the items written so far. */
+  initialLatestId: string | null;
+  latestId: string | null;
+  latestStatus: ResultStatus | null;
+  /** Result per externalTestId in this run case, for idempotent re-sends (FR-075). */
+  resultIdByExternalId: Map<string, string>;
+}
+
+/** The fields a submission sets, on a new attempt as well as on an idempotent re-send. */
+function resultFields(dto: SubmitResultDto) {
+  return {
+    status: dto.status,
+    comment: dto.comment,
+    source: dto.source,
+    automationSourceLabel: dto.automationSourceLabel,
+    startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
+    endedAt: dto.endedAt ? new Date(dto.endedAt) : undefined,
+    durationMs: dto.durationMs,
+    stepResults: dto.stepResults
+      ? {
+          create: dto.stepResults.map((s) => ({
+            stepPosition: s.stepPosition,
+            status: s.status,
+            comment: s.comment,
+          })),
+        }
+      : undefined,
+  };
+}
+
+/**
+ * The written results in request order. A result written twice in one upload (a repeated
+ * externalTestId) is returned in its final form, with isLatest as settled at the end.
+ */
+function inRequestOrder(
+  written: ResultWithSteps[],
+  states: Map<string, AttemptState>,
+): ResultWithSteps[] {
+  const latestIds = new Set([...states.values()].map((state) => state.latestId));
+  const finalById = new Map(written.map((result) => [result.id, result]));
+  return written.map((result) => ({
+    ...finalById.get(result.id)!,
+    isLatest: latestIds.has(result.id),
+  }));
+}
 
 @Injectable()
 export class ResultsService {
@@ -63,165 +122,223 @@ export class ResultsService {
     return result;
   }
 
+  /** A single result, written exactly like a one-item bulk upload. */
   async submit(
     userId: string,
     projectId: string,
     runId: string,
     dto: SubmitResultDto,
   ) {
+    const { results } = await this.bulkSubmit(userId, projectId, runId, [dto]);
+    return results[0];
+  }
+
+  /**
+   * Writes the results in request order, all or none (FR-074): every case is checked before
+   * anything is written, so a client that gets an error can resend the whole upload. An item whose
+   * externalTestId is already on a result of its run case updates that result (FR-075); any other
+   * item becomes the case's next attempt (FR-043). Cases that aren't in the run yet are added.
+   *
+   * Writes hold a lock per run case until the transaction ends, so parallel CI jobs posting to the
+   * same run (FR-034) can't create duplicate attempts, two latest results or duplicate re-sends.
+   */
+  async bulkSubmit(
+    userId: string,
+    projectId: string,
+    runId: string,
+    items: SubmitResultDto[],
+  ) {
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       WRITE_ROLES,
     );
-    await this.runsService.assertWritableRun(projectId, runId);
+    // Sorted, because the run cases are locked in this order: two uploads can't deadlock.
+    const caseIds = [...new Set(items.map((item) => item.testCaseId))].sort();
+    await this.accessControl.assertCasesInProject(projectId, caseIds);
 
-    const runCase = await this.getOrCreateRunCase(
-      projectId,
-      runId,
-      dto.testCaseId,
-    );
-
-    // FR-075: idempotency via the external test ID - repeated requests with the
-    // same key update the existing result instead of creating a new attempt.
-    if (dto.externalTestId) {
-      const existing = await this.prisma.result.findFirst({
-        where: { runCaseId: runCase.id, externalTestId: dto.externalTestId },
-      });
-      if (existing) {
-        return this.applyResultUpdate(existing.id, runCase.id, dto);
+    const results = await this.prisma.$transaction(async (tx) => {
+      await this.runsService.assertWritableRun(tx, projectId, runId);
+      for (const caseId of caseIds) {
+        await this.lockRunCase(tx, runId, caseId);
       }
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      const previousCount = await tx.result.count({
-        where: { runCaseId: runCase.id },
-      });
-      await tx.result.updateMany({
-        where: { runCaseId: runCase.id, isLatest: true },
-        data: { isLatest: false },
-      });
-      const result = await tx.result.create({
-        data: {
-          runCaseId: runCase.id,
-          status: dto.status,
-          comment: dto.comment,
-          source: dto.source,
-          authorUserId: userId,
-          automationSourceLabel: dto.automationSourceLabel,
-          startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
-          endedAt: dto.endedAt ? new Date(dto.endedAt) : undefined,
-          durationMs: dto.durationMs,
-          externalTestId: dto.externalTestId,
-          attemptNumber: previousCount + 1,
-          isLatest: true,
-          stepResults: dto.stepResults
-            ? {
-                create: dto.stepResults.map((s) => ({
-                  stepPosition: s.stepPosition,
-                  status: s.status,
-                  comment: s.comment,
-                })),
-              }
-            : undefined,
-        },
-        include: { stepResults: true },
-      });
-      await tx.runCase.update({
-        where: { id: runCase.id },
-        data: { status: dto.status },
-      });
-      return result;
-    });
-  }
-
-  async bulkSubmit(
-    userId: string,
-    projectId: string,
-    runId: string,
-    results: SubmitResultDto[],
-  ) {
-    const created = [];
-    for (const dto of results) {
-      created.push(await this.submit(userId, projectId, runId, dto));
-    }
-    return { count: created.length, results: created };
-  }
-
-  private async applyResultUpdate(
-    resultId: string,
-    runCaseId: string,
-    dto: SubmitResultDto,
-  ) {
-    return this.prisma.$transaction(async (tx) => {
-      if (dto.stepResults) {
-        await tx.stepResult.deleteMany({ where: { resultId } });
+      const states = await this.loadAttemptStates(tx, runId, items);
+      const written: ResultWithSteps[] = [];
+      for (const item of items) {
+        written.push(
+          await this.writeResult(tx, userId, states.get(item.testCaseId)!, item),
+        );
       }
-      const result = await tx.result.update({
-        where: { id: resultId },
-        data: {
-          status: dto.status,
-          comment: dto.comment,
-          source: dto.source,
-          automationSourceLabel: dto.automationSourceLabel,
-          startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
-          endedAt: dto.endedAt ? new Date(dto.endedAt) : undefined,
-          durationMs: dto.durationMs,
-          stepResults: dto.stepResults
-            ? {
-                create: dto.stepResults.map((s) => ({
-                  stepPosition: s.stepPosition,
-                  status: s.status,
-                  comment: s.comment,
-                })),
-              }
-            : undefined,
-        },
-        include: { stepResults: true },
-      });
-      await tx.runCase.update({
-        where: { id: runCaseId },
-        data: { status: dto.status },
-      });
-      return result;
-    });
+      await this.settleLatest(tx, [...states.values()]);
+      return inRequestOrder(written, states);
+    }, WRITE_TRANSACTION);
+    return { count: results.length, results };
   }
 
-  private async getOrCreateRunCase(
-    projectId: string,
+  /**
+   * Serializes result writes for one case of a run until the transaction ends. The lock is keyed
+   * by run and case rather than by a row, so it also covers adding the case to the run.
+   */
+  private async lockRunCase(
+    tx: Prisma.TransactionClient,
     runId: string,
     testCaseId: string,
   ) {
-    const existing = await this.prisma.runCase.findUnique({
-      where: { runId_testCaseId: { runId, testCaseId } },
-    });
-    if (existing) return existing;
+    const key = `result:${runId}:${testCaseId}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+  }
 
-    const testCase = await this.prisma.testCase.findUnique({
-      where: { id: testCaseId },
-      include: { steps: { orderBy: { position: "asc" } } },
+  /**
+   * The run cases of the upload's cases, with their attempt state. Cases that aren't in the run
+   * yet are added after its last case, in upload order, with a snapshot of the case.
+   */
+  private async loadAttemptStates(
+    tx: Prisma.TransactionClient,
+    runId: string,
+    items: SubmitResultDto[],
+  ) {
+    const caseIds = [...new Set(items.map((item) => item.testCaseId))];
+    const runCases = await tx.runCase.findMany({
+      where: { runId, testCaseId: { in: caseIds } },
     });
-    if (!testCase || testCase.projectId !== projectId) {
-      throw new NotFoundException("Test case not found");
+    const inRun = new Set(runCases.map((rc) => rc.testCaseId));
+    const missing = caseIds.filter((id) => !inRun.has(id));
+    if (missing.length > 0) {
+      const cases = await tx.testCase.findMany({
+        where: { id: { in: missing } },
+        include: { steps: { orderBy: { position: "asc" } } },
+      });
+      const caseById = new Map(cases.map((testCase) => [testCase.id, testCase]));
+      const last = await tx.runCase.aggregate({
+        where: { runId },
+        _max: { position: true },
+      });
+      const next = (last._max.position ?? -1) + 1;
+      await tx.runCase.createMany({
+        data: missing.map((testCaseId, index) => ({
+          runId,
+          testCaseId,
+          position: next + index,
+          caseSnapshot: buildCaseSnapshot(
+            caseById.get(testCaseId)!,
+          ) as Prisma.InputJsonValue,
+        })),
+      });
+      runCases.push(
+        ...(await tx.runCase.findMany({
+          where: { runId, testCaseId: { in: missing } },
+        })),
+      );
     }
-    const lastPosition = await this.prisma.runCase.count({ where: { runId } });
-    return this.prisma.runCase.create({
-      data: {
-        runId,
-        testCaseId,
-        position: lastPosition,
-        caseSnapshot: {
-          title: testCase.title,
-          preconditions: testCase.preconditions,
-          description: testCase.description,
-          steps: testCase.steps.map((s) => ({
-            position: s.position,
-            action: s.action,
-            expectedResult: s.expectedResult,
-          })),
-        } as Prisma.InputJsonValue,
-      },
+
+    const runCaseIds = runCases.map((rc) => rc.id);
+    const externalIds = [
+      ...new Set(items.map((item) => item.externalTestId).filter((id): id is string => !!id)),
+    ];
+    const maxima = await tx.result.groupBy({
+      by: ["runCaseId"],
+      where: { runCaseId: { in: runCaseIds } },
+      _max: { attemptNumber: true },
     });
+    const latest = await tx.result.findMany({
+      where: { runCaseId: { in: runCaseIds }, isLatest: true },
+      select: { id: true, runCaseId: true, status: true },
+    });
+    const keyed =
+      externalIds.length === 0
+        ? []
+        : await tx.result.findMany({
+            where: { runCaseId: { in: runCaseIds }, externalTestId: { in: externalIds } },
+            select: { id: true, runCaseId: true, externalTestId: true },
+          });
+
+    const maxByRunCase = new Map(maxima.map((m) => [m.runCaseId, m._max.attemptNumber ?? 0]));
+    const latestByRunCase = new Map(latest.map((r) => [r.runCaseId, r]));
+    const states = new Map<string, AttemptState>();
+    for (const runCase of runCases) {
+      const current = latestByRunCase.get(runCase.id);
+      states.set(runCase.testCaseId, {
+        runCase,
+        maxAttempt: maxByRunCase.get(runCase.id) ?? 0,
+        initialLatestId: current?.id ?? null,
+        latestId: current?.id ?? null,
+        latestStatus: current?.status ?? null,
+        resultIdByExternalId: new Map(
+          keyed
+            .filter((r) => r.runCaseId === runCase.id)
+            .map((r) => [r.externalTestId!, r.id]),
+        ),
+      });
+    }
+    return states;
+  }
+
+  /** Writes one upload item: a re-sent externalTestId updates its result, anything else is a new attempt. */
+  private async writeResult(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    state: AttemptState,
+    item: SubmitResultDto,
+  ) {
+    const existingId = item.externalTestId
+      ? state.resultIdByExternalId.get(item.externalTestId)
+      : undefined;
+    if (existingId) {
+      if (item.stepResults) {
+        await tx.stepResult.deleteMany({ where: { resultId: existingId } });
+      }
+      // Re-sending an older attempt corrects that attempt only; the case keeps its latest status.
+      if (existingId === state.latestId) {
+        state.latestStatus = item.status;
+      }
+      return tx.result.update({
+        where: { id: existingId },
+        data: resultFields(item),
+        include: { stepResults: true },
+      });
+    }
+
+    state.maxAttempt += 1;
+    const created = await tx.result.create({
+      data: {
+        ...resultFields(item),
+        runCaseId: state.runCase.id,
+        authorUserId: userId,
+        externalTestId: item.externalTestId,
+        attemptNumber: state.maxAttempt,
+        // settleLatest flags the case's last attempt once the whole upload is written.
+        isLatest: false,
+      },
+      include: { stepResults: true },
+    });
+    state.latestId = created.id;
+    state.latestStatus = item.status;
+    if (item.externalTestId) {
+      state.resultIdByExternalId.set(item.externalTestId, created.id);
+    }
+    return created;
+  }
+
+  /** Moves the latest flag to each case's last attempt; the case status follows it. */
+  private async settleLatest(tx: Prisma.TransactionClient, states: AttemptState[]) {
+    for (const state of states) {
+      if (state.latestId && state.latestId !== state.initialLatestId) {
+        await tx.result.updateMany({
+          where: { runCaseId: state.runCase.id, isLatest: true },
+          data: { isLatest: false },
+        });
+        await tx.result.update({
+          where: { id: state.latestId },
+          data: { isLatest: true },
+        });
+      }
+      if (state.latestStatus && state.latestStatus !== state.runCase.status) {
+        await tx.runCase.update({
+          where: { id: state.runCase.id },
+          data: { status: state.latestStatus },
+        });
+      }
+    }
   }
 
   private async ensureRunInProject(projectId: string, runId: string) {
@@ -279,9 +396,10 @@ export class ResultsService {
       projectId,
       WRITE_ROLES,
     );
-    await this.runsService.assertWritableRun(projectId, runId);
-    const existing = await this.findInRun(runId, resultId);
+    const { runCase } = await this.findInRun(runId, resultId);
     return this.prisma.$transaction(async (tx) => {
+      await this.runsService.assertWritableRun(tx, projectId, runId);
+      await this.lockRunCase(tx, runId, runCase.testCaseId);
       const result = await tx.result.update({
         where: { id: resultId },
         data: {
@@ -294,14 +412,15 @@ export class ResultsService {
         },
         include: { stepResults: true },
       });
-      if (dto.status && existing.isLatest) {
+      // isLatest is read under the lock, so a newer attempt from a parallel upload wins.
+      if (dto.status && result.isLatest) {
         await tx.runCase.update({
-          where: { id: existing.runCaseId },
+          where: { id: runCase.id },
           data: { status: dto.status },
         });
       }
       return result;
-    });
+    }, WRITE_TRANSACTION);
   }
 
   /**
@@ -315,16 +434,17 @@ export class ResultsService {
       projectId,
       [ProjectRole.ADMIN],
     );
-    await this.runsService.assertWritableRun(projectId, runId);
-    const existing = await this.findInRun(runId, resultId);
+    const { runCase } = await this.findInRun(runId, resultId);
     const keys = await this.attachmentFiles.keysFor({
       OR: [{ resultId }, { stepResult: { resultId } }],
     });
     await this.prisma.$transaction(async (tx) => {
-      await tx.result.delete({ where: { id: resultId } });
-      if (existing.isLatest) {
+      await this.runsService.assertWritableRun(tx, projectId, runId);
+      await this.lockRunCase(tx, runId, runCase.testCaseId);
+      const deleted = await tx.result.delete({ where: { id: resultId } });
+      if (deleted.isLatest) {
         const previous = await tx.result.findFirst({
-          where: { runCaseId: existing.runCaseId },
+          where: { runCaseId: runCase.id },
           orderBy: { attemptNumber: "desc" },
         });
         if (previous) {
@@ -334,11 +454,11 @@ export class ResultsService {
           });
         }
         await tx.runCase.update({
-          where: { id: existing.runCaseId },
+          where: { id: runCase.id },
           data: { status: previous?.status ?? ResultStatus.UNTESTED },
         });
       }
-    });
+    }, WRITE_TRANSACTION);
     await this.attachmentFiles.removeFiles(keys);
   }
 
