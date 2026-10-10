@@ -2608,3 +2608,22 @@ code {
     min-width: 8rem;
   }
 }
+
+/* Edit/archive/delete buttons next to a record's title. */
+.detail-actions,
+.toolbar-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.archived-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}

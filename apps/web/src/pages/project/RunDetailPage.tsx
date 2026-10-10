@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Bug, CheckCheck, Paperclip, RotateCcw, X } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Bug, CheckCheck, Paperclip, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import { api, downloadFile } from '../../api/client';
+import { Dialog } from '../../components/Dialog';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ConfirmDialog } from '../../components/Members';
 import { ResultRibbon, StatusLegend } from '../../components/ResultRibbon';
@@ -55,6 +56,88 @@ interface RunDetail {
 interface ResultRow {
   id: string;
   runCase: { testCaseId: string };
+}
+
+function EditRunDialog({ open, ...props }: Parameters<typeof EditRunForm>[0] & { open: boolean }) {
+  return (
+    <Dialog open={open} onClose={props.onClose} title="Edit run">
+      <EditRunForm {...props} />
+    </Dialog>
+  );
+}
+
+/** The run's own details; its cases and results don't change. */
+function EditRunForm({
+  projectId,
+  run,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  run: RunDetail;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(run.title);
+  const [description, setDescription] = useState(run.description ?? '');
+  const [environment, setEnvironment] = useState(run.environment ?? '');
+  const [build, setBuild] = useState(run.build ?? '');
+  const [configuration, setConfiguration] = useState(run.configuration ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const ids = { title: useId(), description: useId(), environment: useId(), build: useId(), configuration: useId() };
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch(`/projects/${projectId}/runs/${run.id}`, {
+        title,
+        description: description.trim() || null,
+        environment: environment.trim() || null,
+        build: build.trim() || null,
+        configuration: configuration.trim() || null,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save the run");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="dialog-body" onSubmit={onSubmit}>
+      <div className="field">
+        <label htmlFor={ids.title} className="field-label">Title</label>
+        <input id={ids.title} value={title} required onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div className="field">
+        <label htmlFor={ids.description} className="field-label">Description</label>
+        <textarea id={ids.description} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </div>
+      <div className="field-grid">
+        <div className="field">
+          <label htmlFor={ids.environment} className="field-label">Environment</label>
+          <input id={ids.environment} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor={ids.build} className="field-label">Build</label>
+          <input id={ids.build} value={build} onChange={(e) => setBuild(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor={ids.configuration} className="field-label">Configuration</label>
+          <input id={ids.configuration} value={configuration} onChange={(e) => setConfiguration(e.target.value)} />
+        </div>
+      </div>
+      <FormError message={error} />
+      <div className="dialog-footer">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>Save changes</button>
+      </div>
+    </form>
+  );
 }
 
 interface ResultEntry {
@@ -385,7 +468,8 @@ export function RunDetailPage() {
     [projectId, runId],
   );
   const run = runRes.data;
-  const { execute, editRepository, role, archived } = useProjectPermissions(projectId);
+  const { execute, editRepository, deleteRecords, role, archived } = useProjectPermissions(projectId);
+  const navigate = useNavigate();
   const members = useProjectMembers(projectId);
   const { user } = useAuth();
   usePageTitle(run?.title);
@@ -396,6 +480,8 @@ export function RunDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [onlyMine, setOnlyMine] = useState(false);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
+  const [editingRun, setEditingRun] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const latestResultByCase = new Map(
     (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r.id]),
@@ -538,17 +624,29 @@ export function RunDetailPage() {
           </dl>
         }
         actions={
-          canRecord ? (
-            <button type="button" className="btn btn-primary" onClick={() => setConfirmingComplete(true)}>
-              <CheckCheck size={16} aria-hidden="true" />
-              Complete run
-            </button>
-          ) : canReopen ? (
-            <button type="button" className="btn btn-secondary" onClick={reopenRun}>
-              <RotateCcw size={16} aria-hidden="true" />
-              Reopen run
-            </button>
-          ) : undefined
+          <>
+            {execute && (
+              <button type="button" className="icon-button" onClick={() => setEditingRun(true)} aria-label="Edit the run" title="Edit">
+                <Pencil size={16} aria-hidden="true" />
+              </button>
+            )}
+            {deleteRecords && (
+              <button type="button" className="icon-button" onClick={() => setConfirmingDelete(true)} aria-label="Delete the run" title="Delete">
+                <Trash2 size={16} aria-hidden="true" />
+              </button>
+            )}
+            {canRecord ? (
+              <button type="button" className="btn btn-primary" onClick={() => setConfirmingComplete(true)}>
+                <CheckCheck size={16} aria-hidden="true" />
+                Complete run
+              </button>
+            ) : canReopen ? (
+              <button type="button" className="btn btn-secondary" onClick={reopenRun}>
+                <RotateCcw size={16} aria-hidden="true" />
+                Reopen run
+              </button>
+            ) : null}
+          </>
         }
       />
 
@@ -687,6 +785,29 @@ export function RunDetailPage() {
         confirmLabel="Complete run"
         onConfirm={completeRun}
         onClose={() => setConfirmingComplete(false)}
+      />
+      <EditRunDialog
+        key={editingRun ? 'open' : 'closed'}
+        projectId={projectId}
+        run={run}
+        open={editingRun}
+        onClose={() => setEditingRun(false)}
+        onSaved={() => {
+          setEditingRun(false);
+          setNotice({ text: 'Run updated.' });
+          runRes.reload();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete this run?"
+        message={`"${run.title}" is deleted with all of its results, their attachments and their links to defects. This can't be undone.`}
+        confirmLabel="Delete run"
+        onConfirm={async () => {
+          await api.delete(`/projects/${projectId}/runs/${runId}`);
+          navigate(`/projects/${projectId}/runs`);
+        }}
+        onClose={() => setConfirmingDelete(false)}
       />
     </>
   );

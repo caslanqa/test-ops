@@ -11,6 +11,8 @@ export interface ProjectPermissions {
   execute: boolean;
   /** Managing project members and their roles. */
   manageMembers: boolean;
+  /** Deleting suites, runs and defects, which only project admins can do. */
+  deleteRecords: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export function projectPermissions(
     editRepository: !archived && (role === 'ADMIN' || role === 'TESTER'),
     execute: !archived && (role === 'ADMIN' || role === 'TESTER' || role === 'AUTOMATION'),
     manageMembers: role === 'ADMIN',
+    deleteRecords: !archived && role === 'ADMIN',
   };
 }
 

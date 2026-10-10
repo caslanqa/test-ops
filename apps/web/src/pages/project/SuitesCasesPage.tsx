@@ -1,21 +1,26 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import {
+  Archive,
+  ArchiveRestore,
   ChevronRight,
   Folder,
   FolderOpen,
   FolderPlus,
   Inbox,
   Layers,
+  Pencil,
   Plus,
   Search,
   Trash2,
   X,
 } from 'lucide-react';
 import { api } from '../../api/client';
+import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { Dialog } from '../../components/Dialog';
+import { ConfirmDialog } from '../../components/Members';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
-import { PriorityMark } from '../../components/StatusChip';
+import { PriorityMark, Tag } from '../../components/StatusChip';
 import {
   AUTOMATION_LABEL,
   CASE_SEVERITY_LABEL,
@@ -55,6 +60,7 @@ interface TestCase {
   description: string | null;
   tags: string[];
   steps: TestCaseStep[];
+  archivedAt: string | null;
 }
 
 /** Selected node in the tree: all cases, cases outside any suite, or a suite. */
@@ -140,10 +146,18 @@ function SuiteTreeItem({
 function CaseDetail({
   testCase,
   suites,
+  canEdit,
+  onEdit,
+  onArchive,
+  onRestore,
   onClose,
 }: {
   testCase: TestCase;
   suites: Suite[];
+  canEdit: boolean;
+  onEdit: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
   onClose: () => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -162,11 +176,32 @@ function CaseDetail({
         <h2 id={headingId} ref={headingRef} tabIndex={-1} className="detail-title">
           {testCase.title}
         </h2>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Close details">
-          <X size={18} aria-hidden="true" />
-        </button>
+        <div className="detail-actions">
+          {canEdit && (
+            <>
+              <button type="button" className="icon-button" onClick={onEdit} aria-label="Edit the case" title="Edit">
+                <Pencil size={16} aria-hidden="true" />
+              </button>
+              {testCase.archivedAt ? (
+                <button type="button" className="icon-button" onClick={onRestore} aria-label="Restore the case" title="Restore">
+                  <ArchiveRestore size={16} aria-hidden="true" />
+                </button>
+              ) : (
+                <button type="button" className="icon-button" onClick={onArchive} aria-label="Archive the case" title="Archive">
+                  <Archive size={16} aria-hidden="true" />
+                </button>
+              )}
+            </>
+          )}
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close details">
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
       </div>
-      <p className="detail-path">{suitePath(suites, testCase.suiteId)}</p>
+      <p className="detail-path">
+        {suitePath(suites, testCase.suiteId)}
+        {testCase.archivedAt && <> · <Tag tone="outline">Archived</Tag></>}
+      </p>
 
       <dl className="props">
         <div>
@@ -240,14 +275,17 @@ function SuiteSelect({
   value,
   onChange,
   emptyLabel,
+  exclude,
 }: {
   id: string;
   suites: Suite[];
   value: string;
   onChange: (value: string) => void;
   emptyLabel: string;
+  /** Suites that can't be chosen, e.g. a suite and its sub-suites as its own new parent. */
+  exclude?: Set<string>;
 }) {
-  const options = flattenTree(buildSuiteTree(suites));
+  const options = flattenTree(buildSuiteTree(suites)).filter((s) => !exclude?.has(s.id));
   return (
     <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">{emptyLabel}</option>
@@ -263,29 +301,37 @@ function SuiteSelect({
 
 // The form mounts only while the dialog is open: state starts clean on every open, and
 // the data the form needs is requested when the dialog opens, not when the page loads.
-function CreateSuiteDialog({ open, ...props }: Parameters<typeof CreateSuiteForm>[0] & { open: boolean }) {
+function SuiteDialog({ open, ...props }: Parameters<typeof SuiteForm>[0] & { open: boolean }) {
   return (
-    <Dialog open={open} onClose={props.onClose} title="New suite">
-      <CreateSuiteForm {...props} />
+    <Dialog open={open} onClose={props.onClose} title={props.suite ? 'Edit suite' : 'New suite'}>
+      <SuiteForm {...props} />
     </Dialog>
   );
 }
 
-function CreateSuiteForm({
+/** Creates a suite, or renames and moves `suite` when given. */
+function SuiteForm({
   projectId,
   suites,
+  suite,
   defaultParentId,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   projectId: string;
   suites: Suite[];
+  suite?: Suite;
   defaultParentId: string;
   onClose: () => void;
-  onCreated: (suite: Suite) => void;
+  onSaved: (suite: Suite) => void;
 }) {
-  const [name, setName] = useState('');
-  const [parentId, setParentId] = useState(defaultParentId);
+  const [name, setName] = useState(suite?.name ?? '');
+  const [parentId, setParentId] = useState(suite ? (suite.parentId ?? '') : defaultParentId);
+  // A suite can't move into itself or one of its sub-suites.
+  const ownBranch = useMemo(() => {
+    const node = suite && flattenTree(buildSuiteTree(suites)).find((n) => n.id === suite.id);
+    return node ? descendantIds(node) : undefined;
+  }, [suite, suites]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const nameId = useId();
@@ -296,13 +342,12 @@ function CreateSuiteForm({
     setSaving(true);
     setError(null);
     try {
-      const suite = await api.post<Suite>(`/projects/${projectId}/suites`, {
-        name,
-        parentId: parentId || undefined,
-      });
-      onCreated(suite);
+      const saved = suite
+        ? await api.patch<Suite>(`/projects/${projectId}/suites/${suite.id}`, { name, parentId: parentId || null })
+        : await api.post<Suite>(`/projects/${projectId}/suites`, { name, parentId: parentId || undefined });
+      onSaved(saved);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't create the suite");
+      setError(err instanceof Error ? err.message : "Couldn't save the suite");
     } finally {
       setSaving(false);
     }
@@ -316,12 +361,19 @@ function CreateSuiteForm({
       </div>
       <div className="field">
         <label htmlFor={parentFieldId} className="field-label">Parent suite</label>
-        <SuiteSelect id={parentFieldId} suites={suites} value={parentId} onChange={setParentId} emptyLabel="None (top level)" />
+        <SuiteSelect
+          id={parentFieldId}
+          suites={suites}
+          value={parentId}
+          onChange={setParentId}
+          emptyLabel="None (top level)"
+          exclude={ownBranch}
+        />
       </div>
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving}>Create suite</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>{suite ? 'Save changes' : 'Create suite'}</button>
       </div>
     </form>
   );
@@ -335,38 +387,47 @@ interface StepDraft {
 
 // The form mounts only while the dialog is open: state starts clean on every open, and
 // the data the form needs is requested when the dialog opens, not when the page loads.
-function CreateCaseDialog({ open, ...props }: Parameters<typeof CreateCaseForm>[0] & { open: boolean }) {
+function CaseDialog({ open, ...props }: Parameters<typeof CaseForm>[0] & { open: boolean }) {
   return (
-    <Dialog open={open} onClose={props.onClose} title="New test case" wide>
-      <CreateCaseForm {...props} />
+    <Dialog open={open} onClose={props.onClose} title={props.testCase ? 'Edit test case' : 'New test case'} wide>
+      <CaseForm {...props} />
     </Dialog>
   );
 }
 
-function CreateCaseForm({
+/** Creates a case, or saves changes to `testCase` when given (its steps are replaced). */
+function CaseForm({
   projectId,
   suites,
+  testCase,
   defaultSuiteId,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   projectId: string;
   suites: Suite[];
+  testCase?: TestCase;
   defaultSuiteId: string;
   onClose: () => void;
-  onCreated: (testCase: TestCase) => void;
+  onSaved: (testCase: TestCase) => void;
 }) {
-  const [title, setTitle] = useState('');
-  const [suiteId, setSuiteId] = useState(defaultSuiteId);
-  const [priority, setPriority] = useState('MEDIUM');
-  const [severity, setSeverity] = useState('NORMAL');
-  const [type, setType] = useState('FUNCTIONAL');
-  const [automationStatus, setAutomationStatus] = useState('MANUAL');
-  const [preconditions, setPreconditions] = useState('');
-  const [steps, setSteps] = useState<StepDraft[]>([]);
+  const [title, setTitle] = useState(testCase?.title ?? '');
+  const [suiteId, setSuiteId] = useState(testCase ? (testCase.suiteId ?? '') : defaultSuiteId);
+  const [priority, setPriority] = useState(testCase?.priority ?? 'MEDIUM');
+  const [severity, setSeverity] = useState(testCase?.severity ?? 'NORMAL');
+  const [type, setType] = useState(testCase?.type ?? 'FUNCTIONAL');
+  const [automationStatus, setAutomationStatus] = useState(testCase?.automationStatus ?? 'MANUAL');
+  const [description, setDescription] = useState(testCase?.description ?? '');
+  const [preconditions, setPreconditions] = useState(testCase?.preconditions ?? '');
+  // Keys 1..n for the existing steps; added steps continue from n.
+  const nextKey = useRef(testCase?.steps.length ?? 0);
+  const [steps, setSteps] = useState<StepDraft[]>(() =>
+    [...(testCase?.steps ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((step, index) => ({ key: index + 1, action: step.action, expectedResult: step.expectedResult ?? '' })),
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const nextKey = useRef(0);
   const ids = {
     title: useId(),
     suite: useId(),
@@ -374,6 +435,7 @@ function CreateCaseForm({
     severity: useId(),
     type: useId(),
     automation: useId(),
+    description: useId(),
     preconditions: useId(),
   };
 
@@ -390,25 +452,37 @@ function CreateCaseForm({
     e.preventDefault();
     setSaving(true);
     setError(null);
+    const fields = {
+      title,
+      priority,
+      severity,
+      type,
+      automationStatus,
+      steps: steps
+        .filter((s) => s.action.trim())
+        .map((s) => ({
+          action: s.action.trim(),
+          expectedResult: s.expectedResult.trim() || undefined,
+        })),
+    };
     try {
-      const created = await api.post<TestCase>(`/projects/${projectId}/cases`, {
-        title,
-        suiteId: suiteId || undefined,
-        priority,
-        severity,
-        type,
-        automationStatus,
-        preconditions: preconditions.trim() || undefined,
-        steps: steps
-          .filter((s) => s.action.trim())
-          .map((s) => ({
-            action: s.action.trim(),
-            expectedResult: s.expectedResult.trim() || undefined,
-          })),
-      });
-      onCreated(created);
+      // Emptied fields are cleared with null on edit; on create they are simply left out.
+      const saved = testCase
+        ? await api.patch<TestCase>(`/projects/${projectId}/cases/${testCase.id}`, {
+            ...fields,
+            suiteId: suiteId || null,
+            description: description.trim() || null,
+            preconditions: preconditions.trim() || null,
+          })
+        : await api.post<TestCase>(`/projects/${projectId}/cases`, {
+            ...fields,
+            suiteId: suiteId || undefined,
+            description: description.trim() || undefined,
+            preconditions: preconditions.trim() || undefined,
+          });
+      onSaved(saved);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't create the test case");
+      setError(err instanceof Error ? err.message : "Couldn't save the test case");
     } finally {
       setSaving(false);
     }
@@ -449,6 +523,10 @@ function CreateCaseForm({
             {Object.entries(AUTOMATION_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </div>
+      </div>
+      <div className="field">
+        <label htmlFor={ids.description} className="field-label">Description</label>
+        <textarea id={ids.description} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
       <div className="field">
         <label htmlFor={ids.preconditions} className="field-label">Preconditions</label>
@@ -500,7 +578,7 @@ function CreateCaseForm({
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving}>Create test case</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>{testCase ? 'Save changes' : 'Create test case'}</button>
       </div>
     </form>
   );
@@ -513,11 +591,15 @@ function CreateCaseForm({
 export function SuitesCasesPage() {
   const { projectId = '' } = useParams();
   const { data: info } = useProjectInfo(projectId);
-  const { editRepository } = useProjectPermissions(projectId);
+  const { editRepository, deleteRecords } = useProjectPermissions(projectId);
   usePageTitle(info ? `Test cases (${info.project.name})` : 'Test cases');
 
+  const [showArchived, setShowArchived] = useState(false);
   const suitesRes = useResource(() => api.get<Suite[]>(`/projects/${projectId}/suites`), [projectId]);
-  const casesRes = useResource(() => api.get<TestCase[]>(`/projects/${projectId}/cases`), [projectId]);
+  const casesRes = useResource(
+    () => api.get<TestCase[]>(`/projects/${projectId}/cases${showArchived ? '?includeArchived=true' : ''}`),
+    [projectId, showArchived],
+  );
   const suites = useMemo(() => suitesRes.data ?? [], [suitesRes.data]);
   const cases = useMemo(() => casesRes.data ?? [], [casesRes.data]);
 
@@ -525,7 +607,9 @@ export function SuitesCasesPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [openCaseId, setOpenCaseId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'suite' | 'case' | null>(null);
+  const [dialog, setDialog] = useState<'suite' | 'edit-suite' | 'case' | 'edit-case' | null>(null);
+  const [confirming, setConfirming] = useState<'archive-case' | 'delete-suite' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const searchId = useId();
   const listHeadingId = useId();
 
@@ -582,6 +666,17 @@ export function SuitesCasesPage() {
 
   const openCase = cases.find((c) => c.id === openCaseId) ?? null;
   const selectedSuiteId = selection.kind === 'suite' ? selection.id : '';
+  const selectedSuite = suites.find((s) => s.id === selectedSuiteId) ?? null;
+
+  async function restoreCase(testCase: TestCase) {
+    setActionError(null);
+    try {
+      await api.post(`/projects/${projectId}/cases/${testCase.id}/restore`);
+      casesRes.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't restore the case");
+    }
+  }
   const listTitle =
     selection.kind === 'all'
       ? "All cases"
@@ -641,6 +736,7 @@ export function SuitesCasesPage() {
         />
       )}
       {(suitesRes.loading || casesRes.loading) && <Loading />}
+      {actionError && <p className="form-error" role="alert">{actionError}</p>}
 
       {suitesRes.data && casesRes.data && (
         <div className={`repo surface${openCase ? ' repo--with-detail' : ''}`}>
@@ -695,6 +791,19 @@ export function SuitesCasesPage() {
           <section className="repo-list" aria-labelledby={listHeadingId}>
             <div className="list-toolbar">
               <h2 id={listHeadingId} className="list-title truncate">{listTitle}</h2>
+              {selectedSuite && editRepository && (
+                <div className="toolbar-actions">
+                  <button type="button" className="icon-button" onClick={() => setDialog('edit-suite')} aria-label={`Edit suite ${selectedSuite.name}`} title="Edit suite">
+                    <Pencil size={16} aria-hidden="true" />
+                  </button>
+                  {deleteRecords && (
+                    <button type="button" className="icon-button" onClick={() => setConfirming('delete-suite')} aria-label={`Delete suite ${selectedSuite.name}`} title="Delete suite">
+                      <Trash2 size={16} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              )}
+              <ArchivedToggle checked={showArchived} onChange={setShowArchived} />
               <label htmlFor={searchId} className="search-field">
                 <Search size={16} aria-hidden="true" />
                 <span className="visually-hidden">Search this list</span>
@@ -759,6 +868,7 @@ export function SuitesCasesPage() {
                             >
                               {c.title}
                             </button>
+                            {c.archivedAt && <> <Tag tone="outline">Archived</Tag></>}
                           </td>
                           <td><PriorityMark priority={c.priority} /></td>
                           <td className="hide-sm col-optional">{labelOf(CASE_TYPE_LABEL, c.type)}</td>
@@ -772,33 +882,96 @@ export function SuitesCasesPage() {
             )}
           </section>
 
-          {openCase && <CaseDetail testCase={openCase} suites={suites} onClose={closeDetail} />}
+          {openCase && (
+            <CaseDetail
+              testCase={openCase}
+              suites={suites}
+              canEdit={editRepository}
+              onEdit={() => setDialog('edit-case')}
+              onArchive={() => setConfirming('archive-case')}
+              onRestore={() => restoreCase(openCase)}
+              onClose={closeDetail}
+            />
+          )}
         </div>
       )}
 
-      <CreateSuiteDialog
+      <SuiteDialog
         projectId={projectId}
         suites={suites}
         defaultParentId=""
         open={dialog === 'suite'}
         onClose={() => setDialog(null)}
-        onCreated={(suite) => {
+        onSaved={(suite) => {
           setDialog(null);
           suitesRes.reload();
           setSelection({ kind: 'suite', id: suite.id });
         }}
       />
-      <CreateCaseDialog
+      <SuiteDialog
+        key={selectedSuite?.id ?? 'none'}
+        projectId={projectId}
+        suites={suites}
+        suite={selectedSuite ?? undefined}
+        defaultParentId=""
+        open={dialog === 'edit-suite' && selectedSuite !== null}
+        onClose={() => setDialog(null)}
+        onSaved={() => {
+          setDialog(null);
+          suitesRes.reload();
+        }}
+      />
+      <CaseDialog
         projectId={projectId}
         suites={suites}
         defaultSuiteId={selectedSuiteId}
         open={dialog === 'case'}
         onClose={() => setDialog(null)}
-        onCreated={(created) => {
+        onSaved={(created) => {
           setDialog(null);
           casesRes.reload();
           setOpenCaseId(created.id);
         }}
+      />
+      <CaseDialog
+        key={openCase?.id ?? 'none'}
+        projectId={projectId}
+        suites={suites}
+        testCase={openCase ?? undefined}
+        defaultSuiteId=""
+        open={dialog === 'edit-case' && openCase !== null}
+        onClose={() => setDialog(null)}
+        onSaved={() => {
+          setDialog(null);
+          casesRes.reload();
+        }}
+      />
+      <ConfirmDialog
+        open={confirming === 'archive-case' && openCase !== null}
+        title="Archive this test case?"
+        message={`"${openCase?.title ?? ''}" leaves the case list and new runs; runs and results that include it keep it. You can restore it with "Show archived".`}
+        confirmLabel="Archive case"
+        onConfirm={async () => {
+          await api.delete(`/projects/${projectId}/cases/${openCase!.id}`);
+          setConfirming(null);
+          if (!showArchived) setOpenCaseId(null);
+          casesRes.reload();
+        }}
+        onClose={() => setConfirming(null)}
+      />
+      <ConfirmDialog
+        open={confirming === 'delete-suite' && selectedSuite !== null}
+        title="Delete this suite?"
+        message={`"${selectedSuite?.name ?? ''}" is deleted. Its sub-suites move to the top level and its cases to "No suite"; no case is deleted.`}
+        confirmLabel="Delete suite"
+        onConfirm={async () => {
+          await api.delete(`/projects/${projectId}/suites/${selectedSuite!.id}`);
+          setConfirming(null);
+          setSelection({ kind: 'all' });
+          suitesRes.reload();
+          casesRes.reload();
+        }}
+        onClose={() => setConfirming(null)}
       />
     </>
   );

@@ -1,9 +1,11 @@
 import { useId, useState, type FormEvent } from 'react';
 import { useParams } from 'react-router-dom';
-import { Link2, ListChecks, Plus } from 'lucide-react';
+import { Archive, ArchiveRestore, Link2, ListChecks, Pencil, Plus } from 'lucide-react';
 import { api } from '../../api/client';
+import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
 import { Dialog } from '../../components/Dialog';
+import { ConfirmDialog } from '../../components/Members';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ResultRibbon } from '../../components/ResultRibbon';
 import { Tag } from '../../components/StatusChip';
@@ -19,6 +21,7 @@ interface Requirement {
   title: string;
   description: string | null;
   externalRef: string | null;
+  archivedAt: string | null;
   cases: { testCase: { id: string; title: string } }[];
 }
 
@@ -39,26 +42,29 @@ function coverageCounts(row: CoverageRow | undefined) {
 
 // The form mounts only while the dialog is open: state starts clean on every open, and
 // the data the form needs is requested when the dialog opens, not when the page loads.
-function CreateRequirementDialog({ open, ...props }: Parameters<typeof CreateRequirementForm>[0] & { open: boolean }) {
+function RequirementDialog({ open, ...props }: Parameters<typeof RequirementForm>[0] & { open: boolean }) {
   return (
-    <Dialog open={open} onClose={props.onClose} title="New requirement">
-      <CreateRequirementForm {...props} />
+    <Dialog open={open} onClose={props.onClose} title={props.requirement ? 'Edit requirement' : 'New requirement'}>
+      <RequirementForm {...props} />
     </Dialog>
   );
 }
 
-function CreateRequirementForm({
+/** Creates a requirement, or saves changes to `requirement` when given. */
+function RequirementForm({
   projectId,
+  requirement,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   projectId: string;
+  requirement?: Requirement;
   onClose: () => void;
-  onCreated: () => void;
+  onSaved: () => void;
 }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [externalRef, setExternalRef] = useState('');
+  const [title, setTitle] = useState(requirement?.title ?? '');
+  const [description, setDescription] = useState(requirement?.description ?? '');
+  const [externalRef, setExternalRef] = useState(requirement?.externalRef ?? '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const ids = { title: useId(), description: useId(), ref: useId(), refHint: useId() };
@@ -68,17 +74,23 @@ function CreateRequirementForm({
     setSaving(true);
     setError(null);
     try {
-      await api.post(`/projects/${projectId}/requirements`, {
-        title,
-        description: description.trim() || undefined,
-        externalRef: externalRef.trim() || undefined,
-      });
-      setTitle('');
-      setDescription('');
-      setExternalRef('');
-      onCreated();
+      if (requirement) {
+        // Emptied fields are cleared.
+        await api.patch(`/projects/${projectId}/requirements/${requirement.id}`, {
+          title,
+          description: description.trim() || null,
+          externalRef: externalRef.trim() || null,
+        });
+      } else {
+        await api.post(`/projects/${projectId}/requirements`, {
+          title,
+          description: description.trim() || undefined,
+          externalRef: externalRef.trim() || undefined,
+        });
+      }
+      onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't create the requirement");
+      setError(err instanceof Error ? err.message : "Couldn't save the requirement");
     } finally {
       setSaving(false);
     }
@@ -102,7 +114,7 @@ function CreateRequirementForm({
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving}>Create requirement</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>{requirement ? 'Save changes' : 'Create requirement'}</button>
       </div>
     </form>
   );
@@ -118,8 +130,8 @@ function LinkCasesDialog({
     <Dialog
       open={requirement !== null}
       onClose={props.onClose}
-      title="Link cases"
-      description={requirement ? `Choose the cases that cover "${requirement.title}".` : undefined}
+      title="Linked cases"
+      description={requirement ? `Choose the cases that cover "${requirement.title}"; clear a case to unlink it.` : undefined}
       wide
     >
       {requirement && <LinkCasesForm requirement={requirement} {...props} />}
@@ -138,27 +150,26 @@ function LinkCasesForm({
   onClose: () => void;
   onLinked: () => void;
 }) {
-  const [caseIds, setCaseIds] = useState<string[]>([]);
+  const linked = requirement.cases.map((c) => c.testCase.id);
+  const [caseIds, setCaseIds] = useState<string[]>(linked);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const cases = useResource(() => api.get<ChecklistCase[]>(`/projects/${projectId}/cases`), [projectId]);
   const suites = useResource(() => api.get<Suite[]>(`/projects/${projectId}/suites`), [projectId]);
-  const linked = new Set(requirement.cases.map((c) => c.testCase.id));
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (caseIds.length === 0) {
-      setError('Select at least one case to link.');
-      return;
-    }
+    const added = caseIds.filter((id) => !linked.includes(id));
+    const removed = linked.filter((id) => !caseIds.includes(id));
     setSaving(true);
     setError(null);
     try {
-      await api.post(`/projects/${projectId}/requirements/${requirement.id}/cases`, { testCaseIds: caseIds });
-      setCaseIds([]);
+      const base = `/projects/${projectId}/requirements/${requirement.id}/cases`;
+      if (added.length > 0) await api.post(base, { testCaseIds: added });
+      for (const id of removed) await api.delete(`${base}/${id}`);
       onLinked();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't link the cases");
+      setError(err instanceof Error ? err.message : "Couldn't save the links");
     } finally {
       setSaving(false);
     }
@@ -168,7 +179,7 @@ function LinkCasesForm({
     <form className="dialog-body" onSubmit={onSubmit}>
       {cases.data && suites.data ? (
         <CaseChecklist
-          cases={cases.data.filter((c) => !linked.has(c.id))}
+          cases={cases.data}
           suites={suites.data}
           selected={caseIds}
           onChange={setCaseIds}
@@ -179,7 +190,7 @@ function LinkCasesForm({
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving}>Link selected cases</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>Save links</button>
       </div>
     </form>
   );
@@ -192,18 +203,36 @@ export function RequirementsPage() {
   usePageTitle(info ? `Requirements (${info.project.name})` : 'Requirements');
   const [creating, setCreating] = useState(false);
   const [linking, setLinking] = useState<Requirement | null>(null);
-  const reqRes = useResource(() => api.get<Requirement[]>(`/projects/${projectId}/requirements`), [projectId]);
+  const [editing, setEditing] = useState<Requirement | null>(null);
+  const [archiving, setArchiving] = useState<Requirement | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const reqRes = useResource(
+    () => api.get<Requirement[]>(`/projects/${projectId}/requirements${showArchived ? '?includeArchived=true' : ''}`),
+    [projectId, showArchived],
+  );
   const coverageRes = useResource(
     () => api.get<CoverageRow[]>(`/projects/${projectId}/requirements/coverage`),
     [projectId],
   );
   const coverageById = new Map((coverageRes.data ?? []).map((row) => [row.requirementId, row]));
   const requirements = reqRes.data;
-  const untested = requirements?.filter((r) => r.cases.length === 0).length ?? 0;
+  const untested = requirements?.filter((r) => !r.archivedAt && r.cases.length === 0).length ?? 0;
+  const active = requirements?.filter((r) => !r.archivedAt).length ?? 0;
 
   function reload() {
     reqRes.reload();
     coverageRes.reload();
+  }
+
+  async function restore(r: Requirement) {
+    setActionError(null);
+    try {
+      await api.post(`/projects/${projectId}/requirements/${r.id}/restore`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't restore the requirement");
+    }
   }
 
   const createButton = editRepository ? (
@@ -218,15 +247,21 @@ export function RequirementsPage() {
       <PageHeader
         title="Requirements"
         description={
-          requirements && requirements.length > 0
+          active > 0
             ? untested > 0
-              ? `${plural(requirements.length, 'requirement')}; ${untested} not linked to any case yet.`
-              : `${plural(requirements.length, 'requirement')}; all covered by at least one case.`
+              ? `${plural(active, 'requirement')}; ${untested} not linked to any case yet.`
+              : `${plural(active, 'requirement')}; all covered by at least one case.`
             : 'Link requirements to cases to see coverage and latest results here.'
         }
-        actions={createButton}
+        actions={
+          <>
+            <ArchivedToggle checked={showArchived} onChange={setShowArchived} />
+            {createButton}
+          </>
+        }
       />
       {reqRes.error && <LoadError message={reqRes.error} onRetry={reload} />}
+      {actionError && <p className="form-error" role="alert">{actionError}</p>}
       {reqRes.loading && <Loading />}
       {requirements && requirements.length === 0 && (
         <div className="surface">
@@ -255,6 +290,7 @@ export function RequirementsPage() {
                     <td>
                       <span className="cell-title">{r.title}</span>
                       {r.externalRef && <span className="ref"> {r.externalRef}</span>}
+                      {r.archivedAt && <> <Tag tone="outline">Archived</Tag></>}
                       {r.cases.length > 0 ? (
                         <p className="cell-sub">
                           {shown.map((c) => c.testCase.title).join(', ')}
@@ -280,11 +316,23 @@ export function RequirementsPage() {
                         type="button"
                         className="btn btn-secondary btn-sm"
                         onClick={() => setLinking(r)}
-                        aria-label={`Link cases to ${r.title}`}
+                        aria-label={`Linked cases of ${r.title}`}
                       >
                         <Link2 size={14} aria-hidden="true" />
-                        Link cases
+                        Cases
                       </button>
+                      <button type="button" className="icon-button" onClick={() => setEditing(r)} aria-label={`Edit ${r.title}`} title="Edit">
+                        <Pencil size={16} aria-hidden="true" />
+                      </button>
+                      {r.archivedAt ? (
+                        <button type="button" className="icon-button" onClick={() => restore(r)} aria-label={`Restore ${r.title}`} title="Restore">
+                          <ArchiveRestore size={16} aria-hidden="true" />
+                        </button>
+                      ) : (
+                        <button type="button" className="icon-button" onClick={() => setArchiving(r)} aria-label={`Archive ${r.title}`} title="Archive">
+                          <Archive size={16} aria-hidden="true" />
+                        </button>
+                      )}
                     </td>
                     )}
                   </tr>
@@ -294,14 +342,37 @@ export function RequirementsPage() {
           </table>
         </div>
       )}
-      <CreateRequirementDialog
+      <RequirementDialog
         projectId={projectId}
         open={creating}
         onClose={() => setCreating(false)}
-        onCreated={() => {
+        onSaved={() => {
           setCreating(false);
           reload();
         }}
+      />
+      <RequirementDialog
+        key={editing?.id ?? 'none'}
+        projectId={projectId}
+        requirement={editing ?? undefined}
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
+          reload();
+        }}
+      />
+      <ConfirmDialog
+        open={archiving !== null}
+        title="Archive this requirement?"
+        message={`"${archiving?.title ?? ''}" leaves the requirement list and coverage; its case links are kept. You can restore it with "Show archived".`}
+        confirmLabel="Archive requirement"
+        onConfirm={async () => {
+          await api.delete(`/projects/${projectId}/requirements/${archiving!.id}`);
+          setArchiving(null);
+          reload();
+        }}
+        onClose={() => setArchiving(null)}
       />
       <LinkCasesDialog
         projectId={projectId}
