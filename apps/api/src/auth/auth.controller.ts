@@ -49,15 +49,18 @@ export class AuthController {
     return this.authService.updateProfile(user.id, dto.displayName);
   }
 
+  /**
+   * Changes the password and signs out every other session. The response carries a new session
+   * token for the client that made the change; API tokens are not affected.
+   */
   @RateLimitAuthAttempt("password-change")
   @ApiTooManyRequestsResponse({ description: "Too many attempts; see the Retry-After header" })
-  @HttpCode(204)
   @Patch("me/password")
-  async changePassword(
+  changePassword(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ChangePasswordDto,
   ) {
-    await this.authService.changePassword(
+    return this.authService.changePassword(
       user.id,
       user.authMethod,
       dto.currentPassword,

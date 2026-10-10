@@ -89,6 +89,8 @@ export class AuthService {
    * Changing the password requires verifying the current one, so someone who
    * hijacks a session left open cannot take over the account permanently.
    * Not allowed with API tokens (a token must not change its owner's password).
+   * Every other session ends, including one an attacker may hold; the browser
+   * that made the change gets a new session token. API tokens keep working.
    */
   async changePassword(
     userId: string,
@@ -103,14 +105,24 @@ export class AuthService {
     if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
       throw new UnauthorizedException("The current password is incorrect.");
     }
-    await this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: await this.hashPassword(newPassword) },
+      data: {
+        passwordHash: await this.hashPassword(newPassword),
+        sessionVersion: { increment: 1 },
+      },
     });
+    return this.issueSession(updated);
   }
 
-  private async issueSession(user: { id: string; email: string; displayName: string }) {
-    const accessToken = await this.jwtService.signAsync({ sub: user.id });
+  private async issueSession(user: {
+    id: string;
+    email: string;
+    displayName: string;
+    sessionVersion: number;
+  }) {
+    // `sv` lets AuthGuard reject sessions signed in before a password change.
+    const accessToken = await this.jwtService.signAsync({ sub: user.id, sv: user.sessionVersion });
     return {
       accessToken,
       user: { id: user.id, email: user.email, displayName: user.displayName },
