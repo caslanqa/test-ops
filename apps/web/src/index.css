@@ -631,6 +631,15 @@ input[type='checkbox'] {
   font-size: var(--text-xs);
 }
 
+.context-archived {
+  margin-top: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--blocked-bg);
+  color: var(--blocked-ink);
+  font-size: var(--text-xs);
+}
+
 .project-key {
   flex: none;
   padding: 0.0625rem 0.375rem;

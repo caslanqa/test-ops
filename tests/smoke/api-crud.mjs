@@ -1,6 +1,6 @@
 // API completeness smoke test: pagination and filters on list endpoints, the get/update/delete
-// endpoints that complete each resource's CRUD, bulk case creation, project-wide listings and
-// the cleanup of attachment files. Runs against a running stack and creates its own data:
+// endpoints that complete each resource's CRUD, bulk case creation, project-wide listings, archived
+// projects and the cleanup of attachment files. Runs against a running stack and creates its own data:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/api-crud.mjs
 // BASE, ADMIN_EMAIL, ADMIN_PASSWORD can be used to change the target.
@@ -227,6 +227,42 @@ const fields = await call(tester, 'GET', '/system-fields');
 check('system fields list the allowed values',
   fields.status === 200 && fields.json.result.status.includes('PASSED') && fields.json.testCase.priority.includes('HIGH') && fields.json.roles.project.includes('TESTER'), JSON.stringify(fields.json));
 await expectStatus('system fields require sign-in', 401, null, 'GET', '/system-fields');
+
+// ---------- archived projects: read-only until restored
+console.log('--- Archived projects ---');
+const pid = P.split('/')[2];
+const keptCase = await ok(tester, 'POST', `${P}/cases`, { title: 'Kept case' });
+const keptRun = await ok(admin, 'POST', `${P}/runs`, { title: 'Kept run', testCaseIds: [keptCase.id] });
+await ok(admin, 'POST', `${P}/runs/${keptRun.id}/share`, { enabled: true });
+await expectStatus('a tester cannot archive the project', 403, tester, 'DELETE', P);
+const archived = await expectStatus('a project admin archives the project', 200, admin, 'DELETE', P);
+check('archiving again keeps the date', (await ok(admin, 'DELETE', P)).archivedAt === archived.json?.archivedAt && !!archived.json?.archivedAt);
+const listed = (items) => items.some((p) => p.id === pid);
+check('an archived project leaves the project lists',
+  !listed(await ok(admin, 'GET', `/workspaces/${ws.id}/projects`)) && !listed(await ok(tester, 'GET', '/projects')));
+const archivedList = await call(admin, 'GET', `/workspaces/${ws.id}/projects?archived=true`);
+check('archived projects can be listed', archivedList.status === 200 && archivedList.json.length === 1 && archivedList.json[0].id === pid, JSON.stringify(archivedList.json));
+check('its data can still be read',
+  (await call(tester, 'GET', `${P}/cases`)).status === 200 && (await call(tester, 'GET', `${P}/runs/${keptRun.id}`)).status === 200
+  && !!(await ok(tester, 'GET', P)).archivedAt);
+const blocked = await expectStatus('no new cases', 409, tester, 'POST', `${P}/cases`, { title: 'x' });
+check('the answer says the project is archived', /archived/.test(blocked.json?.message ?? ''), JSON.stringify(blocked.json));
+await expectStatus('no edits to existing cases', 409, tester, 'PATCH', `${P}/cases/${keptCase.id}`, { title: 'Changed' });
+await expectStatus('no results, also from CI', 409, tester, 'POST', `${P}/runs/${keptRun.id}/results/bulk`, { results: [{ testCaseId: keptCase.id, status: 'PASSED' }] });
+await expectStatus('no new runs', 409, admin, 'POST', `${P}/runs`, { title: 'x', testCaseIds: [keptCase.id] });
+await expectStatus('no new suites', 409, admin, 'POST', `${P}/suites`, { name: 'x' });
+await expectStatus('no renaming', 409, admin, 'PATCH', P, { name: 'Renamed' });
+await expectStatus('no new public links', 409, admin, 'POST', `${P}/runs/${keptRun.id}/share`, { enabled: true });
+await expectStatus('a public link can still be turned off', 201, admin, 'POST', `${P}/runs/${keptRun.id}/share`, { enabled: false });
+const testerMember = (await ok(admin, 'GET', `${P}/members`)).find((m) => m.user.email === testerEmail);
+await expectStatus('members can still be managed', 200, admin, 'PATCH', `${P}/members/${testerMember.id}`, { role: 'VIEWER' });
+const keyTaken = await expectStatus('a new project cannot take its key', 409, admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'CR', name: 'Again' });
+check('...and the answer points to the archived project', /archived/i.test(keyTaken.json?.message ?? ''), JSON.stringify(keyTaken.json));
+await expectStatus('a tester cannot restore it', 403, tester, 'POST', `${P}/restore`);
+const restored = await expectStatus('a project admin restores it', 200, admin, 'POST', `${P}/restore`);
+check('a restored project is listed and writable again',
+  restored.json?.archivedAt === null && listed(await ok(admin, 'GET', `/workspaces/${ws.id}/projects`))
+  && (await call(admin, 'POST', `${P}/cases`, { title: 'After restore' })).status === 201);
 
 // ---------- workspace: delete
 console.log('--- Deleting a workspace ---');

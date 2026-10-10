@@ -221,10 +221,12 @@ export class RunsService {
     runId: string,
     enabled: boolean,
   ) {
+    // A public link can still be turned off after the project is archived.
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       WRITE_ROLES,
+      { allowArchived: !enabled },
     );
     await this.getOne(userId, projectId, runId);
     return this.prisma.testRun.update({
