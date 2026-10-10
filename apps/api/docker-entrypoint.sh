@@ -1,7 +1,8 @@
 #!/bin/sh
 # Container startup: checks the prerequisite with a clear message, retries the
-# migration until the database is ready and starts the app as PID 1.
-# Thanks to `exec`, `docker stop`'s SIGTERM reaches Node without getting stuck in sh.
+# migration until the database is ready and starts the app.
+# Thanks to `exec`, `docker stop`'s SIGTERM reaches Node without getting stuck in sh; the app
+# handles it (shutDownGracefully in main.ts), also when it runs as PID 1 without an init.
 set -eu
 
 if [ -z "${DATABASE_URL:-}" ]; then

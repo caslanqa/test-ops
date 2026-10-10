@@ -106,7 +106,7 @@ Run commands from the installation directory, usually `~/testops`.
 | Upgrade using the installer | Run the same installer command again |
 | Pull the selected image and restart | `docker compose pull && docker compose up -d --wait` |
 
-Upgrades preserve `.env` and the database/attachment volumes. Database migrations are applied when the app starts. To pin a release, set `APP_IMAGE=ghcr.io/caslanqa/testops:0.3.0` in `.env`. Run the installer with `TESTOPS_VERSION=latest` to switch a pinned installation back to the latest image.
+Stopping or upgrading waits up to 30 seconds for running requests, such as uploads and CI result submissions, to finish. Upgrades preserve `.env` and the database/attachment volumes. Database migrations are applied when the app starts. To pin a release, set `APP_IMAGE=ghcr.io/caslanqa/testops:0.3.0` in `.env`. Run the installer with `TESTOPS_VERSION=latest` to switch a pinned installation back to the latest image.
 
 A full backup includes the database, attachments, and `.env` file:
 
