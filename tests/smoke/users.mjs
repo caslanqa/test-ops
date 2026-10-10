@@ -1,4 +1,4 @@
-// User management smoke test: registration, passwords, roles, membership scope.
+// User management smoke test: registration, passwords and sessions, API tokens, roles, membership scope.
 // Runs against a running stack and creates its own data:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/users.mjs
@@ -57,12 +57,27 @@ console.log('--- Profile and password ---');
 // The non-ASCII (Turkish) display name is deliberate: it checks that UTF-8 round-trips unchanged.
 const prof = await ok(user, 'PATCH', '/auth/me', { displayName: 'Ayşe Yılmaz' });
 check('display name updated', prof.displayName === 'Ayşe Yılmaz', JSON.stringify(prof));
+const early = await ok(user, 'POST', '/api-tokens', { name: 'created before the password change' });
 await expectStatus('wrong current password', 401, user, 'PATCH', '/auth/me/password', { currentPassword: 'wrong', newPassword: 'NewPass4567' });
-await expectStatus('change password', 204, user, 'PATCH', '/auth/me/password', { currentPassword: 'FirstPass123', newPassword: 'NewPass4567' });
+const changed = await expectStatus('change password', 200, user, 'PATCH', '/auth/me/password', { currentPassword: 'FirstPass123', newPassword: 'NewPass4567' });
+await expectStatus('a password change ends the sessions signed in before it', 401, user, 'GET', '/auth/me');
+await expectStatus('...and gives the browser that made it a new session', 200, changed.json?.accessToken, 'GET', '/auth/me');
+await expectStatus('API tokens keep working after a password change', 200, early.token, 'GET', '/auth/me');
 await expectStatus('login with the old password is rejected', 401, null, 'POST', '/auth/login', { email, password: 'FirstPass123' });
 user = (await ok(null, 'POST', '/auth/login', { email, password: 'NewPass4567' })).accessToken;
 check('login with the new password', !!user);
+
+console.log('--- API tokens ---');
 const tok = await ok(user, 'POST', '/api-tokens', { name: 'smoke' });
+check('a token without a lifetime does not expire', tok.expiresAt === null, JSON.stringify(tok));
+const expiring = await call(user, 'POST', '/api-tokens', { name: 'expiring', expiresInDays: 30 });
+const lifetimeDays = (Date.parse(expiring.json?.expiresAt) - Date.now()) / 86_400_000;
+check(`[${expiring.status}] a token can expire after a number of days`, expiring.status === 201 && lifetimeDays > 29.9 && lifetimeDays <= 30, JSON.stringify(expiring.json));
+await expectStatus('a lifetime longer than a year is rejected', 400, user, 'POST', '/api-tokens', { name: 'too long', expiresInDays: 366 });
+// A leaked token must not be able to keep access by creating more tokens.
+await expectStatus('an API token cannot create tokens', 403, tok.token, 'POST', '/api-tokens', { name: 'minted' });
+await expectStatus('...list them', 403, tok.token, 'GET', '/api-tokens');
+await expectStatus('...or revoke them', 403, tok.token, 'DELETE', `/api-tokens/${early.id}`);
 await expectStatus('password cannot be changed with an API token', 403, tok.token, 'PATCH', '/auth/me/password', { currentPassword: 'NewPass4567', newPassword: 'Other789012' });
 const revoked = await ok(user, 'DELETE', `/api-tokens/${tok.id}`);
 check('token revoke response has no tokenHash', revoked && !('tokenHash' in revoked), JSON.stringify(revoked));

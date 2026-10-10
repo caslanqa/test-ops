@@ -44,7 +44,9 @@ export class AuthGuard implements CanActivate {
         const user = await this.prisma.user.findUnique({
           where: { id: payload.sub },
         });
-        if (!user || !user.isActive) {
+        // A password change raises sessionVersion and so ends the sessions signed in before it.
+        // Tokens issued before session versions existed carry no `sv` and count as version 0.
+        if (!user || !user.isActive || (payload.sv ?? 0) !== user.sessionVersion) {
           throw new UnauthorizedException("User not found or inactive");
         }
         request.user = {
@@ -66,6 +68,11 @@ export class AuthGuard implements CanActivate {
     });
     if (!apiToken || apiToken.revokedAt || !apiToken.user.isActive) {
       throw new UnauthorizedException("Invalid or revoked API token");
+    }
+    if (apiToken.expiresAt && apiToken.expiresAt <= new Date()) {
+      throw new UnauthorizedException(
+        "This API token has expired; create a new one under Account → API tokens",
+      );
     }
     await this.prisma.apiToken.update({
       where: { id: apiToken.id },

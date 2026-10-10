@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent } from 'react';
 import { Check, Copy, KeyRound, Plus } from 'lucide-react';
-import { api, ApiError } from '../api/client';
+import { api, ApiError, setToken } from '../api/client';
 import { useAuth, type CurrentUser } from '../auth/AuthContext';
 import { ConfirmDialog } from '../components/Members';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../components/Page';
@@ -13,7 +13,21 @@ interface ApiToken {
   name: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** null: the token doesn't expire. */
+  expiresAt: string | null;
   createdAt: string;
+}
+
+/** Lifetimes offered when creating a token; an empty value means it doesn't expire. */
+const TOKEN_LIFETIMES = [
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '365', label: '1 year' },
+  { value: '', label: 'No expiration' },
+];
+
+function isExpired(token: ApiToken) {
+  return token.expiresAt !== null && new Date(token.expiresAt) <= new Date();
 }
 
 function ProfileSection({ user }: { user: CurrentUser }) {
@@ -81,7 +95,12 @@ function PasswordSection() {
     }
     setSaving(true);
     try {
-      await api.patch('/auth/me/password', { currentPassword: current, newPassword: next });
+      // The change signs out every other session; this one continues with the new token.
+      const session = await api.patch<{ accessToken: string }>('/auth/me/password', {
+        currentPassword: current,
+        newPassword: next,
+      });
+      setToken(session.accessToken);
       setCurrent('');
       setNext('');
       setConfirm('');
@@ -121,7 +140,7 @@ function PasswordSection() {
         <FormError message={error} />
         <div className="settings-actions">
           <button type="submit" className="btn btn-primary" disabled={saving}>Change password</button>
-          <span className="save-status" role="status">{saved && 'Password changed.'}</span>
+          <span className="save-status" role="status">{saved && 'Password changed. You were signed out everywhere else.'}</span>
         </div>
       </form>
     </section>
@@ -164,11 +183,13 @@ function NewTokenReveal({ token, onDone }: { token: string; onDone: () => void }
 
 function ApiTokensSection() {
   const [name, setName] = useState('');
+  const [lifetime, setLifetime] = useState('90');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<ApiToken | null>(null);
   const nameId = useId();
+  const lifetimeId = useId();
   const { data: tokens, error: loadError, loading, reload } = useResource(
     () => api.get<ApiToken[]>('/api-tokens'),
     [],
@@ -179,7 +200,10 @@ function ApiTokensSection() {
     setSaving(true);
     setError(null);
     try {
-      const created = await api.post<{ token: string }>('/api-tokens', { name });
+      const created = await api.post<{ token: string }>('/api-tokens', {
+        name,
+        expiresInDays: lifetime ? Number(lifetime) : undefined,
+      });
       setNewToken(created.token);
       setName('');
       reload();
@@ -203,6 +227,12 @@ function ApiTokensSection() {
           <label htmlFor={nameId} className="field-label">Token name</label>
           <input id={nameId} placeholder="e.g. GitHub Actions – web" value={name} minLength={2} maxLength={100} required onChange={(e) => setName(e.target.value)} />
         </div>
+        <div className="field token-lifetime">
+          <label htmlFor={lifetimeId} className="field-label">Expires after</label>
+          <select id={lifetimeId} value={lifetime} onChange={(e) => setLifetime(e.target.value)}>
+            {TOKEN_LIFETIMES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
         <button type="submit" className="btn btn-primary" disabled={saving}>
           <Plus size={16} aria-hidden="true" />
           Create token
@@ -225,6 +255,7 @@ function ApiTokensSection() {
                 <th scope="col" className="col-main">Name</th>
                 <th scope="col">Status</th>
                 <th scope="col" className="hide-sm">Created</th>
+                <th scope="col" className="hide-sm">Expires</th>
                 <th scope="col" className="hide-sm">Last used</th>
                 <th scope="col"><span className="visually-hidden">Actions</span></th>
               </tr>
@@ -233,11 +264,20 @@ function ApiTokensSection() {
               {tokens.map((t) => (
                 <tr key={t.id}>
                   <td><span className="cell-title">{t.name}</span></td>
-                  <td>{t.revokedAt ? <Tag tone="outline">Revoked</Tag> : <Tag tone="strong">Active</Tag>}</td>
+                  <td>
+                    {t.revokedAt ? (
+                      <Tag tone="outline">Revoked</Tag>
+                    ) : isExpired(t) ? (
+                      <Tag tone="outline">Expired</Tag>
+                    ) : (
+                      <Tag tone="strong">Active</Tag>
+                    )}
+                  </td>
                   <td className="muted num hide-sm">{formatDate(t.createdAt)}</td>
+                  <td className="muted num hide-sm">{t.expiresAt ? formatDate(t.expiresAt) : 'Never'}</td>
                   <td className="muted num hide-sm">{t.lastUsedAt ? formatDate(t.lastUsedAt) : 'Never'}</td>
                   <td className="cell-actions">
-                    {!t.revokedAt && (
+                    {!t.revokedAt && !isExpired(t) && (
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRevoking(t)} aria-label={`Revoke ${t.name}`}>
                         Revoke
                       </button>
