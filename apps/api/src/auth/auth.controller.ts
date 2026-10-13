@@ -51,7 +51,7 @@ export class AuthController {
 
   /**
    * Changes the password and signs out every other session. The response carries a new session
-   * token for the client that made the change; API tokens are not affected.
+   * token for the client that made the change; the user's API tokens are revoked.
    */
   @RateLimitAuthAttempt("password-change")
   @ApiTooManyRequestsResponse({ description: "Too many attempts; see the Retry-After header" })

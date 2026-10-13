@@ -90,7 +90,10 @@ export class AuthService {
    * hijacks a session left open cannot take over the account permanently.
    * Not allowed with API tokens (a token must not change its owner's password).
    * Every other session ends, including one an attacker may hold; the browser
-   * that made the change gets a new session token. API tokens keep working.
+   * that made the change gets a new session token. The user's API tokens are revoked too: a
+   * stolen session may have minted some, and they would otherwise outlive the password change.
+   * The update only applies to the session version that was checked, so two concurrent changes
+   * can't both succeed.
    */
   async changePassword(
     userId: string,
@@ -105,12 +108,23 @@ export class AuthService {
     if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
       throw new UnauthorizedException("The current password is incorrect.");
     }
-    const updated = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: await this.hashPassword(newPassword),
-        sessionVersion: { increment: 1 },
-      },
+    const passwordHash = await this.hashPassword(newPassword);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.user.updateMany({
+        where: { id: userId, sessionVersion: user.sessionVersion },
+        data: { passwordHash, sessionVersion: { increment: 1 } },
+      });
+      if (count === 0) {
+        // Another change got in between our check and this update; leave the tokens alone too.
+        throw new ConflictException(
+          "The password was changed in the meantime. Sign in again and retry.",
+        );
+      }
+      await tx.apiToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return tx.user.findUniqueOrThrow({ where: { id: userId } });
     });
     return this.issueSession(updated);
   }
