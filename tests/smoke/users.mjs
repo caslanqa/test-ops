@@ -1,13 +1,24 @@
-// User management smoke test: registration, passwords, roles, membership scope.
+// User management smoke test: registration, passwords and sessions, API tokens, roles, membership scope.
 // Runs against a running stack and creates its own data:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/users.mjs
 // Requires SELF_REGISTRATION=true (the default). The target can be changed with BASE, ADMIN_EMAIL and ADMIN_PASSWORD.
+import { execFileSync } from 'node:child_process';
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'ChangeMe123!';
 const sfx = Date.now().toString(36);
 let failures = 0;
+
+// The API refuses lifetimes below one day, so an expired token has to be made through the database.
+// Runs from the repo root against the compose stack (set POSTGRES_USER / POSTGRES_DB if changed).
+function sql(statement) {
+  return execFileSync(
+    'docker',
+    ['compose', 'exec', '-T', 'postgres', 'psql', '-U', process.env.POSTGRES_USER ?? 'testops', '-d', process.env.POSTGRES_DB ?? 'testops', '-v', 'ON_ERROR_STOP=1', '-c', statement],
+    { cwd: new URL('../..', import.meta.url), encoding: 'utf8' },
+  );
+}
 
 async function call(token, method, path, body) {
   const res = await fetch(BASE + path, {
@@ -57,12 +68,37 @@ console.log('--- Profile and password ---');
 // The non-ASCII (Turkish) display name is deliberate: it checks that UTF-8 round-trips unchanged.
 const prof = await ok(user, 'PATCH', '/auth/me', { displayName: 'Ayşe Yılmaz' });
 check('display name updated', prof.displayName === 'Ayşe Yılmaz', JSON.stringify(prof));
+const early = await ok(user, 'POST', '/api-tokens', { name: 'created before the password change' });
 await expectStatus('wrong current password', 401, user, 'PATCH', '/auth/me/password', { currentPassword: 'wrong', newPassword: 'NewPass4567' });
-await expectStatus('change password', 204, user, 'PATCH', '/auth/me/password', { currentPassword: 'FirstPass123', newPassword: 'NewPass4567' });
+const changed = await expectStatus('change password', 200, user, 'PATCH', '/auth/me/password', { currentPassword: 'FirstPass123', newPassword: 'NewPass4567' });
+await expectStatus('a password change ends the sessions signed in before it', 401, user, 'GET', '/auth/me');
+await expectStatus('...and gives the browser that made it a new session', 200, changed.json?.accessToken, 'GET', '/auth/me');
+// A stolen session may have minted tokens, so the password change must end them too.
+await expectStatus('a password change revokes API tokens created before it', 401, early.token, 'GET', '/auth/me');
+await expectStatus('a stale session cannot change the password a second time', 401, user, 'PATCH', '/auth/me/password', { currentPassword: 'NewPass4567', newPassword: 'Another7890' });
 await expectStatus('login with the old password is rejected', 401, null, 'POST', '/auth/login', { email, password: 'FirstPass123' });
 user = (await ok(null, 'POST', '/auth/login', { email, password: 'NewPass4567' })).accessToken;
 check('login with the new password', !!user);
+
+console.log('--- API tokens ---');
 const tok = await ok(user, 'POST', '/api-tokens', { name: 'smoke' });
+const lifetimeOf = (t) => (Date.parse(t.expiresAt) - Date.now()) / 86_400_000;
+check('a token without expiresInDays gets the 90-day default', tok.expiresAt && lifetimeOf(tok) > 89.9 && lifetimeOf(tok) <= 90, JSON.stringify(tok));
+const forever = await call(user, 'POST', '/api-tokens', { name: 'forever', expiresInDays: null });
+check(`[${forever.status}] an explicit null means no expiration`, forever.status === 201 && forever.json?.expiresAt === null, JSON.stringify(forever.json));
+await expectStatus('a lifetime of zero days is rejected', 400, user, 'POST', '/api-tokens', { name: 'zero', expiresInDays: 0 });
+const expiring = await call(user, 'POST', '/api-tokens', { name: 'expiring', expiresInDays: 30 });
+const lifetimeDays = (Date.parse(expiring.json?.expiresAt) - Date.now()) / 86_400_000;
+check(`[${expiring.status}] a token can expire after a number of days`, expiring.status === 201 && lifetimeDays > 29.9 && lifetimeDays <= 30, JSON.stringify(expiring.json));
+const short = await ok(user, 'POST', '/api-tokens', { name: 'about to expire', expiresInDays: 1 });
+sql(`UPDATE api_tokens SET "expiresAt" = now() - interval '1 minute' WHERE id = '${short.id}'`);
+await expectStatus('an expired token is rejected', 401, short.token, 'GET', '/auth/me');
+await expectStatus('a lifetime longer than a year is rejected', 400, user, 'POST', '/api-tokens', { name: 'too long', expiresInDays: 366 });
+// A leaked token must not be able to keep access by creating more tokens.
+await expectStatus('an API token cannot create tokens', 403, tok.token, 'POST', '/api-tokens', { name: 'minted' });
+await expectStatus('...list them', 403, tok.token, 'GET', '/api-tokens');
+await expectStatus('...or revoke them', 403, tok.token, 'DELETE', `/api-tokens/${early.id}`);
+await expectStatus('a token without an expiry still works while valid', 200, forever.json.token, 'GET', '/auth/me');
 await expectStatus('password cannot be changed with an API token', 403, tok.token, 'PATCH', '/auth/me/password', { currentPassword: 'NewPass4567', newPassword: 'Other789012' });
 const revoked = await ok(user, 'DELETE', `/api-tokens/${tok.id}`);
 check('token revoke response has no tokenHash', revoked && !('tokenHash' in revoked), JSON.stringify(revoked));
@@ -110,7 +146,7 @@ check('...which joins the workspace', (await ok(invited.json?.accessToken, 'GET'
 // An API token must not create access that outlives it, even for a workspace admin.
 const adminToken = (await ok(admin, 'POST', '/api-tokens', { name: 'smoke-admin' })).token;
 const viaToken = await expectStatus('an API token cannot create an invitation', 403, adminToken, 'POST', `/workspaces/${ws.id}/invitations`, { email: `token-${sfx}@test.local`, role: 'MEMBER' });
-check('...and says to sign in', /sign in/i.test(String(viaToken.json?.message)), JSON.stringify(viaToken.json));
+check('...and says to use a web session', /web session/i.test(String(viaToken.json?.message)), JSON.stringify(viaToken.json));
 const pendingInvite = await ok(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: `token2-${sfx}@test.local`, role: 'MEMBER' });
 await expectStatus('an API token cannot revoke an invitation', 403, adminToken, 'DELETE', `/workspaces/${ws.id}/invitations/${pendingInvite.id}`);
 await expectStatus('...while a signed-in admin can', 204, admin, 'DELETE', `/workspaces/${ws.id}/invitations/${pendingInvite.id}`);
@@ -119,6 +155,7 @@ console.log('--- Workspace membership and roles ---');
 const wsAsUser = await ok(user, 'GET', `/workspaces/${ws.id}`);
 check('workspace response role: MEMBER', wsAsUser.currentUserRole === 'MEMBER', JSON.stringify(wsAsUser));
 check('role for admin: ADMIN', (await ok(admin, 'GET', `/workspaces/${ws.id}`)).currentUserRole === 'ADMIN');
+await expectStatus('an API token cannot add a project member', 403, adminToken, 'POST', `/projects/${pA.id}/members`, { email, role: 'ADMIN' });
 await expectStatus('add a member to a project', 201, admin, 'POST', `/projects/${pA.id}/members`, { email, role: 'VIEWER' });
 const visible = await ok(user, 'GET', `/workspaces/${ws.id}/projects`);
 check('a member only sees their own project', visible.length === 1 && visible[0].id === pA.id, JSON.stringify(visible.map((p) => p.key)));
@@ -127,6 +164,7 @@ check('project response role: VIEWER', (await ok(user, 'GET', `/projects/${pA.id
 check('workspace admin appears as ADMIN in the project', (await ok(admin, 'GET', `/projects/${pB.id}`)).currentUserRole === 'ADMIN');
 await expectStatus('VIEWER cannot create a case', 403, user, 'POST', `/projects/${pA.id}/cases`, { title: 'x' });
 const pm = (await ok(admin, 'GET', `/projects/${pA.id}/members`)).find((m) => m.user.email === email.toLowerCase());
+await expectStatus('an API token cannot change a project role', 403, adminToken, 'PATCH', `/projects/${pA.id}/members/${pm.id}`, { role: 'ADMIN' });
 await ok(admin, 'PATCH', `/projects/${pA.id}/members/${pm.id}`, { role: 'TESTER' });
 await expectStatus('TESTER creates a case', 201, user, 'POST', `/projects/${pA.id}/cases`, { title: 'Tester case' });
 await expectStatus('cannot access a project they are not a member of', 403, user, 'GET', `/projects/${pB.id}`);

@@ -159,7 +159,8 @@ docker compose logs --tail 100 app
 | `pull access denied` | Check `APP_IMAGE` in `.env`. For a public release, use `ghcr.io/caslanqa/testops:latest` or a published version tag. |
 | `Too many attempts. Try again in N seconds.` | Wait for the stated interval. Sign-in and registration have separate rate limits. |
 | `Too many requests without valid credentials. Try again in N seconds.` | A client at this address sent many requests with a missing, expired or wrong token. Fix the token (in CI, check the secret) and wait for the stated interval. Signed-in browser sessions are not affected. |
-| API returns `401 Unauthorized` | Use an API token from **Account → API tokens** in the `Authorization: Bearer <token>` header. |
+| API returns `401 Unauthorized` | Use an API token from **Account → API tokens** in the `Authorization: Bearer <token>` header. The token may have expired (they last 90 days by default) or been revoked; create a new one. A password change revokes all of your API tokens. |
+| API returns `403 Forbidden` on token or member management | API tokens cannot manage API tokens or invitations, add project members or change workspace or project roles. Do this from a signed-in web session. |
 
 Health checks are available at `/health` and `/ready`. `/health` confirms the process is running; `/ready` confirms the database is reachable.
 
@@ -172,6 +173,10 @@ Create a token under **Account → API tokens**, then send it as:
 ```http
 Authorization: Bearer <token>
 ```
+
+Tokens expire after 90 days by default. `POST /api-tokens` accepts `expiresInDays` (1-365); omit it for the 90-day default, or send `null` for a token that never expires. Tokens created before this limit existed keep working without an expiry until you revoke them.
+
+An API token cannot create, list or revoke API tokens, change a password, create or revoke workspace invitations, add project members, or change workspace or project roles; these calls return `403` and need a signed-in web session. This way a leaked token cannot keep or widen its access. Changing your password (`PATCH /auth/me/password`) returns `200` with a fresh session token for the client that made the change, signs out every other session and revokes all of your API tokens.
 
 The **Help & support** page also links to the API reference and includes an example for submitting automation results from CI.
 
