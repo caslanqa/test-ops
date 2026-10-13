@@ -116,6 +116,7 @@ await expectStatus('an API token cannot add a workspace member', 403, adminToken
 const wsAsUser = await ok(user, 'GET', `/workspaces/${ws.id}`);
 check('workspace response role: MEMBER', wsAsUser.currentUserRole === 'MEMBER', JSON.stringify(wsAsUser));
 check('role for admin: ADMIN', (await ok(admin, 'GET', `/workspaces/${ws.id}`)).currentUserRole === 'ADMIN');
+await expectStatus('an API token cannot add a project member', 403, adminToken, 'POST', `/projects/${pA.id}/members`, { email, role: 'ADMIN' });
 await expectStatus('add a member to a project', 201, admin, 'POST', `/projects/${pA.id}/members`, { email, role: 'VIEWER' });
 const visible = await ok(user, 'GET', `/workspaces/${ws.id}/projects`);
 check('a member only sees their own project', visible.length === 1 && visible[0].id === pA.id, JSON.stringify(visible.map((p) => p.key)));
@@ -124,6 +125,7 @@ check('project response role: VIEWER', (await ok(user, 'GET', `/projects/${pA.id
 check('workspace admin appears as ADMIN in the project', (await ok(admin, 'GET', `/projects/${pB.id}`)).currentUserRole === 'ADMIN');
 await expectStatus('VIEWER cannot create a case', 403, user, 'POST', `/projects/${pA.id}/cases`, { title: 'x' });
 const pm = (await ok(admin, 'GET', `/projects/${pA.id}/members`)).find((m) => m.user.email === email.toLowerCase());
+await expectStatus('an API token cannot change a project role', 403, adminToken, 'PATCH', `/projects/${pA.id}/members/${pm.id}`, { role: 'ADMIN' });
 await ok(admin, 'PATCH', `/projects/${pA.id}/members/${pm.id}`, { role: 'TESTER' });
 await expectStatus('TESTER creates a case', 201, user, 'POST', `/projects/${pA.id}/cases`, { title: 'Tester case' });
 await expectStatus('cannot access a project they are not a member of', 403, user, 'GET', `/projects/${pB.id}`);

@@ -12,6 +12,7 @@ import {
 import type { Response } from "express";
 import { PageQueryDto, PagedResponse, sendPage } from "../common/pagination";
 import { ListProjectsQueryDto } from "./dto/list-projects-query.dto";
+import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
 
 @ApiTags("projects")
 @Controller()
@@ -71,6 +72,8 @@ export class ProjectsController {
     return this.projectsService.listMembers(user.id, projectId);
   }
 
+  /** Web session only, like workspace members: a leaked token must not grant roles. */
+  @WebSessionOnly()
   @Post("projects/:projectId/members")
   addMember(
     @CurrentUser() user: AuthenticatedUser,
@@ -80,6 +83,7 @@ export class ProjectsController {
     return this.projectsService.addMember(user.id, projectId, dto);
   }
 
+  @WebSessionOnly()
   @Patch("projects/:projectId/members/:memberId")
   updateMemberRole(
     @CurrentUser() user: AuthenticatedUser,
