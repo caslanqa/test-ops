@@ -7,6 +7,10 @@
 -- such rows without deleting any result, then add the unique indexes that keep them from coming
 -- back. Each step can safely run again.
 
+-- 0) A blank externalTestId means "no key" (older versions stored "" as is); it becomes NULL so that
+--    several results of a run case can have none.
+UPDATE "results" SET "externalTestId" = NULL WHERE btrim("externalTestId") = '';
+
 -- 1) An externalTestId stays only on the newest result that carries it in a run case; older
 --    duplicates keep their data as plain attempts.
 UPDATE "results" AS r

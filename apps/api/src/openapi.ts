@@ -3,6 +3,11 @@ import { ConfigService } from "@nestjs/config";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import { OPENAPI_PUBLIC_EXTENSION } from "./common/decorators/public.decorator";
 import { BULK_RESULTS_MAX_ITEMS } from "./runs/dto/bulk-submit-results.dto";
+import {
+  RESULT_COMMENT_MAX_LENGTH,
+  STEP_RESULT_COMMENT_MAX_LENGTH,
+  STEP_RESULTS_MAX_ITEMS,
+} from "./runs/dto/result-limits";
 
 const HTTP_METHODS = ["get", "put", "post", "delete", "patch", "options", "head", "trace"] as const;
 
@@ -49,8 +54,12 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       "`X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; an exceeded limit returns 429 " +
       "with a `Retry-After` header in seconds.",
     "",
-    `**Request size:** JSON request bodies may be up to ${mebibytes(maxJsonBody)}, and a bulk result ` +
-      `upload holds up to ${BULK_RESULTS_MAX_ITEMS} results; larger requests return 413.`,
+    `**Request size:** JSON request bodies may be up to 100 KB, except a bulk result upload ` +
+      `(\`POST …/runs/{runId}/results/bulk\`), which holds up to ${BULK_RESULTS_MAX_ITEMS} results in up to ` +
+      `${mebibytes(maxJsonBody)}; larger requests return 413. A result's \`comment\` may be up to ` +
+      `${RESULT_COMMENT_MAX_LENGTH} characters, and it holds up to ${STEP_RESULTS_MAX_ITEMS} \`stepResults\`, ` +
+      `each with a comment of up to ${STEP_RESULT_COMMENT_MAX_LENGTH} characters; larger values return 400. ` +
+      "Attach long logs as files instead.",
   ].join("\n");
 
   const document = SwaggerModule.createDocument(

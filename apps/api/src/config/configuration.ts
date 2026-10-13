@@ -7,8 +7,9 @@ import {
 } from "../attachments/attachments.constants";
 
 /**
- * Default for the largest JSON request body: room for a bulk upload of 500 results with their
- * failure messages (FR-074). Express's own 100 KB default rejected realistic CI uploads.
+ * Default for the largest JSON body of the bulk result upload: room for 500 results with their
+ * failure messages (FR-074). Express's own 100 KB default rejected realistic CI uploads. All other
+ * JSON requests keep the 100 KB default.
  */
 const JSON_DEFAULT_MAX_REQUEST_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -71,7 +72,8 @@ export default () => ({
     authIpPerMinute: intFromEnv("AUTH_IP_RATE_LIMIT_PER_MINUTE", 60, { allowZero: true }),
   },
   http: {
-    // JSON bodies only; multipart attachment uploads have their own limits below.
+    // The bulk result upload only; other JSON bodies stay at 100 KB, and multipart attachment
+    // uploads have their own limits below.
     maxJsonBodyBytes: intFromEnv(
       "JSON_MAX_REQUEST_SIZE_BYTES",
       JSON_DEFAULT_MAX_REQUEST_SIZE_BYTES,

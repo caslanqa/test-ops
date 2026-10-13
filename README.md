@@ -132,7 +132,9 @@ The installer creates `.env` with secure values. Keep it private and keep a back
 | `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up. |
 | `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
 
-Rate limits, the largest JSON request size (10 MiB by default, enough for a bulk upload of 500 results) and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
+Rate limits, the largest JSON request size of a bulk result upload (`JSON_MAX_REQUEST_SIZE_BYTES`, 10 MiB by default, enough for 500 results; all other JSON requests are limited to 100 KB) and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
+
+Result submissions are also capped: a result's `comment` may hold up to 10,000 characters and a result up to 200 `stepResults` (each comment up to 2,000 characters); a bulk upload holds up to 500 results. Larger values return 400. Attach long logs as files.
 
 ### HTTPS and reverse proxies
 

@@ -36,6 +36,15 @@ interface AttemptState {
   resultIdByExternalId: Map<string, string>;
 }
 
+/**
+ * The externalTestId of an item, or null when it has none. A blank value means "no key", so it
+ * is never stored: "" would otherwise collide on the unique (runCaseId, externalTestId) index.
+ */
+function externalIdOf(item: SubmitResultDto): string | null {
+  const id = item.externalTestId;
+  return id && id.trim() !== "" ? id : null;
+}
+
 /** The fields a submission sets, on a new attempt as well as on an idempotent re-send. */
 function resultFields(dto: SubmitResultDto) {
   return {
@@ -233,7 +242,7 @@ export class ResultsService {
 
     const runCaseIds = runCases.map((rc) => rc.id);
     const externalIds = [
-      ...new Set(items.map((item) => item.externalTestId).filter((id): id is string => !!id)),
+      ...new Set(items.map(externalIdOf).filter((id): id is string => id !== null)),
     ];
     const maxima = await tx.result.groupBy({
       by: ["runCaseId"],
@@ -280,8 +289,9 @@ export class ResultsService {
     state: AttemptState,
     item: SubmitResultDto,
   ) {
-    const existingId = item.externalTestId
-      ? state.resultIdByExternalId.get(item.externalTestId)
+    const externalTestId = externalIdOf(item);
+    const existingId = externalTestId
+      ? state.resultIdByExternalId.get(externalTestId)
       : undefined;
     if (existingId) {
       if (item.stepResults) {
@@ -304,7 +314,7 @@ export class ResultsService {
         ...resultFields(item),
         runCaseId: state.runCase.id,
         authorUserId: userId,
-        externalTestId: item.externalTestId,
+        externalTestId,
         attemptNumber: state.maxAttempt,
         // settleLatest flags the case's last attempt once the whole upload is written.
         isLatest: false,
@@ -313,8 +323,8 @@ export class ResultsService {
     });
     state.latestId = created.id;
     state.latestStatus = item.status;
-    if (item.externalTestId) {
-      state.resultIdByExternalId.set(item.externalTestId, created.id);
+    if (externalTestId) {
+      state.resultIdByExternalId.set(externalTestId, created.id);
     }
     return created;
   }
