@@ -8,6 +8,7 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import { requireWebSession } from "../common/require-web-session";
 import type { Response } from "express";
 import { PageQueryDto, PagedResponse, sendPage } from "../common/pagination";
 import { DeleteWorkspaceDto } from "./dto/delete-workspace.dto";
@@ -60,6 +61,7 @@ export class WorkspacesController {
     return this.workspacesService.listMembers(user.id, workspaceId);
   }
 
+  /** Changes a member's workspace role (workspace admins only, signed in; not with an API token). */
   @Patch(":workspaceId/members/:memberId")
   updateMemberRole(
     @CurrentUser() user: AuthenticatedUser,
@@ -67,6 +69,7 @@ export class WorkspacesController {
     @Param("memberId") memberId: string,
     @Body() dto: UpdateWorkspaceMemberRoleDto,
   ) {
+    requireWebSession(user);
     return this.workspacesService.updateMemberRole(
       user.id,
       workspaceId,

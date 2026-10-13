@@ -218,6 +218,11 @@ export class ResultsService {
         include: { steps: { orderBy: { position: "asc" } } },
       });
       const caseById = new Map(cases.map((testCase) => [testCase.id, testCase]));
+      // Uploads lock per run case, so two of them can add different cases to the same run at once;
+      // the next position is read under a lock per run. It is always taken after the case locks,
+      // so uploads can't deadlock.
+      const positionKey = `run-items:${runId}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${positionKey}, 0))`;
       const last = await tx.runCase.aggregate({
         where: { runId },
         _max: { position: true },
