@@ -1,7 +1,14 @@
 # TestOps - single image: the NestJS API + React SPA are served from the same container/port
 # (design-doc.md section 7: "The application is published as a single versioned OCI/Docker image").
 # PostgreSQL deliberately stays outside this image and runs as a separate service/container.
-FROM node:20-bookworm-slim AS base
+#
+# Hardening (0.7.0):
+#   - Node 22 LTS base (Node 20 reached end-of-life on 2026-04-30). Override with --build-arg NODE_IMAGE=...
+#   - runtime image contains production dependencies only (no @nestjs/cli, typescript, vite, ...)
+#   - the app runs as the unprivileged `node` user (uid 1000), not root
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+FROM ${NODE_IMAGE} AS base
 # Prisma engine binaries need libssl (not present by default in ARM64/Debian slim images)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl curl \
@@ -9,6 +16,7 @@ RUN apt-get update \
 RUN corepack enable
 WORKDIR /app
 
+# All dependencies (dev included): used to build the API and the web UI.
 FROM base AS deps
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/api/package.json apps/api/package.json
@@ -24,22 +32,37 @@ ARG VITE_API_URL=/api/v1
 ENV VITE_API_URL=$VITE_API_URL
 RUN pnpm --filter @testops/web run build
 
+# Production dependencies of the API only. `prisma` is a regular dependency because
+# docker-entrypoint.sh runs `prisma migrate deploy` on every start.
+FROM base AS prod-deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN pnpm install --frozen-lockfile --prod --filter @testops/api
+COPY apps/api/prisma apps/api/prisma
+RUN pnpm --filter @testops/api run prisma:generate
+
 FROM base AS runtime
 ENV NODE_ENV=production
-COPY --from=build /app/node_modules /app/node_modules
-COPY --from=build /app/apps/api/node_modules /app/apps/api/node_modules
+COPY --from=prod-deps /app/node_modules /app/node_modules
+COPY --from=prod-deps /app/apps/api/node_modules /app/apps/api/node_modules
 COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY --from=build /app/apps/api/prisma /app/apps/api/prisma
 COPY --from=build /app/apps/api/package.json /app/apps/api/package.json
 # SPA files are copied next to dist (ServeStaticModule rootPath = dist/../web)
 COPY --from=build /app/apps/web/dist /app/apps/api/web
 COPY --chmod=0755 apps/api/docker-entrypoint.sh /app/apps/api/docker-entrypoint.sh
+# Attachment directory owned by the runtime user. A *new* named volume mounted here inherits
+# this ownership; volumes created by images before 0.7.0 are root-owned and need a one-time
+# `chown -R 1000:1000 /data/attachments` (install.sh does this on upgrade).
+RUN mkdir -p /data/attachments && chown node:node /data/attachments
 WORKDIR /app/apps/api
 
 # The container listens on this port internally (configurable via the PORT env var); the
 # exposed host port can be chosen freely with `docker run -p <YOUR_PORT>:3000`.
 ENV PORT=3000
 EXPOSE 3000
+USER node
 # Release version shown on the Help & support page (/api/v1/system/info). Declared last so a
 # new version only rebuilds this layer; docker-publish.yml passes it, local builds report "dev".
 ARG APP_VERSION=dev
