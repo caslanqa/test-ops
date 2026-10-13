@@ -181,6 +181,11 @@ EOF
 
   say "Pulling images"
   docker compose pull --quiet
+  if [ "$fresh_db" = false ]; then
+    # 0.7.0+ runs as the unprivileged node user (uid 1000); attachment volumes created by
+    # older images are root-owned. Idempotent, so it is safe on every upgrade.
+    docker compose run --rm --no-deps --user root --entrypoint chown app -R 1000:1000 /data/attachments > /dev/null 2>&1 || true
+  fi
   say "Starting TestOps (waits until it is ready)"
   if ! docker compose up -d --wait; then
     docker compose logs --tail 40 app >&2 || true
