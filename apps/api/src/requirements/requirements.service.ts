@@ -24,7 +24,7 @@ export class RequirementsService {
     );
     const where: Prisma.RequirementWhereInput = {
       projectId,
-      archivedAt: null,
+      archivedAt: query.includeArchived ? undefined : null,
       title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
     };
     const [items, total] = await this.prisma.$transaction([
@@ -91,6 +91,20 @@ export class RequirementsService {
     return this.prisma.requirement.update({
       where: { id: requirementId },
       data: { archivedAt: new Date() },
+    });
+  }
+
+  /** Brings an archived requirement back into the lists. */
+  async restore(userId: string, projectId: string, requirementId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.getOne(userId, projectId, requirementId);
+    return this.prisma.requirement.update({
+      where: { id: requirementId },
+      data: { archivedAt: null },
     });
   }
 

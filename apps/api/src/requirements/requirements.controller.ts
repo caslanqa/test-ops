@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { RequirementsService } from "./requirements.service";
 import { CreateRequirementDto } from "./dto/create-requirement.dto";
@@ -77,6 +77,17 @@ export class RequirementsController {
     @Param("requirementId") requirementId: string,
   ) {
     return this.requirementsService.archive(user.id, projectId, requirementId);
+  }
+
+  /** Brings an archived requirement back into the lists. */
+  @Post(":requirementId/restore")
+  @HttpCode(200)
+  restore(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("requirementId") requirementId: string,
+  ) {
+    return this.requirementsService.restore(user.id, projectId, requirementId);
   }
 
   @Post(":requirementId/cases")

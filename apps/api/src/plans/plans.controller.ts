@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { PlansService } from "./plans.service";
 import { CreatePlanDto } from "./dto/create-plan.dto";
@@ -73,6 +73,17 @@ export class PlansController {
     @Param("planId") planId: string,
   ) {
     return this.plansService.archive(user.id, projectId, planId);
+  }
+
+  /** Brings an archived plan back into the lists. */
+  @Post(":planId/restore")
+  @HttpCode(200)
+  restore(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("planId") planId: string,
+  ) {
+    return this.plansService.restore(user.id, projectId, planId);
   }
 
   @Post(":planId/cases")

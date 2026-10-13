@@ -16,7 +16,8 @@ export function PageHeader({
   return (
     <div className="page-header">
       <div className="page-heading">
-        <h1>{title}</h1>
+        {/* tabIndex -1: focus moves here when the control that was used disappears (see lib/focus). */}
+        <h1 tabIndex={-1}>{title}</h1>
         {description && <p className="page-description">{description}</p>}
         {meta}
       </div>

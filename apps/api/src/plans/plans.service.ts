@@ -24,14 +24,20 @@ export class PlansService {
     );
     const where: Prisma.TestPlanWhereInput = {
       projectId,
-      archivedAt: null,
+      archivedAt: query.includeArchived ? undefined : null,
       milestoneId: query.milestoneId,
       title: query.q ? { contains: query.q, mode: "insensitive" } : undefined,
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.testPlan.findMany({
         where,
-        include: { _count: { select: { items: true, runs: true } } },
+        // `items` counts the active cases only: archived ones stay in the plan but can't start a run,
+        // so clients decide from this number whether a run can be started from the plan.
+        include: {
+          _count: {
+            select: { items: { where: { testCase: { archivedAt: null } } }, runs: true },
+          },
+        },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
         ...pageArgs(query),
       }),
@@ -122,6 +128,20 @@ export class PlansService {
     return this.prisma.testPlan.update({
       where: { id: planId },
       data: { archivedAt: new Date() },
+    });
+  }
+
+  /** Brings an archived plan back into the lists. */
+  async restore(userId: string, projectId: string, planId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.getOne(userId, projectId, planId);
+    return this.prisma.testPlan.update({
+      where: { id: planId },
+      data: { archivedAt: null },
     });
   }
 
