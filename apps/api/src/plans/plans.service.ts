@@ -160,19 +160,24 @@ export class PlansService {
     await this.accessControl.assertCasesInProject(projectId, dto.testCaseIds);
     await this.accessControl.assertAssignableUser(projectId, dto.assigneeId);
     // Added cases go to the end, in the order given; cases already in the plan stay as they are.
-    const last = await this.prisma.planCase.aggregate({
-      where: { planId },
-      _max: { position: true },
-    });
-    const start = (last._max.position ?? -1) + 1;
-    await this.prisma.planCase.createMany({
-      data: [...new Set(dto.testCaseIds)].map((testCaseId, index) => ({
-        planId,
-        testCaseId,
-        position: start + index,
-        assigneeId: dto.assigneeId,
-      })),
-      skipDuplicates: true,
+    // The next position is read and used under a lock per plan, so parallel adds can't both take
+    // the same positions.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`plan-items:${planId}`}, 0))`;
+      const last = await tx.planCase.aggregate({
+        where: { planId },
+        _max: { position: true },
+      });
+      const start = (last._max.position ?? -1) + 1;
+      await tx.planCase.createMany({
+        data: [...new Set(dto.testCaseIds)].map((testCaseId, index) => ({
+          planId,
+          testCaseId,
+          position: start + index,
+          assigneeId: dto.assigneeId,
+        })),
+        skipDuplicates: true,
+      });
     });
     return this.getOne(userId, projectId, planId);
   }

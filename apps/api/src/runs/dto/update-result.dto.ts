@@ -7,9 +7,11 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
 } from "class-validator";
 import { MAX_INT32 } from "../../common/limits";
+import { RESULT_COMMENT_MAX_LENGTH } from "./result-limits";
 
 /** Fields of a result that can be corrected after it was submitted; omitted fields are kept. */
 export class UpdateResultDto {
@@ -20,6 +22,7 @@ export class UpdateResultDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(RESULT_COMMENT_MAX_LENGTH)
   comment?: string;
 
   @IsOptional()

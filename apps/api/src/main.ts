@@ -8,12 +8,16 @@ import { ConfigService } from "@nestjs/config";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import { SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
+import { json, urlencoded } from "express";
 import type { Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module";
 import { buildOpenApiDocument } from "./openapi";
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Body parsing is set up below, with a size limit per route.
+    bodyParser: false,
+  });
   const logger = new Logger("Bootstrap");
   const config = app.get(ConfigService);
 
@@ -32,10 +36,16 @@ async function bootstrap() {
       "X-RateLimit-Reset",
     ],
   });
-  // FR-074: bulk uploads need more than Express's 100 KB JSON default. Registered after helmet and
-  // CORS, so a 413 still carries their headers, and before the app initializes, so Nest skips its
-  // own default JSON parser instead of adding a second one.
-  app.useBodyParser("json", { limit: config.get<number>("http.maxJsonBodyBytes") });
+  // FR-074: only the bulk result upload needs more than Express's 100 KB JSON default. Every other
+  // route, including the unauthenticated sign-in and sign-up, keeps the small limit, so a client
+  // can't make the server buffer megabytes before any throttling. Registered after helmet and
+  // CORS, so a 413 still carries their headers.
+  const smallJson = json();
+  const bulkJson = json({ limit: config.get<number>("http.maxJsonBodyBytes") });
+  app.use((req: Request, res: Response, next: NextFunction) =>
+    (isBulkResultUpload(req) ? bulkJson : smallJson)(req, res, next),
+  );
+  app.use(urlencoded({ extended: true }));
   app.setGlobalPrefix("api/v1", { exclude: ["health", "ready"] });
   app.useGlobalPipes(
     new ValidationPipe({
@@ -73,6 +83,13 @@ async function bootstrap() {
   await app.listen(port);
   logger.log(`TestOps API listening on port ${port}`);
   shutDownGracefully(app, logger);
+}
+
+/** POST /api/v1/projects/:projectId/runs/:runId/results/bulk, the only route with the large JSON limit. */
+const BULK_RESULTS_PATH = /^\/api\/v1\/projects\/[^/]+\/runs\/[^/]+\/results\/bulk\/?$/;
+
+function isBulkResultUpload(req: Request) {
+  return req.method === "POST" && BULK_RESULTS_PATH.test(req.path);
 }
 
 /**

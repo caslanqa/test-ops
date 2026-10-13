@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
+  ArrayMaxSize,
   IsArray,
   IsDateString,
   IsEnum,
@@ -8,12 +9,14 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from "class-validator";
 import { ResultSource, ResultStatus } from "@prisma/client";
 import { MAX_INT32 } from "../../common/limits";
 import { StepResultDto } from "./step-result.dto";
+import { RESULT_COMMENT_MAX_LENGTH, STEP_RESULTS_MAX_ITEMS } from "./result-limits";
 
 export class SubmitResultDto {
   @IsString()
@@ -25,6 +28,7 @@ export class SubmitResultDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(RESULT_COMMENT_MAX_LENGTH)
   comment?: string;
 
   @IsOptional()
@@ -55,8 +59,11 @@ export class SubmitResultDto {
   @IsString()
   externalTestId?: string;
 
+  // The CLI plugin doesn't translate the array size rules, so the limit is stated here.
+  @ApiPropertyOptional({ type: [StepResultDto], maxItems: STEP_RESULTS_MAX_ITEMS })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(STEP_RESULTS_MAX_ITEMS)
   @ValidateNested({ each: true })
   @Type(() => StepResultDto)
   stepResults?: StepResultDto[];

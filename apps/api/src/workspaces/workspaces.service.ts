@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
@@ -19,9 +21,33 @@ export class WorkspacesService {
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
     private readonly attachmentFiles: AttachmentFilesService,
+    private readonly config: ConfigService,
   ) {}
 
+  /**
+   * With SELF_REGISTRATION off, only an admin of a workspace may start another one; otherwise any
+   * member could create a workspace and invite arbitrary email addresses, which creates accounts
+   * on a closed installation. A server without any workspace is still open so the first one can
+   * be created. This is an interim rule until the Installation Admin role (FR-090) exists.
+   */
+  private async assertMayCreateWorkspace(userId: string) {
+    if (this.config.get<boolean>("auth.selfRegistration") ?? false) return;
+    const [isAdmin, anyWorkspace] = await Promise.all([
+      this.prisma.workspaceMember.findFirst({
+        where: { userId, role: WorkspaceRole.ADMIN },
+        select: { id: true },
+      }),
+      this.prisma.workspace.findFirst({ select: { id: true } }),
+    ]);
+    if (anyWorkspace && !isAdmin) {
+      throw new ForbiddenException(
+        "Creating workspaces is limited to workspace admins while self-registration is disabled.",
+      );
+    }
+  }
+
   async create(userId: string, dto: CreateWorkspaceDto) {
+    await this.assertMayCreateWorkspace(userId);
     const existing = await this.prisma.workspace.findUnique({
       where: { slug: dto.slug },
     });

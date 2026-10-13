@@ -4,12 +4,17 @@ import {
   Catch,
   ConflictException,
   HttpException,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { BaseExceptionFilter } from "@nestjs/core";
 import { Prisma } from "@prisma/client";
+import type { Request, Response } from "express";
 
 const NUMBER_OUT_OF_RANGE = "A number is outside the range that can be stored.";
+/** Seconds a client is asked to wait before retrying after a pool or transaction timeout. */
+const RETRY_AFTER_SECONDS = 2;
 const NUL_CHARACTER = "Text can't contain the NUL character (\\u0000).";
 
 type PrismaRequestError =
@@ -21,13 +26,56 @@ type PrismaRequestError =
  * taken by a parallel request, a record deleted in the meantime, a reference that doesn't
  * exist or is still in use, and values PostgreSQL can't store. The services and DTOs check
  * these up front; this covers races and input no rule catches. Any other error is handled
- * as before (500, logged).
+ * as before (500, logged). Pool and transaction timeouts (P2024, P2028) are overload, not a bad
+ * request: they get 503 with Retry-After. Every mapped error is logged at warn level, because the
+ * same codes can also come from a server bug that a 4xx would otherwise hide.
  */
 @Catch(Prisma.PrismaClientKnownRequestError, Prisma.PrismaClientUnknownRequestError)
 export class PrismaExceptionFilter extends BaseExceptionFilter {
+  private readonly logger = new Logger(PrismaExceptionFilter.name);
+
   catch(exception: PrismaRequestError, host: ArgumentsHost) {
-    super.catch(toHttpException(exception) ?? exception, host);
+    const mapped = toHttpException(exception);
+    if (mapped) {
+      const http = host.switchToHttp();
+      const request = http.getRequest<Request>();
+      this.logger.warn(
+        `${request.method} ${pathOf(request)}: ${describe(exception)} -> ${mapped.getStatus()}`,
+      );
+      if (mapped instanceof ServiceUnavailableException) {
+        http.getResponse<Response>().setHeader("Retry-After", String(RETRY_AFTER_SECONDS));
+      }
+    }
+    super.catch(mapped ?? exception, host);
   }
+}
+
+/** The request path without its query string, which can carry tokens or personal data. */
+function pathOf(request: Request) {
+  return (request.originalUrl ?? request.url).split("?")[0];
+}
+
+/**
+ * "P2002 on ProjectMember (userId, projectId)": the code, model and field or constraint names.
+ * Never the error message or meta values: Prisma embeds argument values (emails, tokens) there.
+ */
+function describe(error: PrismaRequestError) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
+    return "unknown request error";
+  }
+  const meta = error.meta ?? {};
+  const model = typeof meta.modelName === "string" ? ` on ${meta.modelName}` : "";
+  const target = Array.isArray(meta.target)
+    ? ` (${meta.target.join(", ")})`
+    : typeof meta.target === "string"
+      ? ` (${meta.target})`
+      : typeof meta.constraint === "string" || Array.isArray(meta.constraint)
+        ? ` (${[meta.constraint].flat().join(", ")})`
+        : typeof meta.field_name === "string"
+          ? ` (${meta.field_name})`
+          : "";
+  const pg = typeof meta.code === "string" ? ` [postgres ${meta.code}]` : "";
+  return `${error.code}${model}${target}${pg}`;
 }
 
 export function toHttpException(error: PrismaRequestError): HttpException | undefined {
@@ -44,6 +92,11 @@ export function toHttpException(error: PrismaRequestError): HttpException | unde
       case "P2020":
       case "P2033":
         return new BadRequestException(NUMBER_OUT_OF_RANGE);
+      case "P2024":
+      case "P2028":
+        return new ServiceUnavailableException(
+          "The server is busy; retry the request in a moment.",
+        );
       case "P2010":
         // Raw queries ($queryRaw) carry the PostgreSQL error code instead.
         return fromPostgresCode(String(error.meta?.code ?? ""));

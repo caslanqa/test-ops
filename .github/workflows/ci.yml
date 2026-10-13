@@ -87,6 +87,12 @@ jobs:
           bash tests/smoke/attachments.sh
           node tests/smoke/ratelimit.mjs
 
+      # Recreates only the app container with sign-up disabled; the database and seed data stay.
+      - name: Closed installation smoke test
+        run: |
+          SELF_REGISTRATION=false docker compose up -d --wait --wait-timeout 120 app
+          node tests/smoke/closed-install.mjs
+
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --no-color app postgres

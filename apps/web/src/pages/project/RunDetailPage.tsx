@@ -314,7 +314,7 @@ function ResultHistory({
               <StatusChip status={r.status} />
               <span className="muted">
                 Attempt {r.attemptNumber} · {formatDateTime(r.createdAt)} ·{' '}
-                {r.source === 'CI'
+                {r.source === 'AUTOMATION'
                   ? r.automationSourceLabel ?? 'Automation'
                   : (r.authorUserId && memberName.get(r.authorUserId)) ?? 'A project member'}
               </span>
