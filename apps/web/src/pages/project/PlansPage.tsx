@@ -6,9 +6,13 @@ import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
+import { useNotice } from '../../lib/notice';
 import { Tag } from '../../components/StatusChip';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
+import { changedFields, hasChanges } from '../../lib/changes';
+import { useFocusFallback } from '../../lib/focus';
 import { formatDate, formatDateTime } from '../../lib/format';
+import { removeLink } from '../../lib/links';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectMembers } from '../../lib/members';
 import { useProjectInfo } from '../../lib/projectInfo';
@@ -31,6 +35,8 @@ interface PlanRow {
   _count: { items: number; runs: number };
 }
 
+// No `key` on the dialog: its form mounts only while it is open, and a changing key would remove
+// the open <dialog> from the DOM instead of closing it, which drops keyboard focus.
 function EditPlanDialog({ plan, ...props }: Omit<Parameters<typeof EditPlanForm>[0], 'plan'> & { plan: PlanRow | null }) {
   return (
     <Dialog open={plan !== null} onClose={props.onClose} title="Edit plan" wide>
@@ -48,17 +54,29 @@ function EditPlanForm({
   plan,
   onClose,
   onSaved,
+  onChanged,
 }: {
   projectId: string;
   plan: PlanRow;
   onClose: () => void;
   onSaved: () => void;
+  /** Called when something was saved but the dialog stays open (a partly failed save), so the list can refresh. */
+  onChanged: () => void;
 }) {
+  // What the server holds, for sending only changed fields; updated as saves go through.
+  const [baseline, setBaseline] = useState({
+    title: plan.title,
+    description: plan.description,
+    environment: plan.environment,
+    configuration: plan.configuration,
+  });
   const [title, setTitle] = useState(plan.title);
   const [description, setDescription] = useState(plan.description ?? '');
   const [environment, setEnvironment] = useState(plan.environment ?? '');
   const [configuration, setConfiguration] = useState(plan.configuration ?? '');
   const [caseIds, setCaseIds] = useState<string[] | null>(null);
+  // The plan's cases as last read from the server; replaces the first read after a failed save.
+  const [freshIds, setFreshIds] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const ids = { title: useId(), description: useId(), environment: useId(), configuration: useId() };
@@ -66,30 +84,45 @@ function EditPlanForm({
     () => api.get<{ testCaseIds: string[] }>(`/projects/${projectId}/plans/${plan.id}/case-ids`),
     [projectId, plan.id],
   );
-  const cases = useResource(() => api.get<ChecklistCase[]>(`/projects/${projectId}/cases`), [projectId]);
+  // Archived cases are loaded too: the ones already in the plan must stay visible so they can be removed.
+  const cases = useResource(() => api.get<ChecklistCase[]>(`/projects/${projectId}/cases?includeArchived=true`), [projectId]);
   const suites = useResource(() => api.get<Suite[]>(`/projects/${projectId}/suites`), [projectId]);
-  const before = planned.data?.testCaseIds ?? [];
+  const before = freshIds ?? planned.data?.testCaseIds ?? [];
   const selected = caseIds ?? before;
+  const offered = (cases.data ?? []).filter((c) => !c.archivedAt || before.includes(c.id));
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
+    const base = `/projects/${projectId}/plans/${plan.id}`;
     try {
-      const base = `/projects/${projectId}/plans/${plan.id}`;
-      await api.patch(base, {
+      const fields = changedFields(baseline, {
         title,
         description: description.trim() || null,
         environment: environment.trim() || null,
         configuration: configuration.trim() || null,
       });
+      if (hasChanges(fields)) {
+        await api.patch(base, fields);
+        setBaseline((prev) => ({ ...prev, ...fields }));
+      }
       const added = selected.filter((id) => !before.includes(id));
       const removed = before.filter((id) => !selected.includes(id));
       if (added.length > 0) await api.post(`${base}/cases`, { testCaseIds: added });
-      for (const id of removed) await api.delete(`${base}/cases/${id}`);
+      for (const id of removed) await removeLink(`${base}/cases/${id}`);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save the plan");
+      setError(
+        `${err instanceof Error ? err.message : "Couldn't save the plan"} Some changes may already be saved; check the cases and save again.`,
+      );
+      // Re-read the plan's cases so that a retry works out the right difference, and refresh the list behind the dialog.
+      try {
+        setFreshIds((await api.get<{ testCaseIds: string[] }>(`${base}/case-ids`)).testCaseIds);
+      } catch {
+        // Keep the earlier state; the error above is already shown.
+      }
+      onChanged();
     } finally {
       setSaving(false);
     }
@@ -116,7 +149,7 @@ function EditPlanForm({
         </div>
       </div>
       {cases.data && suites.data && planned.data ? (
-        <CaseChecklist cases={cases.data} suites={suites.data} selected={selected} onChange={setCaseIds} />
+        <CaseChecklist cases={offered} suites={suites.data} selected={selected} onChange={setCaseIds} />
       ) : (
         <Loading label="Loading cases…" />
       )}
@@ -232,15 +265,20 @@ export function PlansPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const { notify } = useNotice();
   const { data: plans, error, loading, reload } = useResource(
     () => api.get<PlanRow[]>(`/projects/${projectId}/plans${showArchived ? '?includeArchived=true' : ''}`),
     [projectId, showArchived],
   );
 
+  // An archived plan's row can disappear with the change; focus then moves to the page heading.
+  const requestFocus = useFocusFallback(plans);
+
   async function restore(plan: PlanRow) {
     setStartError(null);
     try {
       await api.post(`/projects/${projectId}/plans/${plan.id}/restore`);
+      notify(`Plan "${plan.title}" restored.`);
       reload();
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Couldn't restore the plan");
@@ -264,7 +302,7 @@ export function PlansPage() {
   }
 
   const createButton = editRepository ? (
-    <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+    <button type="button" className="btn btn-primary" onClick={() => { setStartError(null); setCreating(true); }}>
       <Plus size={16} aria-hidden="true" />
       New plan
     </button>
@@ -332,7 +370,7 @@ export function PlansPage() {
                     )}
                     {editRepository && (
                       <>
-                        <button type="button" className="icon-button" onClick={() => setEditing(plan)} aria-label={`Edit ${plan.title}`} title="Edit">
+                        <button type="button" className="icon-button" onClick={() => { setStartError(null); setEditing(plan); }} aria-label={`Edit ${plan.title}`} title="Edit">
                           <Pencil size={16} aria-hidden="true" />
                         </button>
                         {plan.archivedAt ? (
@@ -340,7 +378,7 @@ export function PlansPage() {
                             <ArchiveRestore size={16} aria-hidden="true" />
                           </button>
                         ) : (
-                          <button type="button" className="icon-button" onClick={() => setArchiving(plan)} aria-label={`Archive ${plan.title}`} title="Archive">
+                          <button type="button" className="icon-button" onClick={() => { setStartError(null); setArchiving(plan); }} aria-label={`Archive ${plan.title}`} title="Archive">
                             <Archive size={16} aria-hidden="true" />
                           </button>
                         )}
@@ -364,14 +402,15 @@ export function PlansPage() {
         }}
       />
       <EditPlanDialog
-        key={editing?.id ?? 'none'}
         projectId={projectId}
         plan={editing}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
+          notify('Plan updated.');
           reload();
         }}
+        onChanged={reload}
       />
       <ConfirmDialog
         open={archiving !== null}
@@ -380,7 +419,9 @@ export function PlansPage() {
         confirmLabel="Archive plan"
         onConfirm={async () => {
           await api.delete(`/projects/${projectId}/plans/${archiving!.id}`);
+          requestFocus();
           setArchiving(null);
+          notify(`Plan "${archiving!.title}" archived.`);
           reload();
         }}
         onClose={() => setArchiving(null)}

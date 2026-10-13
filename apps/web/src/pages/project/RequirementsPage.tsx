@@ -6,9 +6,13 @@ import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
+import { useNotice } from '../../lib/notice';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ResultRibbon } from '../../components/ResultRibbon';
 import { Tag } from '../../components/StatusChip';
+import { changedFields, hasChanges } from '../../lib/changes';
+import { useFocusFallback } from '../../lib/focus';
+import { removeLink } from '../../lib/links';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectInfo } from '../../lib/projectInfo';
 import { normalizeCounts } from '../../lib/status';
@@ -22,7 +26,7 @@ interface Requirement {
   description: string | null;
   externalRef: string | null;
   archivedAt: string | null;
-  cases: { testCase: { id: string; title: string } }[];
+  cases: { testCase: { id: string; title: string; archivedAt: string | null } }[];
 }
 
 interface CoverageRow {
@@ -75,12 +79,12 @@ function RequirementForm({
     setError(null);
     try {
       if (requirement) {
-        // Emptied fields are cleared.
-        await api.patch(`/projects/${projectId}/requirements/${requirement.id}`, {
-          title,
-          description: description.trim() || null,
-          externalRef: externalRef.trim() || null,
-        });
+        // Only changed fields are sent; emptied ones are cleared with null.
+        const fields = changedFields(
+          { title: requirement.title, description: requirement.description, externalRef: requirement.externalRef },
+          { title, description: description.trim() || null, externalRef: externalRef.trim() || null },
+        );
+        if (hasChanges(fields)) await api.patch(`/projects/${projectId}/requirements/${requirement.id}`, fields);
       } else {
         await api.post(`/projects/${projectId}/requirements`, {
           title,
@@ -144,32 +148,55 @@ function LinkCasesForm({
   requirement,
   onClose,
   onLinked,
+  onChanged,
 }: {
   projectId: string;
   requirement: Requirement;
   onClose: () => void;
   onLinked: () => void;
+  /** Called when something was saved but the dialog stays open (a partly failed save), so the list can refresh. */
+  onChanged: () => void;
 }) {
-  const linked = requirement.cases.map((c) => c.testCase.id);
-  const [caseIds, setCaseIds] = useState<string[]>(linked);
+  const [caseIds, setCaseIds] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const cases = useResource(() => api.get<ChecklistCase[]>(`/projects/${projectId}/cases`), [projectId]);
+  // The links are read from the server rather than taken from the list row, so that a retry
+  // after a partly failed save works from what is really linked.
+  const [freshLinked, setFreshLinked] = useState<string[] | null>(null);
+  const current = useResource(
+    () => api.get<Requirement>(`/projects/${projectId}/requirements/${requirement.id}`),
+    [projectId, requirement.id],
+  );
+  // Archived cases are loaded too: the ones already linked must stay visible so they can be unlinked.
+  const cases = useResource(() => api.get<ChecklistCase[]>(`/projects/${projectId}/cases?includeArchived=true`), [projectId]);
   const suites = useResource(() => api.get<Suite[]>(`/projects/${projectId}/suites`), [projectId]);
+  const linked = freshLinked ?? current.data?.cases.map((c) => c.testCase.id) ?? [];
+  const selected = caseIds ?? linked;
+  const offered = (cases.data ?? []).filter((c) => !c.archivedAt || linked.includes(c.id));
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const added = caseIds.filter((id) => !linked.includes(id));
-    const removed = linked.filter((id) => !caseIds.includes(id));
+    const added = selected.filter((id) => !linked.includes(id));
+    const removed = linked.filter((id) => !selected.includes(id));
     setSaving(true);
     setError(null);
+    const base = `/projects/${projectId}/requirements/${requirement.id}`;
     try {
-      const base = `/projects/${projectId}/requirements/${requirement.id}/cases`;
-      if (added.length > 0) await api.post(base, { testCaseIds: added });
-      for (const id of removed) await api.delete(`${base}/${id}`);
+      if (added.length > 0) await api.post(`${base}/cases`, { testCaseIds: added });
+      for (const id of removed) await removeLink(`${base}/cases/${id}`);
       onLinked();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save the links");
+      setError(
+        `${err instanceof Error ? err.message : "Couldn't save the links"} Some changes may already be saved; check the cases and save again.`,
+      );
+      // Re-read the links so that a retry works out the right difference, and refresh the list behind the dialog.
+      try {
+        const fresh = await api.get<Requirement>(base);
+        setFreshLinked(fresh.cases.map((c) => c.testCase.id));
+      } catch {
+        // Keep the earlier state; the error above is already shown.
+      }
+      onChanged();
     } finally {
       setSaving(false);
     }
@@ -177,20 +204,20 @@ function LinkCasesForm({
 
   return (
     <form className="dialog-body" onSubmit={onSubmit}>
-      {cases.data && suites.data ? (
+      {cases.data && suites.data && current.data ? (
         <CaseChecklist
-          cases={cases.data}
+          cases={offered}
           suites={suites.data}
-          selected={caseIds}
+          selected={selected}
           onChange={setCaseIds}
         />
       ) : (
         <Loading label="Loading cases…" />
       )}
-      <FormError message={error} />
+      <FormError message={error ?? current.error ?? cases.error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving}>Save links</button>
+        <button type="submit" className="btn btn-primary" disabled={saving || !current.data}>Save links</button>
       </div>
     </form>
   );
@@ -207,6 +234,7 @@ export function RequirementsPage() {
   const [archiving, setArchiving] = useState<Requirement | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const { notify } = useNotice();
   const reqRes = useResource(
     () => api.get<Requirement[]>(`/projects/${projectId}/requirements${showArchived ? '?includeArchived=true' : ''}`),
     [projectId, showArchived],
@@ -225,10 +253,20 @@ export function RequirementsPage() {
     coverageRes.reload();
   }
 
+  // A requirement's row can disappear with the change; focus then moves to the page heading.
+  const requestFocus = useFocusFallback(requirements);
+
+  /** Opens a dialog; a message from an earlier action no longer applies. */
+  function open(action: () => void) {
+    setActionError(null);
+    action();
+  }
+
   async function restore(r: Requirement) {
     setActionError(null);
     try {
       await api.post(`/projects/${projectId}/requirements/${r.id}/restore`);
+      notify(`Requirement "${r.title}" restored.`);
       reload();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't restore the requirement");
@@ -236,7 +274,7 @@ export function RequirementsPage() {
   }
 
   const createButton = editRepository ? (
-    <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+    <button type="button" className="btn btn-primary" onClick={() => open(() => setCreating(true))}>
       <Plus size={16} aria-hidden="true" />
       New requirement
     </button>
@@ -255,7 +293,7 @@ export function RequirementsPage() {
         }
         actions={
           <>
-            <ArchivedToggle checked={showArchived} onChange={setShowArchived} />
+            <ArchivedToggle checked={showArchived} onChange={(checked) => open(() => setShowArchived(checked))} />
             {createButton}
           </>
         }
@@ -293,7 +331,7 @@ export function RequirementsPage() {
                       {r.archivedAt && <> <Tag tone="outline">Archived</Tag></>}
                       {r.cases.length > 0 ? (
                         <p className="cell-sub">
-                          {shown.map((c) => c.testCase.title).join(', ')}
+                          {shown.map((c) => (c.testCase.archivedAt ? `${c.testCase.title} (archived)` : c.testCase.title)).join(', ')}
                           {r.cases.length > shown.length && ` and ${r.cases.length - shown.length} more`}
                         </p>
                       ) : (
@@ -301,7 +339,10 @@ export function RequirementsPage() {
                       )}
                     </td>
                     <td className="col-ribbon">
-                      {r.cases.length === 0 ? (
+                      {r.archivedAt ? (
+                        // Coverage leaves out archived requirements, so there is no ribbon to show.
+                        <Tag tone="outline">Archived</Tag>
+                      ) : r.cases.length === 0 ? (
                         <Tag tone="outline">No coverage</Tag>
                       ) : (
                         <div className="ribbon-cell-wrap">
@@ -315,13 +356,13 @@ export function RequirementsPage() {
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={() => setLinking(r)}
+                        onClick={() => open(() => setLinking(r))}
                         aria-label={`Linked cases of ${r.title}`}
                       >
                         <Link2 size={14} aria-hidden="true" />
                         Cases
                       </button>
-                      <button type="button" className="icon-button" onClick={() => setEditing(r)} aria-label={`Edit ${r.title}`} title="Edit">
+                      <button type="button" className="icon-button" onClick={() => open(() => setEditing(r))} aria-label={`Edit ${r.title}`} title="Edit">
                         <Pencil size={16} aria-hidden="true" />
                       </button>
                       {r.archivedAt ? (
@@ -329,7 +370,7 @@ export function RequirementsPage() {
                           <ArchiveRestore size={16} aria-hidden="true" />
                         </button>
                       ) : (
-                        <button type="button" className="icon-button" onClick={() => setArchiving(r)} aria-label={`Archive ${r.title}`} title="Archive">
+                        <button type="button" className="icon-button" onClick={() => open(() => setArchiving(r))} aria-label={`Archive ${r.title}`} title="Archive">
                           <Archive size={16} aria-hidden="true" />
                         </button>
                       )}
@@ -352,13 +393,13 @@ export function RequirementsPage() {
         }}
       />
       <RequirementDialog
-        key={editing?.id ?? 'none'}
         projectId={projectId}
         requirement={editing ?? undefined}
         open={editing !== null}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
+          notify('Requirement updated.');
           reload();
         }}
       />
@@ -369,7 +410,9 @@ export function RequirementsPage() {
         confirmLabel="Archive requirement"
         onConfirm={async () => {
           await api.delete(`/projects/${projectId}/requirements/${archiving!.id}`);
+          requestFocus();
           setArchiving(null);
+          notify(`Requirement "${archiving!.title}" archived.`);
           reload();
         }}
         onClose={() => setArchiving(null)}
@@ -380,8 +423,10 @@ export function RequirementsPage() {
         onClose={() => setLinking(null)}
         onLinked={() => {
           setLinking(null);
+          notify('Linked cases updated.');
           reload();
         }}
+        onChanged={reload}
       />
     </>
   );

@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useMatch } from 'react-router-dom';
 import { ChevronRight, Menu, X } from 'lucide-react';
 import { useProjectInfo, useWorkspace } from '../lib/projectInfo';
 import { PROJECT_SECTIONS } from '../lib/sections';
+import { NoticeProvider } from './Notice';
 import { Sidebar } from './Sidebar';
 import { ThemeSwitcher } from './ThemeSwitcher';
 
@@ -100,6 +101,14 @@ function NavDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 /** Skeleton of all signed-in pages: skip link, sidebar, top bar and content. */
 export function AppShell() {
+  return (
+    <NoticeProvider>
+      <ShellLayout />
+    </NoticeProvider>
+  );
+}
+
+function ShellLayout() {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
   const isFirstRender = useRef(true);

@@ -4,8 +4,11 @@ import { Bug, ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
+import { useNotice } from '../../lib/notice';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { PriorityMark, Tag } from '../../components/StatusChip';
+import { changedFields, hasChanges } from '../../lib/changes';
+import { useFocusFallback } from '../../lib/focus';
 import { formatDate } from '../../lib/format';
 import { DEFECT_SEVERITY_LABEL, DEFECT_STATUS_LABEL, labelOf } from '../../lib/labels';
 import { useProjectMembers, type ProjectMember } from '../../lib/members';
@@ -39,6 +42,8 @@ function safeUrl(url: string | null): string | null {
   }
 }
 
+// No `key` on the dialog: its form mounts only while it is open, and a changing key would remove
+// the open <dialog> from the DOM instead of closing it, which drops keyboard focus.
 function EditDefectDialog({ defect, ...props }: Omit<Parameters<typeof EditDefectForm>[0], 'defect'> & { defect: Defect | null }) {
   return (
     <Dialog open={defect !== null} onClose={props.onClose} title="Edit defect">
@@ -81,16 +86,31 @@ function EditDefectForm({
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/projects/${projectId}/defects/${defect.id}`, {
-        title,
-        description: description.trim() || null,
-        status,
-        severity,
-        assigneeId: assigneeId || null,
-        externalProvider: externalProvider.trim() || null,
-        externalIssueId: externalIssueId.trim() || null,
-        externalUrl: externalUrl.trim() || null,
-      });
+      // Only changed fields are sent. Re-sending an unchanged assignee who has since left the
+      // project would be rejected and block every other change to the defect.
+      const fields = changedFields(
+        {
+          title: defect.title,
+          description: defect.description,
+          status: defect.status,
+          severity: defect.severity,
+          assigneeId: defect.assigneeId,
+          externalProvider: defect.externalProvider,
+          externalIssueId: defect.externalIssueId,
+          externalUrl: defect.externalUrl,
+        },
+        {
+          title,
+          description: description.trim() || null,
+          status,
+          severity,
+          assigneeId: assigneeId || null,
+          externalProvider: externalProvider.trim() || null,
+          externalIssueId: externalIssueId.trim() || null,
+          externalUrl: externalUrl.trim() || null,
+        },
+      );
+      if (hasChanges(fields)) await api.patch(`/projects/${projectId}/defects/${defect.id}`, fields);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save the defect");
@@ -165,10 +185,13 @@ export function DefectsPage() {
   const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
   const [editing, setEditing] = useState<Defect | null>(null);
   const [deleting, setDeleting] = useState<Defect | null>(null);
+  const { notify } = useNotice();
   const { data: defects, error, loading, reload } = useResource(
     () => api.get<Defect[]>(`/projects/${projectId}/defects`),
     [projectId],
   );
+  // The deleted defect's row is gone afterwards; focus then moves to the page heading.
+  const requestFocus = useFocusFallback(defects);
   const open = defects?.filter((d) => d.status === 'OPEN' || d.status === 'IN_PROGRESS').length ?? 0;
 
   return (
@@ -254,13 +277,13 @@ export function DefectsPage() {
         </div>
       )}
       <EditDefectDialog
-        key={editing?.id ?? 'none'}
         projectId={projectId}
         defect={editing}
         members={members.data ?? []}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
+          notify('Defect updated.');
           reload();
         }}
       />
@@ -271,7 +294,9 @@ export function DefectsPage() {
         confirmLabel="Delete defect"
         onConfirm={async () => {
           await api.delete(`/projects/${projectId}/defects/${deleting!.id}`);
+          requestFocus();
           setDeleting(null);
+          notify(`Defect "${deleting!.title}" deleted.`);
           reload();
         }}
         onClose={() => setDeleting(null)}

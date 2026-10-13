@@ -1658,7 +1658,8 @@ input[type='checkbox'] {
   box-shadow: var(--shadow-pop);
 }
 
-.main:has(.toast) {
+/* The notice region lives outside <main>, so the page leaves room for it from the root. */
+:root:has(.toast) .main {
   padding-bottom: 6rem;
 }
 

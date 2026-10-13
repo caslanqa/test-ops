@@ -19,6 +19,7 @@ import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
+import { useNotice } from '../../lib/notice';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { PriorityMark, Tag } from '../../components/StatusChip';
 import {
@@ -28,6 +29,8 @@ import {
   PRIORITY_LABEL,
   labelOf,
 } from '../../lib/labels';
+import { changedFields, hasChanges } from '../../lib/changes';
+import { useFocusFallback } from '../../lib/focus';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectInfo } from '../../lib/projectInfo';
 import {
@@ -342,8 +345,14 @@ function SuiteForm({
     setSaving(true);
     setError(null);
     try {
+      // On edit only changed fields are sent; nothing changed means nothing to save.
+      const fields = suite
+        ? changedFields({ name: suite.name, parentId: suite.parentId }, { name, parentId: parentId || null })
+        : {};
       const saved = suite
-        ? await api.patch<Suite>(`/projects/${projectId}/suites/${suite.id}`, { name, parentId: parentId || null })
+        ? hasChanges(fields)
+          ? await api.patch<Suite>(`/projects/${projectId}/suites/${suite.id}`, fields)
+          : suite
         : await api.post<Suite>(`/projects/${projectId}/suites`, { name, parentId: parentId || undefined });
       onSaved(saved);
     } catch (err) {
@@ -467,13 +476,34 @@ function CaseForm({
     };
     try {
       // Emptied fields are cleared with null on edit; on create they are simply left out.
+      // On edit only changed fields are sent, and nothing changed means nothing to save.
+      const changes = testCase
+        ? changedFields(
+            {
+              title: testCase.title,
+              priority: testCase.priority,
+              severity: testCase.severity,
+              type: testCase.type,
+              automationStatus: testCase.automationStatus,
+              steps: [...testCase.steps]
+                .sort((a, b) => a.position - b.position)
+                .map((step) => ({ action: step.action, expectedResult: step.expectedResult || undefined })),
+              suiteId: testCase.suiteId,
+              description: testCase.description,
+              preconditions: testCase.preconditions,
+            },
+            {
+              ...fields,
+              suiteId: suiteId || null,
+              description: description.trim() || null,
+              preconditions: preconditions.trim() || null,
+            },
+          )
+        : {};
       const saved = testCase
-        ? await api.patch<TestCase>(`/projects/${projectId}/cases/${testCase.id}`, {
-            ...fields,
-            suiteId: suiteId || null,
-            description: description.trim() || null,
-            preconditions: preconditions.trim() || null,
-          })
+        ? hasChanges(changes)
+          ? await api.patch<TestCase>(`/projects/${projectId}/cases/${testCase.id}`, changes)
+          : testCase
         : await api.post<TestCase>(`/projects/${projectId}/cases`, {
             ...fields,
             suiteId: suiteId || undefined,
@@ -610,6 +640,7 @@ export function SuitesCasesPage() {
   const [dialog, setDialog] = useState<'suite' | 'edit-suite' | 'case' | 'edit-case' | null>(null);
   const [confirming, setConfirming] = useState<'archive-case' | 'delete-suite' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const { notify } = useNotice();
   const searchId = useId();
   const listHeadingId = useId();
 
@@ -668,10 +699,25 @@ export function SuitesCasesPage() {
   const selectedSuiteId = selection.kind === 'suite' ? selection.id : '';
   const selectedSuite = suites.find((s) => s.id === selectedSuiteId) ?? null;
 
+  // When the control that was used disappears with the change (an archived case's panel, a deleted
+  // suite's toolbar button), focus moves to the list heading instead of falling to <body>.
+  const requestFocus = useFocusFallback(casesRes.data, () => document.getElementById(listHeadingId));
+
+  /** Opens a dialog; a message from an earlier action no longer applies. */
+  function openDialog(next: NonNullable<typeof dialog>) {
+    setActionError(null);
+    setDialog(next);
+  }
+  function openConfirm(next: NonNullable<typeof confirming>) {
+    setActionError(null);
+    setConfirming(next);
+  }
+
   async function restoreCase(testCase: TestCase) {
     setActionError(null);
     try {
       await api.post(`/projects/${projectId}/cases/${testCase.id}/restore`);
+      notify(`Test case "${testCase.title}" restored.`);
       casesRes.reload();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't restore the case");
@@ -714,11 +760,11 @@ export function SuitesCasesPage() {
         actions={
           editRepository && (
           <>
-            <button type="button" className="btn btn-secondary" onClick={() => setDialog('suite')}>
+            <button type="button" className="btn btn-secondary" onClick={() => openDialog('suite')}>
               <FolderPlus size={16} aria-hidden="true" />
               New suite
             </button>
-            <button type="button" className="btn btn-primary" onClick={() => setDialog('case')}>
+            <button type="button" className="btn btn-primary" onClick={() => openDialog('case')}>
               <Plus size={16} aria-hidden="true" />
               New test case
             </button>
@@ -790,14 +836,14 @@ export function SuitesCasesPage() {
 
           <section className="repo-list" aria-labelledby={listHeadingId}>
             <div className="list-toolbar">
-              <h2 id={listHeadingId} className="list-title truncate">{listTitle}</h2>
+              <h2 id={listHeadingId} tabIndex={-1} className="list-title truncate">{listTitle}</h2>
               {selectedSuite && editRepository && (
                 <div className="toolbar-actions">
-                  <button type="button" className="icon-button" onClick={() => setDialog('edit-suite')} aria-label={`Edit suite ${selectedSuite.name}`} title="Edit suite">
+                  <button type="button" className="icon-button" onClick={() => openDialog('edit-suite')} aria-label={`Edit suite ${selectedSuite.name}`} title="Edit suite">
                     <Pencil size={16} aria-hidden="true" />
                   </button>
                   {deleteRecords && (
-                    <button type="button" className="icon-button" onClick={() => setConfirming('delete-suite')} aria-label={`Delete suite ${selectedSuite.name}`} title="Delete suite">
+                    <button type="button" className="icon-button" onClick={() => openConfirm('delete-suite')} aria-label={`Delete suite ${selectedSuite.name}`} title="Delete suite">
                       <Trash2 size={16} aria-hidden="true" />
                     </button>
                   )}
@@ -823,7 +869,7 @@ export function SuitesCasesPage() {
                   title="No test cases yet"
                   action={
                     editRepository && (
-                      <button type="button" className="btn btn-primary" onClick={() => setDialog('case')}>
+                      <button type="button" className="btn btn-primary" onClick={() => openDialog('case')}>
                         <Plus size={16} aria-hidden="true" />
                         New test case
                       </button>
@@ -887,8 +933,8 @@ export function SuitesCasesPage() {
               testCase={openCase}
               suites={suites}
               canEdit={editRepository}
-              onEdit={() => setDialog('edit-case')}
-              onArchive={() => setConfirming('archive-case')}
+              onEdit={() => openDialog('edit-case')}
+              onArchive={() => openConfirm('archive-case')}
               onRestore={() => restoreCase(openCase)}
               onClose={closeDetail}
             />
@@ -918,6 +964,7 @@ export function SuitesCasesPage() {
         onClose={() => setDialog(null)}
         onSaved={() => {
           setDialog(null);
+          notify('Suite updated.');
           suitesRes.reload();
         }}
       />
@@ -943,6 +990,7 @@ export function SuitesCasesPage() {
         onClose={() => setDialog(null)}
         onSaved={() => {
           setDialog(null);
+          notify('Test case updated.');
           casesRes.reload();
         }}
       />
@@ -953,8 +1001,10 @@ export function SuitesCasesPage() {
         confirmLabel="Archive case"
         onConfirm={async () => {
           await api.delete(`/projects/${projectId}/cases/${openCase!.id}`);
+          requestFocus();
           setConfirming(null);
           if (!showArchived) setOpenCaseId(null);
+          notify(`Test case "${openCase!.title}" archived.`);
           casesRes.reload();
         }}
         onClose={() => setConfirming(null)}
@@ -966,8 +1016,10 @@ export function SuitesCasesPage() {
         confirmLabel="Delete suite"
         onConfirm={async () => {
           await api.delete(`/projects/${projectId}/suites/${selectedSuite!.id}`);
+          requestFocus();
           setConfirming(null);
           setSelection({ kind: 'all' });
+          notify(`Suite "${selectedSuite!.name}" deleted.`);
           suitesRes.reload();
           casesRes.reload();
         }}

@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
+import { Tag } from './StatusChip';
 import { foldForSearch } from '../lib/format';
 import { buildSuiteTree, flattenTree, suitePath, type Suite } from '../lib/suites';
 
@@ -7,6 +8,8 @@ export interface ChecklistCase {
   id: string;
   title: string;
   suiteId: string | null;
+  /** Set for an archived case; those are only offered when they are already linked, so they can be unlinked. */
+  archivedAt?: string | null;
 }
 
 interface CaseChecklistProps {
@@ -50,7 +53,8 @@ export function CaseChecklist({
     );
   }, [cases, suites, query]);
 
-  const visibleIds = groups.flatMap(([, list]) => list.map((c) => c.id));
+  // "Select all visible" never adds archived cases: they can only be kept or unlinked.
+  const visibleIds = groups.flatMap(([, list]) => list.filter((c) => !c.archivedAt).map((c) => c.id));
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selectedSet.has(id));
 
@@ -80,6 +84,10 @@ export function CaseChecklist({
             placeholder="Search titles"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            // Enter in the search box must not submit the surrounding form (it would save the dialog early).
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.preventDefault();
+            }}
           />
         </label>
         <button
@@ -112,7 +120,10 @@ export function CaseChecklist({
                   checked={selectedSet.has(c.id)}
                   onChange={() => toggle(c.id)}
                 />
-                <span>{c.title}</span>
+                <span>
+                  {c.title}
+                  {c.archivedAt && <> <Tag tone="outline">Archived</Tag></>}
+                </span>
               </label>
             ))}
           </div>

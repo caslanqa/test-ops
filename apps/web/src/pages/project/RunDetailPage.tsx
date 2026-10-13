@@ -1,13 +1,15 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Bug, CheckCheck, Paperclip, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import { api, downloadFile } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ConfirmDialog } from '../../components/Members';
+import { useNotice } from '../../lib/notice';
 import { ResultRibbon, StatusLegend } from '../../components/ResultRibbon';
 import { StatusChip, Tag } from '../../components/StatusChip';
-import { formatBytes, formatDate, formatDateTime } from '../../lib/format';
+import { changedFields, hasChanges } from '../../lib/changes';
+import { formatBytes, formatDate, formatDateTime, plural } from '../../lib/format';
 import { RUN_SOURCE_LABEL, RUN_STATUS_LABEL, labelOf } from '../../lib/labels';
 import {
   RESULT_CHOICES,
@@ -51,6 +53,9 @@ interface RunDetail {
   completedAt: string | null;
   runCases: RunCase[];
   progress: Record<string, number>;
+  /** What deleting the run removes with it. */
+  resultCount: number;
+  attachmentCount: number;
 }
 
 interface ResultRow {
@@ -92,13 +97,24 @@ function EditRunForm({
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/projects/${projectId}/runs/${run.id}`, {
-        title,
-        description: description.trim() || null,
-        environment: environment.trim() || null,
-        build: build.trim() || null,
-        configuration: configuration.trim() || null,
-      });
+      // Only changed fields are sent.
+      const fields = changedFields(
+        {
+          title: run.title,
+          description: run.description,
+          environment: run.environment,
+          build: run.build,
+          configuration: run.configuration,
+        },
+        {
+          title,
+          description: description.trim() || null,
+          environment: environment.trim() || null,
+          build: build.trim() || null,
+          configuration: configuration.trim() || null,
+        },
+      );
+      if (hasChanges(fields)) await api.patch(`/projects/${projectId}/runs/${run.id}`, fields);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save the run");
@@ -476,7 +492,12 @@ export function RunDetailPage() {
 
   const [openCaseId, setOpenCaseId] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ text: string; defectLink?: boolean } | null>(null);
+  const { notify, dismiss } = useNotice();
+  // Messages go to the app-wide live region (components/Notice) so that they are announced on every page.
+  const setNotice = (notice: { text: string; defectLink?: boolean } | null) => {
+    if (notice) notify(notice.text, notice.defectLink ? { to: `/projects/${projectId}/defects`, label: 'Go to defects' } : undefined);
+    else dismiss();
+  };
   const [actionError, setActionError] = useState<string | null>(null);
   const [onlyMine, setOnlyMine] = useState(false);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
@@ -626,17 +647,17 @@ export function RunDetailPage() {
         actions={
           <>
             {execute && (
-              <button type="button" className="icon-button" onClick={() => setEditingRun(true)} aria-label="Edit the run" title="Edit">
+              <button type="button" className="icon-button" onClick={() => { setActionError(null); setEditingRun(true); }} aria-label="Edit the run" title="Edit">
                 <Pencil size={16} aria-hidden="true" />
               </button>
             )}
             {deleteRecords && (
-              <button type="button" className="icon-button" onClick={() => setConfirmingDelete(true)} aria-label="Delete the run" title="Delete">
+              <button type="button" className="icon-button" onClick={() => { setActionError(null); setConfirmingDelete(true); }} aria-label="Delete the run" title="Delete">
                 <Trash2 size={16} aria-hidden="true" />
               </button>
             )}
             {canRecord ? (
-              <button type="button" className="btn btn-primary" onClick={() => setConfirmingComplete(true)}>
+              <button type="button" className="btn btn-primary" onClick={() => { setActionError(null); setConfirmingComplete(true); }}>
                 <CheckCheck size={16} aria-hidden="true" />
                 Complete run
               </button>
@@ -650,26 +671,6 @@ export function RunDetailPage() {
         }
       />
 
-      {/* Fixed to the bottom of the screen so the confirmation stays visible wherever in the list the
-          result was entered; role=status also announces it to screen readers without moving focus (WCAG 4.1.3). */}
-      <div className="toast-region" role="status">
-        {notice && (
-          <div className="toast">
-            <p>
-              {notice.text}{' '}
-              {notice.defectLink && <Link to={`/projects/${projectId}/defects`}>Go to defects</Link>}
-            </p>
-            <button
-              type="button"
-              className="icon-button icon-button--on-dark"
-              onClick={() => setNotice(null)}
-              aria-label="Dismiss notification"
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
-          </div>
-        )}
-      </div>
       {actionError && <p className="form-error" role="alert">{actionError}</p>}
 
       <section className="run-summary surface" aria-labelledby="run-progress-heading">
@@ -787,7 +788,6 @@ export function RunDetailPage() {
         onClose={() => setConfirmingComplete(false)}
       />
       <EditRunDialog
-        key={editingRun ? 'open' : 'closed'}
         projectId={projectId}
         run={run}
         open={editingRun}
@@ -801,10 +801,12 @@ export function RunDetailPage() {
       <ConfirmDialog
         open={confirmingDelete}
         title="Delete this run?"
-        message={`"${run.title}" is deleted with all of its results, their attachments and their links to defects. This can't be undone.`}
+        message={`"${run.title}" is deleted with its ${plural(run.resultCount, 'result')} and ${plural(run.attachmentCount, 'attachment')}, and the links from those results to defects. This can't be undone.`}
         confirmLabel="Delete run"
         onConfirm={async () => {
           await api.delete(`/projects/${projectId}/runs/${runId}`);
+          // The message outlives this page; the app shell moves focus to the runs page's content.
+          notify(`Run "${run.title}" deleted.`, undefined, true);
           navigate(`/projects/${projectId}/runs`);
         }}
         onClose={() => setConfirmingDelete(false)}
