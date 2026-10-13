@@ -31,7 +31,13 @@ export class PlansService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.testPlan.findMany({
         where,
-        include: { _count: { select: { items: true, runs: true } } },
+        // `items` counts the active cases only: archived ones stay in the plan but can't start a run,
+        // so clients decide from this number whether a run can be started from the plan.
+        include: {
+          _count: {
+            select: { items: { where: { testCase: { archivedAt: null } } }, runs: true },
+          },
+        },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
         ...pageArgs(query),
       }),

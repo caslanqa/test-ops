@@ -109,7 +109,19 @@ export class RunsService {
       acc[rc.status] = (acc[rc.status] ?? 0) + 1;
       return acc;
     }, {});
-    return { ...run, progress };
+    // What deleting the run would remove besides the run itself, so clients can say so in their confirmation.
+    const [resultCount, attachmentCount] = await this.prisma.$transaction([
+      this.prisma.result.count({ where: { runCase: { runId } } }),
+      this.prisma.attachment.count({
+        where: {
+          OR: [
+            { result: { runCase: { runId } } },
+            { stepResult: { result: { runCase: { runId } } } },
+          ],
+        },
+      }),
+    ]);
+    return { ...run, progress, resultCount, attachmentCount };
   }
 
   async create(userId: string, projectId: string, dto: CreateRunDto) {
@@ -140,6 +152,12 @@ export class RunsService {
       }
       if (found.archivedAt) {
         throw new BadRequestException("This plan is archived; restore it to start runs from it.");
+      }
+      if (found.items.length === 0) {
+        // `items` already leaves out archived cases, so this also covers plans whose cases are all archived.
+        throw new BadRequestException(
+          "This plan has no active test cases; add or restore cases before starting a run from it.",
+        );
       }
       plan = found;
       // The plan's assignments carry over, except for people who lost access to the project since.

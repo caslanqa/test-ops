@@ -51,7 +51,6 @@ const other = `/projects/${(await ok(admin, 'POST', `/workspaces/${ws.id}/projec
 const testerInvitation = await ok(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: testerEmail, role: 'MEMBER' });
 await ok(tester, 'POST', `/invitations/${testerInvitation.token}/accept`);
 await ok(admin, 'POST', `${P}/members`, { email: testerEmail, role: 'TESTER' });
-
 // ---------- pagination
 console.log('--- Pagination and filters ---');
 for (let i = 1; i <= 5; i++) await ok(admin, 'POST', `${P}/milestones`, { name: `Release ${i}` });
@@ -298,6 +297,62 @@ for (const [label, list, id] of archivable) {
 }
 await expectStatus('a restored plan starts runs again', 201, admin, 'POST', `${P}/runs`, { title: 'After restore', planId: arPlan.id });
 
+// Restoring needs the same roles as archiving, and stays inside the project.
+const rCase = await ok(admin, 'POST', `${P}/cases`, { title: 'Restore guard' });
+const rReq = await ok(admin, 'POST', `${P}/requirements`, { title: 'Restore guard' });
+const rPlan = await ok(admin, 'POST', `${P}/plans`, { title: 'Restore guard', testCaseIds: [rCase.id] });
+const restorable = [
+  ['case', `${P}/cases`, rCase.id],
+  ['requirement', `${P}/requirements`, rReq.id],
+  ['plan', `${P}/plans`, rPlan.id],
+];
+for (const [, list, id] of restorable) await ok(admin, 'DELETE', `${list}/${id}`);
+// The tester is re-roled in turn (this avoids registering more accounts, which the sign-in rate limit counts).
+const guardMember = (await ok(admin, 'GET', `${P}/members`)).find((m) => m.user.email === testerEmail);
+for (const role of ['VIEWER', 'AUTOMATION']) {
+  await ok(admin, 'PATCH', `${P}/members/${guardMember.id}`, { role });
+  for (const [label, list, id] of restorable) {
+    await expectStatus(`${role.toLowerCase()}: cannot restore the ${label}`, 403, tester, 'POST', `${list}/${id}/restore`);
+  }
+}
+await ok(admin, 'PATCH', `${P}/members/${guardMember.id}`, { role: 'TESTER' });
+for (const [label, list, id] of restorable) {
+  await expectStatus(`the ${label} of another project is not found`, 404, admin, 'POST', `${list.replace(P, other)}/${id}/restore`);
+}
+check('...and nothing was restored by the refused calls',
+  (await ok(admin, 'GET', `${P}/cases?includeArchived=true`)).find((c) => c.id === rCase.id)?.archivedAt !== null);
+
+// A plan whose cases are all archived has no active cases: it lists none and starts no run.
+const onlyArchivedPlan = await ok(admin, 'POST', `${P}/plans`, { title: 'Only archived', testCaseIds: [rCase.id] });
+const listedPlan = (await ok(admin, 'GET', `${P}/plans`)).find((p) => p.id === onlyArchivedPlan.id);
+check('a plan counts its active cases only', listedPlan?._count.items === 0, JSON.stringify(listedPlan?._count));
+const noActive = await expectStatus('a plan with only archived cases starts no run', 400, admin, 'POST', `${P}/runs`, { title: 'x', planId: onlyArchivedPlan.id });
+check('...and the answer says why', /no active test cases/.test(noActive.json?.message ?? ''), JSON.stringify(noActive.json));
+await expectStatus('an empty plan starts no run', 400, admin, 'POST', `${P}/runs`, { title: 'x', planId: (await ok(admin, 'POST', `${P}/plans`, { title: 'Empty' })).id });
+await ok(admin, 'POST', `${P}/cases/${rCase.id}/restore`);
+check('restoring its case makes the plan count it again',
+  (await ok(admin, 'GET', `${P}/plans`)).find((p) => p.id === onlyArchivedPlan.id)?._count.items === 1);
+await expectStatus('...and start a run', 201, admin, 'POST', `${P}/runs`, { title: 'Back again', planId: onlyArchivedPlan.id });
+
+// PATCH with null clears an optional field; leaving it out keeps it.
+const full = await ok(admin, 'POST', `${P}/cases`, { title: 'Clearable', description: 'text', preconditions: 'before' });
+const cleared = await ok(admin, 'PATCH', `${P}/cases/${full.id}`, { description: null });
+check('null clears a case description and leaves the rest', cleared.description === null && cleared.preconditions === 'before', JSON.stringify(cleared));
+const clearableReq = await ok(admin, 'POST', `${P}/requirements`, { title: 'Clearable', externalRef: 'SHOP-1', description: 'text' });
+const clearedReq = await ok(admin, 'PATCH', `${P}/requirements/${clearableReq.id}`, { externalRef: null });
+check('null clears a requirement reference and leaves the rest', clearedReq.externalRef === null && clearedReq.description === 'text', JSON.stringify(clearedReq));
+const clearablePlan = await ok(admin, 'POST', `${P}/plans`, { title: 'Clearable', description: 'text', environment: 'staging' });
+const clearedPlan = await ok(admin, 'PATCH', `${P}/plans/${clearablePlan.id}`, { environment: null });
+check('null clears a plan environment and leaves the rest', clearedPlan.environment === null && clearedPlan.description === 'text', JSON.stringify(clearedPlan));
+
+// Deleting a suite keeps its sub-suites and cases and moves them to the top level.
+const parentSuite = await ok(admin, 'POST', `${P}/suites`, { name: 'Doomed parent' });
+const childSuite = await ok(admin, 'POST', `${P}/suites`, { name: 'Surviving child', parentId: parentSuite.id });
+const looseCase = await ok(admin, 'POST', `${P}/cases`, { title: 'Surviving case', suiteId: parentSuite.id });
+await expectStatus('a suite with sub-suites and cases is deleted', 200, admin, 'DELETE', `${P}/suites/${parentSuite.id}`);
+check('its sub-suite moves to the top level', (await ok(admin, 'GET', `${P}/suites/${childSuite.id}`)).parentId === null);
+check('its case is kept without a suite', (await ok(admin, 'GET', `${P}/cases/${looseCase.id}`)).suiteId === null);
+
 // ---------- invalid input and parallel requests get 4xx, not 500
 console.log('--- Invalid input and races ---');
 const vSuite = await ok(admin, 'POST', `${P}/suites`, { name: 'Validation' });
@@ -335,6 +390,8 @@ const pid = P.split('/')[2];
 const keptCase = await ok(tester, 'POST', `${P}/cases`, { title: 'Kept case' });
 const keptRun = await ok(admin, 'POST', `${P}/runs`, { title: 'Kept run', testCaseIds: [keptCase.id] });
 await ok(admin, 'POST', `${P}/runs/${keptRun.id}/share`, { enabled: true });
+const lateArchived = await ok(tester, 'POST', `${P}/cases`, { title: 'Archived before the project' });
+await ok(tester, 'DELETE', `${P}/cases/${lateArchived.id}`);
 await expectStatus('a tester cannot archive the project', 403, tester, 'DELETE', P);
 const archived = await expectStatus('a project admin archives the project', 200, admin, 'DELETE', P);
 check('archiving again keeps the date', (await ok(admin, 'DELETE', P)).archivedAt === archived.json?.archivedAt && !!archived.json?.archivedAt);
@@ -348,6 +405,7 @@ check('its data can still be read',
   && !!(await ok(tester, 'GET', P)).archivedAt);
 const blocked = await expectStatus('no new cases', 409, tester, 'POST', `${P}/cases`, { title: 'x' });
 check('the answer says the project is archived', /archived/.test(blocked.json?.message ?? ''), JSON.stringify(blocked.json));
+await expectStatus('no restoring in an archived project', 409, admin, 'POST', `${P}/cases/${lateArchived.id}/restore`);
 await expectStatus('no edits to existing cases', 409, tester, 'PATCH', `${P}/cases/${keptCase.id}`, { title: 'Changed' });
 await expectStatus('no results, also from CI', 409, tester, 'POST', `${P}/runs/${keptRun.id}/results/bulk`, { results: [{ testCaseId: keptCase.id, status: 'PASSED' }] });
 await expectStatus('no new runs', 409, admin, 'POST', `${P}/runs`, { title: 'x', testCaseIds: [keptCase.id] });
