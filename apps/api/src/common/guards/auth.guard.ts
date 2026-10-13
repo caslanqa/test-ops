@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -9,6 +10,10 @@ import { JwtService } from "@nestjs/jwt";
 import * as crypto from "crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
+import {
+  WEB_SESSION_ONLY_KEY,
+  WEB_SESSION_ONLY_MESSAGE,
+} from "../decorators/web-session-only.decorator";
 
 // A single Authorization: Bearer <value> scheme accepts both the web session JWT
 // and automation/CI API tokens (FR: API operations are subject to the user's
@@ -84,6 +89,16 @@ export class AuthGuard implements CanActivate {
       displayName: apiToken.user.displayName,
       authMethod: "api-token",
     };
+
+    // Endpoints marked @WebSessionOnly() refuse API tokens, so a leaked token can't use them to
+    // keep or widen its access.
+    const webSessionOnly = this.reflector.getAllAndOverride<boolean>(
+      WEB_SESSION_ONLY_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (webSessionOnly) {
+      throw new ForbiddenException(WEB_SESSION_ONLY_MESSAGE);
+    }
     return true;
   }
 }

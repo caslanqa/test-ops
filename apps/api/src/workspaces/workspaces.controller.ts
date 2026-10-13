@@ -10,6 +10,7 @@ import {
 } from "../common/decorators/current-user.decorator";
 import type { Response } from "express";
 import { PageQueryDto, PagedResponse, sendPage } from "../common/pagination";
+import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
 import { DeleteWorkspaceDto } from "./dto/delete-workspace.dto";
 
 @ApiTags("workspaces")
@@ -60,6 +61,8 @@ export class WorkspacesController {
     return this.workspacesService.listMembers(user.id, workspaceId);
   }
 
+  /** Adds a member (or changes their role). Web session only: a leaked token must not add accounts. */
+  @WebSessionOnly()
   @Post(":workspaceId/members")
   addMember(
     @CurrentUser() user: AuthenticatedUser,
@@ -69,6 +72,8 @@ export class WorkspacesController {
     return this.workspacesService.addMember(user.id, workspaceId, dto);
   }
 
+  /** Changes a member's role. Web session only, like adding a member. */
+  @WebSessionOnly()
   @Patch(":workspaceId/members/:memberId")
   updateMemberRole(
     @CurrentUser() user: AuthenticatedUser,

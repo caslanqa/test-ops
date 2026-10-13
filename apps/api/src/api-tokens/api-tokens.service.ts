@@ -9,6 +9,8 @@ import { AuthenticatedUser } from "../common/decorators/current-user.decorator";
 import { CreateApiTokenDto } from "./dto/create-api-token.dto";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Lifetime of a token when the request doesn't say; the Account page offers the same. */
+const DEFAULT_LIFETIME_DAYS = 90;
 
 /** The token fields a client may see; the hash is never returned. */
 const PUBLIC_FIELDS = {
@@ -28,7 +30,6 @@ export class ApiTokensService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(user: AuthenticatedUser, dto: CreateApiTokenDto) {
-    this.assertWebSession(user);
     const plainToken = `tops_${crypto.randomBytes(32).toString("base64url")}`;
     const tokenHash = crypto
       .createHash("sha256")
@@ -39,9 +40,13 @@ export class ApiTokensService {
         userId: user.id,
         name: dto.name,
         tokenHash,
-        expiresAt: dto.expiresInDays
-          ? new Date(Date.now() + dto.expiresInDays * DAY_MS)
-          : null,
+        // Omitted: the default lifetime. An explicit null: no expiration.
+        expiresAt:
+          dto.expiresInDays === null
+            ? null
+            : new Date(
+                Date.now() + (dto.expiresInDays ?? DEFAULT_LIFETIME_DAYS) * DAY_MS,
+              ),
       },
     });
     return {
@@ -54,7 +59,6 @@ export class ApiTokensService {
   }
 
   async list(user: AuthenticatedUser) {
-    this.assertWebSession(user);
     return this.prisma.apiToken.findMany({
       where: { userId: user.id },
       select: PUBLIC_FIELDS,
@@ -63,7 +67,6 @@ export class ApiTokensService {
   }
 
   async revoke(user: AuthenticatedUser, tokenId: string) {
-    this.assertWebSession(user);
     const token = await this.prisma.apiToken.findUnique({
       where: { id: tokenId },
     });
@@ -77,17 +80,5 @@ export class ApiTokensService {
       data: { revokedAt: new Date() },
       select: PUBLIC_FIELDS,
     });
-  }
-
-  /**
-   * Tokens are managed only from a signed-in web session. Otherwise a leaked token could create
-   * new tokens for itself, and revoking it would not end the access.
-   */
-  private assertWebSession(user: AuthenticatedUser) {
-    if (user.authMethod !== "jwt") {
-      throw new ForbiddenException(
-        "API tokens can only be managed from a signed-in web session.",
-      );
-    }
   }
 }

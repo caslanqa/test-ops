@@ -6,8 +6,11 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
+import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
 
 @ApiTags("api-tokens")
+// Token management is web-session only: otherwise a leaked token could mint replacements for itself.
+@WebSessionOnly()
 @Controller("api-tokens")
 export class ApiTokensController {
   constructor(private readonly apiTokensService: ApiTokensService) {}
