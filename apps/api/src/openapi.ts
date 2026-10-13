@@ -2,12 +2,23 @@ import type { INestApplication } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import { OPENAPI_PUBLIC_EXTENSION } from "./common/decorators/public.decorator";
+import { BULK_RESULTS_MAX_ITEMS } from "./runs/dto/bulk-submit-results.dto";
+import {
+  RESULT_COMMENT_MAX_LENGTH,
+  STEP_RESULT_COMMENT_MAX_LENGTH,
+  STEP_RESULTS_MAX_ITEMS,
+} from "./runs/dto/result-limits";
 
 const HTTP_METHODS = ["get", "put", "post", "delete", "patch", "options", "head", "trace"] as const;
 
 /** Describes a per-minute limit in the API description; 0 means the limit is turned off. */
 function perMinute(limit: number, who: string): string {
   return limit > 0 ? `${limit} requests per minute ${who}` : `no limit ${who}`;
+}
+
+/** A byte count as MiB for the API description, e.g. 10485760 → "10 MiB". */
+function mebibytes(bytes: number): string {
+  return `${Number((bytes / 1024 / 1024).toFixed(1))} MiB`;
 }
 
 /**
@@ -26,6 +37,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
   const config = app.get(ConfigService);
   const general = config.get<number>("rateLimit.perMinute", 600);
   const auth = config.get<number>("rateLimit.authPerMinute", 10);
+  const maxJsonBody = config.get<number>("http.maxJsonBodyBytes")!;
 
   const description = [
     "REST API for TestOps (v1). Every endpoint below is under `/api/v1`.",
@@ -35,8 +47,8 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       "Choose **Authorize** to try requests from this page.",
     "",
     "**API tokens** expire after 90 days unless `expiresInDays` (1-365) says otherwise; send `null` for no " +
-      "expiration. A token cannot manage API tokens, change the password, or add workspace or project members and change " +
-      "their roles (403): those need a web session. Changing the password returns 200 with a fresh session " +
+      "expiration. A token cannot manage API tokens or workspace invitations, change the password, add project " +
+      "members, or change workspace or project roles (403): those need a web session. Changing the password returns 200 with a fresh session " +
       "token, signs out other sessions and revokes all of the user's API tokens.",
     "",
     "**Errors** are JSON: `{ \"statusCode\": 404, \"message\": \"…\", \"error\": \"Not Found\" }`. " +
@@ -46,6 +58,13 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       `password changes are limited to ${perMinute(auth, "per account")}. Responses carry ` +
       "`X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; an exceeded limit returns 429 " +
       "with a `Retry-After` header in seconds.",
+    "",
+    `**Request size:** JSON request bodies may be up to 100 KB, except a bulk result upload ` +
+      `(\`POST …/runs/{runId}/results/bulk\`), which holds up to ${BULK_RESULTS_MAX_ITEMS} results in up to ` +
+      `${mebibytes(maxJsonBody)}; larger requests return 413. A result's \`comment\` may be up to ` +
+      `${RESULT_COMMENT_MAX_LENGTH} characters, and it holds up to ${STEP_RESULTS_MAX_ITEMS} \`stepResults\`, ` +
+      `each with a comment of up to ${STEP_RESULT_COMMENT_MAX_LENGTH} characters; larger values return 400. ` +
+      "Attach long logs as files instead.",
   ].join("\n");
 
   const document = SwaggerModule.createDocument(

@@ -1,4 +1,5 @@
-// Rate limit smoke test: general limit headers, login/password attempt limits, 429 response.
+// Rate limit smoke test: general limit headers, login/password attempt limits, requests without valid
+// credentials, 429 response.
 // Runs against a running stack and creates its own data:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/ratelimit.mjs
@@ -97,7 +98,15 @@ if (!(authLimit > 0)) {
   check(`[${again.status}] other accounts from the same IP are not locked`, again.status === 200, JSON.stringify(again.json));
 
   // 4) Password change: per-user limit (password guessing with a hijacked session).
-  const reg = await call(null, 'POST', '/auth/register', { email: `rl-user-${sfx}@test.local`, displayName: 'Rate Limit', password: 'FirstPass123' });
+  const register = () => call(null, 'POST', '/auth/register', { email: `rl-user-${sfx}@test.local`, displayName: 'Rate Limit', password: 'FirstPass123' });
+  let reg = await register();
+  if (reg.status === 429) {
+    // Sign-ups have their own per-IP limit, and the earlier suites create their accounts the same way.
+    const wait = num(reg.headers, 'retry-after') ?? 60;
+    console.log(`.. per-IP sign-up budget is used up; waiting ${wait} s`);
+    await new Promise((resolve) => setTimeout(resolve, (wait + 1) * 1000));
+    reg = await register();
+  }
   check(`[${reg.status}] registration`, reg.status === 201, JSON.stringify(reg.json));
   const user = reg.json?.accessToken;
   const pw = await exhaust(authLimit, () =>
@@ -109,6 +118,40 @@ if (!(authLimit > 0)) {
   // A user who hit the credential attempt limit can still use everything else.
   const meAfter = await call(user, 'GET', '/auth/me');
   check(`[${meAfter.status}] the password limit does not affect other endpoints`, meAfter.status === 200);
+}
+
+// 5) Requests without valid credentials count against the client address. AuthGuard rejects them
+//    before the per-user limit runs, so they used to be unlimited and each guessed API token cost a
+//    database lookup. The 401s of the earlier suites count too, so the 429 may come a bit earlier.
+const ipLimit = num(anon.headers, 'x-ratelimit-limit');
+if (!(ipLimit > 0)) {
+  console.log('SKIP request limit is disabled (RATE_LIMIT_PER_MINUTE=0)');
+} else {
+  const ciToken = (await call(admin, 'POST', '/api-tokens', { name: `rate limit ${sfx}` })).json?.token;
+  const wrongToken = () => call('tops_not-a-real-token', 'GET', '/workspaces');
+  let first = await wrongToken();
+  if (first.status === 429) {
+    const wait = num(first.headers, 'retry-after') ?? 60;
+    console.log(`.. this address is still blocked from an earlier run; waiting ${wait} s`);
+    await new Promise((resolve) => setTimeout(resolve, (wait + 1) * 1000));
+    first = await wrongToken();
+  }
+  const unauthorized = [];
+  let blocked = first;
+  while (blocked.status === 401 && unauthorized.length < ipLimit) {
+    unauthorized.push(blocked.status);
+    blocked = await wrongToken();
+  }
+  check(`requests with a wrong API token get 401 up to the limit (${unauthorized.length} of at most ${ipLimit})`,
+    unauthorized.length > 0 && unauthorized.length <= ipLimit, `(stopped at ${blocked.status})`);
+  const wait = num(blocked.headers, 'retry-after');
+  check(`[${blocked.status}] then 429 with Retry-After 1-60 s`, blocked.status === 429 && wait >= 1 && wait <= 60, JSON.stringify(blocked.json));
+  const noToken = await call(null, 'GET', '/workspaces');
+  check(`[${noToken.status}] requests without a token from that address get 429 too`, noToken.status === 429);
+  const tokenWhileBlocked = await call(ciToken, 'GET', '/auth/me');
+  check(`[${tokenWhileBlocked.status}] API tokens from that address wait as well (no lookups while blocked)`, tokenWhileBlocked.status === 429);
+  const session = await call(admin, 'GET', '/auth/me');
+  check(`[${session.status}] signed-in web sessions from that address keep working`, session.status === 200);
 }
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);

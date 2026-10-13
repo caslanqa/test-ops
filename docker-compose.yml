@@ -24,17 +24,24 @@ services:
     # To pin a version, set e.g. APP_IMAGE=ghcr.io/caslanqa/testops:0.2.0 in .env
     image: ${APP_IMAGE:-ghcr.io/caslanqa/testops:latest}
     restart: unless-stopped
+    # A small init process runs as PID 1 and passes signals on to the app. On `docker compose
+    # stop`/`down` the app finishes running requests (e.g. uploads) and closes its database
+    # connections; after the grace period Docker stops it forcibly.
+    init: true
+    stop_grace_period: 30s
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-testops}:${POSTGRES_PASSWORD:-testops}@postgres:5432/${POSTGRES_DB:-testops}?schema=public
       # No default: compose stops if it is empty; the app does not start with the example/a short value.
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is not set; add it to .env (scripts/start.sh generates one)}"
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
-      # Self-registration ("Create one" link on the login screen); if false, only workspace admins create accounts.
+      # Self-registration ("Create one" link on the login screen); if false, people join through workspace invitation links.
       SELF_REGISTRATION: ${SELF_REGISTRATION:-true}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-}
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}
       AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-}
       TRUST_PROXY: ${TRUST_PROXY:-}
+      # FR-074: largest JSON request body in bytes (e.g. a bulk result upload); if left empty, 10 MiB
+      JSON_MAX_REQUEST_SIZE_BYTES: ${JSON_MAX_REQUEST_SIZE_BYTES:-}
       ATTACHMENTS_DIR: /data/attachments
       # FR-045: if left empty, the app defaults are used (32 MB / 128 MB / 20 files)
       ATTACHMENT_MAX_FILE_SIZE_BYTES: ${ATTACHMENT_MAX_FILE_SIZE_BYTES:-}

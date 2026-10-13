@@ -18,6 +18,7 @@ function check(label, pass, detail = '') {
 // reviewed change: update this list together with the @Public() decorator.
 const EXPECTED_PUBLIC = [
   'GET /api/v1/auth/config',
+  'GET /api/v1/invitations/{token}',
   'GET /api/v1/public/runs/{token}',
   'GET /health',
   'GET /ready',

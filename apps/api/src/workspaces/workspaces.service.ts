@@ -1,28 +1,53 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { PageQueryDto, pageArgs } from "../common/pagination";
-import { AuthService } from "../auth/auth.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
-import { AddWorkspaceMemberDto } from "./dto/add-workspace-member.dto";
+import { UpdateWorkspaceDto } from "./dto/update-workspace.dto";
 import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
+// People join a workspace through invitations (see InvitationsService); nobody is added directly.
 @Injectable()
 export class WorkspacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
     private readonly attachmentFiles: AttachmentFilesService,
-    private readonly authService: AuthService,
+    private readonly config: ConfigService,
   ) {}
 
+  /**
+   * With SELF_REGISTRATION off, only an admin of a workspace may start another one; otherwise any
+   * member could create a workspace and invite arbitrary email addresses, which creates accounts
+   * on a closed installation. A server without any workspace is still open so the first one can
+   * be created. This is an interim rule until the Installation Admin role (FR-090) exists.
+   */
+  private async assertMayCreateWorkspace(userId: string) {
+    if (this.config.get<boolean>("auth.selfRegistration") ?? false) return;
+    const [isAdmin, anyWorkspace] = await Promise.all([
+      this.prisma.workspaceMember.findFirst({
+        where: { userId, role: WorkspaceRole.ADMIN },
+        select: { id: true },
+      }),
+      this.prisma.workspace.findFirst({ select: { id: true } }),
+    ]);
+    if (anyWorkspace && !isAdmin) {
+      throw new ForbiddenException(
+        "Creating workspaces is limited to workspace admins while self-registration is disabled.",
+      );
+    }
+  }
+
   async create(userId: string, dto: CreateWorkspaceDto) {
+    await this.assertMayCreateWorkspace(userId);
     const existing = await this.prisma.workspace.findUnique({
       where: { slug: dto.slug },
     });
@@ -67,13 +92,13 @@ export class WorkspacesService {
     return { ...workspace, currentUserRole: member.role };
   }
 
-  async update(userId: string, workspaceId: string, name: string) {
+  async update(userId: string, workspaceId: string, dto: UpdateWorkspaceDto) {
     await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
       WorkspaceRole.ADMIN,
     ]);
     return this.prisma.workspace.update({
       where: { id: workspaceId },
-      data: { name },
+      data: { name: dto.name },
     });
   }
 
@@ -85,48 +110,6 @@ export class WorkspacesService {
         user: { select: { id: true, email: true, displayName: true } },
       },
       orderBy: { createdAt: "asc" },
-    });
-  }
-
-  async addMember(
-    userId: string,
-    workspaceId: string,
-    dto: AddWorkspaceMemberDto,
-  ) {
-    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
-      WorkspaceRole.ADMIN,
-    ]);
-
-    let targetUser = await this.authService.findUserByEmail(dto.email);
-    if (!targetUser) {
-      if (!dto.displayName || !dto.password) {
-        throw new ConflictException(
-          "No account exists for this email; displayName and password are required to create one",
-        );
-      }
-      targetUser = await this.prisma.user.create({
-        data: {
-          email: dto.email.trim().toLowerCase(),
-          displayName: dto.displayName,
-          passwordHash: await this.authService.hashPassword(dto.password),
-        },
-      });
-    }
-
-    // Re-adding an existing member updates their role; the last admin cannot be demoted this way either.
-    const existing = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId: targetUser.id } },
-    });
-    if (existing && dto.role !== WorkspaceRole.ADMIN) {
-      await this.assertNotLastAdmin(workspaceId, existing.id);
-    }
-
-    return this.prisma.workspaceMember.upsert({
-      where: {
-        workspaceId_userId: { workspaceId, userId: targetUser.id },
-      },
-      create: { workspaceId, userId: targetUser.id, role: dto.role },
-      update: { role: dto.role },
     });
   }
 

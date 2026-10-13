@@ -24,4 +24,9 @@ export class ListRunsQueryDto extends PageQueryDto {
   @IsOptional()
   @IsString()
   milestoneId?: string;
+
+  /** Only runs with at least one case assigned to this user, e.g. the signed-in tester's own. */
+  @IsOptional()
+  @IsString()
+  assigneeId?: string;
 }

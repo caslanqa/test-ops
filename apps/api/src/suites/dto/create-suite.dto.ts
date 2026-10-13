@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from "class-validator";
+import { IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 
 export class CreateSuiteDto {
   @IsString()
@@ -11,5 +11,6 @@ export class CreateSuiteDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   parentId?: string;
 }

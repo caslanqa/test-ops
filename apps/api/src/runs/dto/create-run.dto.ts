@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { IsArray, IsEnum, IsOptional, IsString } from "class-validator";
+import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString } from "class-validator";
 import { RunSource } from "@prisma/client";
 
 export class CreateRunDto {
@@ -12,10 +12,12 @@ export class CreateRunDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   planId?: string;
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   milestoneId?: string;
 
   @IsOptional()

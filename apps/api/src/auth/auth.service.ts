@@ -8,6 +8,7 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
+import { InvitationsService } from "../invitations/invitations.service";
 import { RegisterDto } from "./dto/register.dto";
 
 const BCRYPT_ROUNDS = 12;
@@ -18,6 +19,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly invitations: InvitationsService,
   ) {}
 
   async hashPassword(plain: string): Promise<string> {
@@ -54,25 +56,38 @@ export class AuthService {
   }
 
   /**
-   * Self-registration (SELF_REGISTRATION). The new user is not a member of any
-   * workspace: they can create their own workspace or be added by an admin;
-   * they cannot see data from any other scope.
+   * Creates an account. Open sign-up needs SELF_REGISTRATION; such a user is not a member
+   * of any workspace and can create their own or be invited. With an invitation link the
+   * invited account can be created even when sign-up is off, and it joins that workspace.
    */
   async register(dto: RegisterDto) {
-    if (!this.publicConfig().selfRegistration) {
+    if (!dto.inviteToken && !this.publicConfig().selfRegistration) {
       throw new ForbiddenException(
-        "Self-registration is disabled on this server; your workspace admin creates your account.",
+        "Self-registration is disabled on this server; ask a workspace admin for an invitation link.",
       );
     }
-    if (await this.findUserByEmail(dto.email)) {
+    const email = dto.email.trim().toLowerCase();
+    // The link comes first: a made-up one must not reveal which addresses have an account.
+    if (dto.inviteToken) {
+      await this.invitations.verify(dto.inviteToken, email);
+    }
+    if (await this.findUserByEmail(email)) {
       throw new ConflictException("An account with this email already exists. Try signing in.");
     }
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email.trim().toLowerCase(),
-        displayName: dto.displayName.trim(),
-        passwordHash: await this.hashPassword(dto.password),
-      },
+    const passwordHash = await this.hashPassword(dto.password);
+    const user = await this.prisma.$transaction(async (tx) => {
+      const invitation = dto.inviteToken
+        ? await this.invitations.claim(tx, dto.inviteToken, email)
+        : null;
+      const created = await tx.user.create({
+        data: { email, displayName: dto.displayName.trim(), passwordHash },
+      });
+      if (invitation) {
+        await tx.workspaceMember.create({
+          data: { workspaceId: invitation.workspaceId, userId: created.id, role: invitation.role },
+        });
+      }
+      return created;
     });
     return this.issueSession(user);
   }

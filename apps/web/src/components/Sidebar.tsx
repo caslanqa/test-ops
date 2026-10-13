@@ -67,6 +67,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 <p className="context-role">
                   Your role: {labelOf(PROJECT_ROLE_LABEL, info.project.currentUserRole)}
                 </p>
+                {info.project.archivedAt && (
+                  <p className="context-archived">Archived: read-only until an admin restores it.</p>
+                )}
               </>
             )}
           </div>

@@ -12,6 +12,6 @@
     "dev:web": "pnpm --filter @testops/web dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "test:smoke": "node tests/smoke/openapi.mjs && node tests/smoke/scope.mjs && node tests/smoke/api-crud.mjs && node tests/smoke/users.mjs && bash tests/smoke/attachments.sh && node tests/smoke/ratelimit.mjs"
+    "test:smoke": "node tests/smoke/openapi.mjs && node tests/smoke/scope.mjs && node tests/smoke/api-crud.mjs && node tests/smoke/users.mjs && node tests/smoke/results.mjs && bash tests/smoke/attachments.sh && node tests/smoke/ratelimit.mjs"
   }
 }

@@ -104,15 +104,54 @@ const revoked = await ok(user, 'DELETE', `/api-tokens/${tok.id}`);
 check('token revoke response has no tokenHash', revoked && !('tokenHash' in revoked), JSON.stringify(revoked));
 await expectStatus('revoked token is rejected', 401, tok.token, 'GET', '/auth/me');
 
-console.log('--- Workspace membership and roles ---');
+console.log('--- Workspace setup ---');
 const ws = await ok(admin, 'POST', '/workspaces', { name: 'Membership test', slug: `membership-${sfx}` });
 const pA = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'UA', name: 'Project A' });
 const pB = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'UB', name: 'Project B' });
 await expectStatus('adding a non-workspace-member to a project is rejected', 400, admin, 'POST', `/projects/${pA.id}/members`, { email, role: 'TESTER' });
-await ok(admin, 'POST', `/workspaces/${ws.id}/members`, { email: email.toUpperCase(), role: 'MEMBER' });
-// A workspace admin's token must not be able to add accounts (even its own owner's) or change roles.
-const adminToken = (await ok(admin, 'POST', '/api-tokens', { name: `admin smoke ${sfx}` })).token;
-await expectStatus('an API token cannot add a workspace member', 403, adminToken, 'POST', `/workspaces/${ws.id}/members`, { email, role: 'ADMIN' });
+
+console.log('--- Invitations ---');
+// Inviting must not reveal whether an address has an account, and nobody joins without accepting.
+const known = await call(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: email.toUpperCase(), role: 'MEMBER' });
+const unknownEmail = `nobody-${sfx}@test.local`;
+const unknown = await call(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: unknownEmail, role: 'MEMBER' });
+const shape = (r) => `${r.status}:${Object.keys(r.json ?? {}).sort().join(',')}`;
+check('an existing account and an unknown address get the same answer', known.status === 201 && shape(known) === shape(unknown), `${shape(known)} vs ${shape(unknown)}`);
+check('the answer carries no account details', !('displayName' in (known.json ?? {})) && !('user' in (known.json ?? {})), JSON.stringify(known.json));
+await expectStatus('inviting creates no account', 401, null, 'POST', '/auth/login', { email: unknownEmail, password: 'Whatever123' });
+check('an invited user is not a member before accepting', !(await ok(user, 'GET', '/workspaces')).some((w) => w.id === ws.id));
+await expectStatus('the old direct-add endpoint is gone', 404, admin, 'POST', `/workspaces/${ws.id}/members`, { email, role: 'MEMBER' });
+const preview = await call(null, 'GET', `/invitations/${known.json?.token}`);
+check(`[${preview.status}] the link shows the workspace and invited address without signing in`,
+  preview.status === 200 && preview.json?.workspace?.id === ws.id && preview.json?.email === email.toLowerCase(), JSON.stringify(preview.json));
+const pendingList = await ok(admin, 'GET', `/workspaces/${ws.id}/invitations`);
+check('admins see pending invitations without their links',
+  pendingList.length === 2 && pendingList.every((i) => !('token' in i) && !('tokenHash' in i)), JSON.stringify(pendingList));
+await expectStatus('another account cannot use the link', 403, user, 'POST', `/invitations/${unknown.json?.token}/accept`);
+await expectStatus('the invited account accepts', 201, user, 'POST', `/invitations/${known.json?.token}/accept`);
+await expectStatus('a link works only once', 404, user, 'POST', `/invitations/${known.json?.token}/accept`);
+await expectStatus('a used link no longer opens', 404, null, 'GET', `/invitations/${known.json?.token}`);
+await expectStatus('members cannot see pending invitations', 403, user, 'GET', `/workspaces/${ws.id}/invitations`);
+await expectStatus('inviting a member again is rejected', 409, admin, 'POST', `/workspaces/${ws.id}/invitations`, { email, role: 'ADMIN' });
+// The failed attempt by another account left this link unused, so it can still be revoked.
+await expectStatus('admins revoke an invitation', 204, admin, 'DELETE', `/workspaces/${ws.id}/invitations/${unknown.json?.id}`);
+await expectStatus('a revoked link no longer opens', 404, null, 'GET', `/invitations/${unknown.json?.token}`);
+// The link's holder can create the invited account, which joins the workspace at once. The link
+// is checked first: another address gets 403 even if it has an account, so 409 can't reveal one.
+const second = await ok(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: unknownEmail, role: 'MEMBER' });
+await expectStatus('the link creates no other address and reveals none', 403, null, 'POST', '/auth/register', { email, displayName: 'Someone', password: 'SomeonePass123', inviteToken: second.token });
+const invited = await expectStatus('the link creates the invited account', 201, null, 'POST', '/auth/register', { email: unknownEmail, displayName: 'Invited', password: 'InvitedPass123', inviteToken: second.token });
+check('...which joins the workspace', (await ok(invited.json?.accessToken, 'GET', '/workspaces')).some((w) => w.id === ws.id));
+
+// An API token must not create access that outlives it, even for a workspace admin.
+const adminToken = (await ok(admin, 'POST', '/api-tokens', { name: 'smoke-admin' })).token;
+const viaToken = await expectStatus('an API token cannot create an invitation', 403, adminToken, 'POST', `/workspaces/${ws.id}/invitations`, { email: `token-${sfx}@test.local`, role: 'MEMBER' });
+check('...and says to use a web session', /web session/i.test(String(viaToken.json?.message)), JSON.stringify(viaToken.json));
+const pendingInvite = await ok(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: `token2-${sfx}@test.local`, role: 'MEMBER' });
+await expectStatus('an API token cannot revoke an invitation', 403, adminToken, 'DELETE', `/workspaces/${ws.id}/invitations/${pendingInvite.id}`);
+await expectStatus('...while a signed-in admin can', 204, admin, 'DELETE', `/workspaces/${ws.id}/invitations/${pendingInvite.id}`);
+
+console.log('--- Workspace membership and roles ---');
 const wsAsUser = await ok(user, 'GET', `/workspaces/${ws.id}`);
 check('workspace response role: MEMBER', wsAsUser.currentUserRole === 'MEMBER', JSON.stringify(wsAsUser));
 check('role for admin: ADMIN', (await ok(admin, 'GET', `/workspaces/${ws.id}`)).currentUserRole === 'ADMIN');
@@ -136,7 +175,6 @@ const adminMember = wsMembers.find((m) => m.user.email === ADMIN_EMAIL);
 const userMember = wsMembers.find((m) => m.user.email === email.toLowerCase());
 await expectStatus('last admin cannot be demoted to member', 400, admin, 'PATCH', `/workspaces/${ws.id}/members/${adminMember.id}`, { role: 'MEMBER' });
 await expectStatus('last admin cannot be removed', 400, admin, 'DELETE', `/workspaces/${ws.id}/members/${adminMember.id}`);
-await expectStatus('last admin cannot be demoted by re-adding', 400, admin, 'POST', `/workspaces/${ws.id}/members`, { email: ADMIN_EMAIL, role: 'MEMBER' });
 await expectStatus('an API token cannot change a member role', 403, adminToken, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'ADMIN' });
 await ok(admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'ADMIN' });
 await expectStatus('an admin can be demoted while there is a second admin', 200, admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'MEMBER' });

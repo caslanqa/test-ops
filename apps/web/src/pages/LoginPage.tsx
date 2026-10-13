@@ -1,5 +1,5 @@
 import { useId, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
 import { AuthLayout } from '../components/AuthLayout';
@@ -7,10 +7,16 @@ import { useAuthConfig } from '../lib/authConfig';
 import { FormError } from '../components/Page';
 import { usePageTitle } from '../lib/useResource';
 
+/** Where to go after signing in: a path in this app from `?next=` (e.g. an invitation), never another site. */
+function nextPath(value: string | null): string {
+  return value && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\') ? value : '/workspaces';
+}
+
 export function LoginPage() {
   usePageTitle('Sign in');
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: config } = useAuthConfig();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,7 +31,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate('/workspaces');
+      navigate(nextPath(searchParams.get('next')));
     } catch (err) {
       setError(
         !(err instanceof ApiError)
@@ -44,10 +50,13 @@ export function LoginPage() {
     <AuthLayout>
       <form className="login-form" onSubmit={onSubmit}>
         <h1>Sign in</h1>
+        {searchParams.get('expired') && (
+          <p className="login-notice" role="status">Your session has ended. Sign in again to continue where you left off.</p>
+        )}
         <p className="login-hint">
           {config?.selfRegistration
             ? 'Sign in with your TestOps account.'
-            : 'Sign in with the account your workspace admin created for you.'}
+            : 'Sign in with your TestOps account. New here? Open the invitation link from your workspace admin.'}
         </p>
         <div className="field">
           <label htmlFor={emailId} className="field-label">Email</label>

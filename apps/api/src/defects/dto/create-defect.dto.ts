@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { IsArray, IsEnum, IsOptional, IsString } from "class-validator";
+import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString } from "class-validator";
 import { DefectSeverity } from "@prisma/client";
 
 export class CreateDefectDto {
@@ -17,6 +17,7 @@ export class CreateDefectDto {
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty()
   assigneeId?: string;
 
   @IsOptional()

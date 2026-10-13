@@ -1,6 +1,6 @@
 // API completeness smoke test: pagination and filters on list endpoints, the get/update/delete
-// endpoints that complete each resource's CRUD, bulk case creation, project-wide listings and
-// the cleanup of attachment files. Runs against a running stack and creates its own data:
+// endpoints that complete each resource's CRUD, bulk case creation, project-wide listings, archived
+// projects and the cleanup of attachment files. Runs against a running stack and creates its own data:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/api-crud.mjs
 // BASE, ADMIN_EMAIL, ADMIN_PASSWORD can be used to change the target.
@@ -48,7 +48,8 @@ const tester = (await ok(null, 'POST', '/auth/register', { email: testerEmail, d
 const ws = await ok(admin, 'POST', '/workspaces', { name: `CRUD ${sfx}`, slug: `crud-${sfx}` });
 const P = `/projects/${(await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'CR', name: 'CRUD project' })).id}`;
 const other = `/projects/${(await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'OT', name: 'Other project' })).id}`;
-await ok(admin, 'POST', `/workspaces/${ws.id}/members`, { email: testerEmail, role: 'MEMBER' });
+const testerInvitation = await ok(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: testerEmail, role: 'MEMBER' });
+await ok(tester, 'POST', `/invitations/${testerInvitation.token}/accept`);
 await ok(admin, 'POST', `${P}/members`, { email: testerEmail, role: 'TESTER' });
 
 // ---------- pagination
@@ -104,6 +105,32 @@ const reqCases = await call(admin, 'GET', `${P}/requirements/${req.id}/cases?lim
 check('linked cases of a requirement are listed and paged', reqCases.status === 200 && reqCases.json.length === 1 && total(reqCases) === 2, JSON.stringify(reqCases.json));
 check('requirements can be searched', total(await call(admin, 'GET', `${P}/requirements?q=sign in`)) === 1 && total(await call(admin, 'GET', `${P}/requirements?q=nothing`)) === 0);
 await expectStatus('linked cases of a foreign requirement are not listed', 404, admin, 'GET', `${other}/requirements/${req.id}/cases`);
+
+// ---------- requirement coverage
+console.log('--- Requirement coverage (FR-022) ---');
+const { cases: [busy, failing, retried, fixedLater, neverRun] } = await ok(admin, 'POST', `${P}/cases/bulk`, {
+  cases: ['busy', 'failing', 'retried', 'fixed later', 'never run'].map((name) => ({ title: `Coverage: ${name}` })),
+});
+const covered = await ok(admin, 'POST', `${P}/requirements`, { title: 'Checkout is covered' });
+await ok(admin, 'POST', `${P}/requirements/${covered.id}/cases`, { testCaseIds: ids([busy, failing, retried, fixedLater, neverRun]) });
+const uncovered = await ok(admin, 'POST', `${P}/requirements`, { title: 'Refunds are covered' });
+const older = await ok(admin, 'POST', `${P}/runs`, { title: 'Coverage history', testCaseIds: ids([failing, retried, fixedLater]) });
+for (const [testCase, status] of [[failing, 'FAILED'], [retried, 'FAILED'], [retried, 'PASSED'], [fixedLater, 'FAILED']]) {
+  await ok(admin, 'POST', `${P}/runs/${older.id}/results`, { testCaseId: testCase.id, status });
+}
+const newer = await ok(admin, 'POST', `${P}/runs`, { title: 'Coverage nightly', testCaseIds: ids([busy, fixedLater]) });
+await ok(admin, 'POST', `${P}/runs/${newer.id}/results`, { testCaseId: fixedLater.id, status: 'PASSED' });
+// More recent results for one case than the report used to read for a whole requirement (200).
+await ok(admin, 'POST', `${P}/runs/${newer.id}/results/bulk`, { results: Array.from({ length: 220 }, () => ({ testCaseId: busy.id, status: 'PASSED' })) });
+const coverage = await ok(admin, 'GET', `${P}/requirements/coverage`);
+const breakdown = coverage.find((r) => r.requirementId === covered.id)?.lastResultStatusBreakdown ?? {};
+check('a failing case stays visible next to a frequently run one', breakdown.FAILED === 1, JSON.stringify(breakdown));
+check('each case counts with its latest attempt in its latest run', breakdown.PASSED === 3, JSON.stringify(breakdown));
+check('a case that never ran is not counted as executed', Object.values(breakdown).reduce((a, b) => a + b, 0) === 4
+  && coverage.find((r) => r.requirementId === covered.id)?.caseCount === 5, JSON.stringify(breakdown));
+const empty = coverage.find((r) => r.requirementId === uncovered.id);
+check('a requirement without cases has no coverage', empty?.hasCoverage === false && empty.caseCount === 0
+  && Object.keys(empty.lastResultStatusBreakdown).length === 0, JSON.stringify(empty));
 
 // ---------- suites and milestones
 console.log('--- Suites and milestones ---');
@@ -200,6 +227,120 @@ const fields = await call(tester, 'GET', '/system-fields');
 check('system fields list the allowed values',
   fields.status === 200 && fields.json.result.status.includes('PASSED') && fields.json.testCase.priority.includes('HIGH') && fields.json.roles.project.includes('TESTER'), JSON.stringify(fields.json));
 await expectStatus('system fields require sign-in', 401, null, 'GET', '/system-fields');
+
+// ---------- plans → runs: fields, order, archived cases and assignments (FR-030, FR-032)
+console.log('--- Plans and runs ---');
+const testerId = (await ok(tester, 'GET', '/auth/me')).id;
+const c1 = await ok(admin, 'POST', `${P}/cases`, { title: 'Plan case 1' });
+const c2 = await ok(admin, 'POST', `${P}/cases`, { title: 'Plan case 2' });
+const c3 = await ok(admin, 'POST', `${P}/cases`, { title: 'Plan case 3' });
+const release2 = await ok(admin, 'POST', `${P}/milestones`, { name: 'Release 2' });
+const release2Plan = await ok(admin, 'POST', `${P}/plans`, {
+  title: 'Release 2 regression', milestoneId: release2.id, environment: 'staging', configuration: 'chrome',
+  testCaseIds: [c2.id, c1.id], assigneeId: testerId,
+});
+await ok(admin, 'POST', `${P}/plans/${release2Plan.id}/cases`, { testCaseIds: [c3.id] });
+const planNow = await ok(admin, 'GET', `${P}/plans/${release2Plan.id}`);
+check('a release2Plan keeps its case order, added cases go last',
+  planNow.items.map((i) => i.testCaseId).join() === [c2.id, c1.id, c3.id].join(), JSON.stringify(planNow.items.map((i) => i.testCaseId)));
+check('the case-ids endpoint returns the release2Plan order',
+  (await ok(admin, 'GET', `${P}/plans/${release2Plan.id}/case-ids`)).testCaseIds.join() === [c2.id, c1.id, c3.id].join());
+check('a release2Plan can assign its cases', planNow.items.filter((i) => i.assigneeId === testerId).length === 2);
+await expectStatus('a single release2Plan case can be assigned', 200, admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases/${c3.id}`, { assigneeId: testerId });
+await expectStatus('only people with access to the project can be assigned', 404, admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases/${c3.id}`, { assigneeId: 'not-a-user' });
+await ok(admin, 'DELETE', `${P}/cases/${c3.id}`); // archived after it was planned
+const fromPlan = await ok(admin, 'POST', `${P}/runs`, { title: 'Release 2 run', planId: release2Plan.id });
+check('a run from a release2Plan takes its milestone, environment and configuration',
+  fromPlan.milestoneId === release2.id && fromPlan.environment === 'staging' && fromPlan.configuration === 'chrome', JSON.stringify(fromPlan));
+const fromPlanCases = [...fromPlan.runCases].sort((a, b) => a.position - b.position);
+check('...lists the cases in release2Plan order and leaves archived ones out',
+  fromPlanCases.map((rc) => rc.testCaseId).join() === [c2.id, c1.id].join(), JSON.stringify(fromPlanCases.map((rc) => rc.testCaseId)));
+check('...and takes over the assignments', fromPlanCases.every((rc) => rc.assigneeId === testerId));
+const overridden = await ok(admin, 'POST', `${P}/runs`, { title: 'Prod check', planId: release2Plan.id, environment: 'production' });
+check('values in the request win over the release2Plan', overridden.environment === 'production' && overridden.configuration === 'chrome');
+const adHoc = await ok(admin, 'POST', `${P}/runs`, { title: 'Ad hoc', testCaseIds: [c2.id, c1.id, c2.id] });
+check('an ad hoc run keeps the given order and ignores repeats',
+  [...adHoc.runCases].sort((a, b) => a.position - b.position).map((rc) => rc.testCaseId).join() === [c2.id, c1.id].join());
+await expectStatus('an ad hoc run cannot include an archived case', 400, admin, 'POST', `${P}/runs`, { title: 'x', testCaseIds: [c1.id, c3.id] });
+const adHocCase = adHoc.runCases[0];
+await expectStatus('a tester can take a case in a run', 200, tester, 'PATCH', `${P}/runs/${adHoc.id}/cases/${adHocCase.id}`, { assigneeId: testerId });
+await expectStatus('...and give it back', 200, tester, 'PATCH', `${P}/runs/${adHoc.id}/cases/${adHocCase.id}`, { assigneeId: null });
+const assignedRuns = await ok(tester, 'GET', `${P}/runs?assigneeId=${testerId}`);
+check('runs can be filtered to the ones with cases assigned to someone',
+  assignedRuns.some((r) => r.id === fromPlan.id) && !assignedRuns.some((r) => r.id === adHoc.id), JSON.stringify(assignedRuns.map((r) => r.title)));
+// Someone who left the project is not assigned in new runs.
+const testerMembership = (await ok(admin, 'GET', `${P}/members`)).find((m) => m.user.email === testerEmail);
+await ok(admin, 'DELETE', `${P}/members/${testerMembership.id}`);
+const afterLeaving = await ok(admin, 'POST', `${P}/runs`, { title: 'After leaving', planId: release2Plan.id });
+check('an assignee who left the project is not assigned in new runs', afterLeaving.runCases.every((rc) => rc.assigneeId === null));
+await ok(admin, 'POST', `${P}/members`, { email: testerEmail, role: 'TESTER' });
+
+// ---------- invalid input and parallel requests get 4xx, not 500
+console.log('--- Invalid input and races ---');
+const vSuite = await ok(admin, 'POST', `${P}/suites`, { name: 'Validation' });
+const vCase = await ok(admin, 'POST', `${P}/cases`, { title: 'Validation case' });
+const vRun = await ok(admin, 'POST', `${P}/runs`, { title: 'Validation run', testCaseIds: [vCase.id] });
+const tooBig = 3_000_000_000;
+await expectStatus('an empty parent suite ID is rejected', 400, admin, 'POST', `${P}/suites`, { name: 'x', parentId: '' });
+await expectStatus('an empty suite ID on a case is rejected', 400, admin, 'POST', `${P}/cases`, { title: 'x', suiteId: '' });
+await expectStatus('an empty milestone ID on a run is rejected', 400, admin, 'POST', `${P}/runs`, { title: 'x', milestoneId: '', testCaseIds: [vCase.id] });
+await expectStatus('an empty assignee is rejected instead of stored', 400, admin, 'POST', `${P}/defects`, { title: 'x', assigneeId: '' });
+await expectStatus('a duration beyond the integer range is rejected', 400, admin, 'POST', `${P}/runs/${vRun.id}/results`, { testCaseId: vCase.id, status: 'PASSED', durationMs: tooBig });
+await expectStatus('a negative duration is rejected', 400, admin, 'POST', `${P}/runs/${vRun.id}/results`, { testCaseId: vCase.id, status: 'PASSED', durationMs: -5 });
+await expectStatus('a suite position beyond the integer range is rejected', 400, admin, 'PATCH', `${P}/suites/${vSuite.id}`, { position: tooBig });
+const nul = await expectStatus('a NUL character in text is rejected', 400, admin, 'POST', `${P}/cases`, { title: 'a\u0000b' });
+check('...with a message that says so', /NUL/.test(nul.json?.message ?? ''), JSON.stringify(nul.json));
+await expectStatus('a NUL character in the URL is rejected', 400, admin, 'GET', '/projects/%00');
+await expectStatus('an empty workspace name is rejected', 400, admin, 'PATCH', `/workspaces/${ws.id}`, { name: '' });
+await expectStatus('a workspace name that is not text is rejected', 400, admin, 'PATCH', `/workspaces/${ws.id}`, { name: 123 });
+await expectStatus('unknown workspace fields are rejected', 400, admin, 'PATCH', `/workspaces/${ws.id}`, { name: ws.name, foo: 1 });
+check('a workspace can still be renamed', (await ok(admin, 'PATCH', `/workspaces/${ws.id}`, { name: `${ws.name} renamed` })).name === `${ws.name} renamed`);
+await ok(admin, 'PATCH', `/workspaces/${ws.id}`, { name: ws.name }); // the deletion check below confirms with this name
+const statuses = (responses) => responses.map((r) => r.status).sort().join(',');
+const slugRace = await Promise.all(Array.from({ length: 5 }, () => call(admin, 'POST', '/workspaces', { name: 'Race', slug: `race-${sfx}` })));
+check('parallel workspaces with one slug: one 201, the rest 409', statuses(slugRace) === '201,409,409,409,409', statuses(slugRace));
+const keyRace = await Promise.all(Array.from({ length: 5 }, () => call(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'RACE', name: 'Race' })));
+check('parallel projects with one key: one 201, the rest 409', statuses(keyRace) === '201,409,409,409,409', statuses(keyRace));
+const delRace = await Promise.all(Array.from({ length: 3 }, () => call(admin, 'DELETE', `${P}/suites/${vSuite.id}`)));
+check('parallel deletes of one suite: one succeeds, the rest 404', statuses(delRace) === '200,404,404', statuses(delRace));
+const raceWs = slugRace.find((r) => r.status === 201)?.json;
+if (raceWs) await ok(admin, 'DELETE', `/workspaces/${raceWs.id}`, { confirmName: raceWs.name });
+
+// ---------- archived projects: read-only until restored
+console.log('--- Archived projects ---');
+const pid = P.split('/')[2];
+const keptCase = await ok(tester, 'POST', `${P}/cases`, { title: 'Kept case' });
+const keptRun = await ok(admin, 'POST', `${P}/runs`, { title: 'Kept run', testCaseIds: [keptCase.id] });
+await ok(admin, 'POST', `${P}/runs/${keptRun.id}/share`, { enabled: true });
+await expectStatus('a tester cannot archive the project', 403, tester, 'DELETE', P);
+const archived = await expectStatus('a project admin archives the project', 200, admin, 'DELETE', P);
+check('archiving again keeps the date', (await ok(admin, 'DELETE', P)).archivedAt === archived.json?.archivedAt && !!archived.json?.archivedAt);
+const listed = (items) => items.some((p) => p.id === pid);
+check('an archived project leaves the project lists',
+  !listed(await ok(admin, 'GET', `/workspaces/${ws.id}/projects`)) && !listed(await ok(tester, 'GET', '/projects')));
+const archivedList = await call(admin, 'GET', `/workspaces/${ws.id}/projects?archived=true`);
+check('archived projects can be listed', archivedList.status === 200 && archivedList.json.length === 1 && archivedList.json[0].id === pid, JSON.stringify(archivedList.json));
+check('its data can still be read',
+  (await call(tester, 'GET', `${P}/cases`)).status === 200 && (await call(tester, 'GET', `${P}/runs/${keptRun.id}`)).status === 200
+  && !!(await ok(tester, 'GET', P)).archivedAt);
+const blocked = await expectStatus('no new cases', 409, tester, 'POST', `${P}/cases`, { title: 'x' });
+check('the answer says the project is archived', /archived/.test(blocked.json?.message ?? ''), JSON.stringify(blocked.json));
+await expectStatus('no edits to existing cases', 409, tester, 'PATCH', `${P}/cases/${keptCase.id}`, { title: 'Changed' });
+await expectStatus('no results, also from CI', 409, tester, 'POST', `${P}/runs/${keptRun.id}/results/bulk`, { results: [{ testCaseId: keptCase.id, status: 'PASSED' }] });
+await expectStatus('no new runs', 409, admin, 'POST', `${P}/runs`, { title: 'x', testCaseIds: [keptCase.id] });
+await expectStatus('no new suites', 409, admin, 'POST', `${P}/suites`, { name: 'x' });
+await expectStatus('no renaming', 409, admin, 'PATCH', P, { name: 'Renamed' });
+await expectStatus('no new public links', 409, admin, 'POST', `${P}/runs/${keptRun.id}/share`, { enabled: true });
+await expectStatus('a public link can still be turned off', 201, admin, 'POST', `${P}/runs/${keptRun.id}/share`, { enabled: false });
+const testerMember = (await ok(admin, 'GET', `${P}/members`)).find((m) => m.user.email === testerEmail);
+await expectStatus('members can still be managed', 200, admin, 'PATCH', `${P}/members/${testerMember.id}`, { role: 'VIEWER' });
+const keyTaken = await expectStatus('a new project cannot take its key', 409, admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'CR', name: 'Again' });
+check('...and the answer points to the archived project', /archived/i.test(keyTaken.json?.message ?? ''), JSON.stringify(keyTaken.json));
+await expectStatus('a tester cannot restore it', 403, tester, 'POST', `${P}/restore`);
+const restored = await expectStatus('a project admin restores it', 200, admin, 'POST', `${P}/restore`);
+check('a restored project is listed and writable again',
+  restored.json?.archivedAt === null && listed(await ok(admin, 'GET', `/workspaces/${ws.id}/projects`))
+  && (await call(admin, 'POST', `${P}/cases`, { title: 'After restore' })).status === 201);
 
 // ---------- workspace: delete
 console.log('--- Deleting a workspace ---');

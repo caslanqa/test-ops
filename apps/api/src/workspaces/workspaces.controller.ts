@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res
 import { ApiTags } from "@nestjs/swagger";
 import { WorkspacesService } from "./workspaces.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
-import { AddWorkspaceMemberDto } from "./dto/add-workspace-member.dto";
+import { UpdateWorkspaceDto } from "./dto/update-workspace.dto";
 import { UpdateWorkspaceMemberRoleDto } from "./dto/update-member-role.dto";
 import {
   CurrentUser,
@@ -48,9 +48,9 @@ export class WorkspacesController {
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param("workspaceId") workspaceId: string,
-    @Body("name") name: string,
+    @Body() dto: UpdateWorkspaceDto,
   ) {
-    return this.workspacesService.update(user.id, workspaceId, name);
+    return this.workspacesService.update(user.id, workspaceId, dto);
   }
 
   @Get(":workspaceId/members")
@@ -61,18 +61,7 @@ export class WorkspacesController {
     return this.workspacesService.listMembers(user.id, workspaceId);
   }
 
-  /** Adds a member (or changes their role). Web session only: a leaked token must not add accounts. */
-  @WebSessionOnly()
-  @Post(":workspaceId/members")
-  addMember(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("workspaceId") workspaceId: string,
-    @Body() dto: AddWorkspaceMemberDto,
-  ) {
-    return this.workspacesService.addMember(user.id, workspaceId, dto);
-  }
-
-  /** Changes a member's role. Web session only, like adding a member. */
+  /** Changes a member's workspace role. Web session only: a leaked token must not grant roles. */
   @WebSessionOnly()
   @Patch(":workspaceId/members/:memberId")
   updateMemberRole(
