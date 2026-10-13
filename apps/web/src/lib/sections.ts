@@ -1,6 +1,6 @@
 import { Bug, ClipboardList, FolderTree, ListChecks, PlayCircle, Users } from 'lucide-react';
 
-/** In-project sections; the order follows the Qase workflow: design → plan → run → track. */
+/** In-project sections; the order follows the usual test workflow: design → plan → run → track. */
 export const PROJECT_SECTIONS = [
   { path: 'cases', label: 'Test cases', icon: FolderTree },
   { path: 'requirements', label: 'Requirements', icon: ListChecks },
