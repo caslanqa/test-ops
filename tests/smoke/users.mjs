@@ -107,6 +107,14 @@ await expectStatus('the link creates no other address and reveals none', 403, nu
 const invited = await expectStatus('the link creates the invited account', 201, null, 'POST', '/auth/register', { email: unknownEmail, displayName: 'Invited', password: 'InvitedPass123', inviteToken: second.token });
 check('...which joins the workspace', (await ok(invited.json?.accessToken, 'GET', '/workspaces')).some((w) => w.id === ws.id));
 
+// An API token must not create access that outlives it, even for a workspace admin.
+const adminToken = (await ok(admin, 'POST', '/api-tokens', { name: 'smoke-admin' })).token;
+const viaToken = await expectStatus('an API token cannot create an invitation', 403, adminToken, 'POST', `/workspaces/${ws.id}/invitations`, { email: `token-${sfx}@test.local`, role: 'MEMBER' });
+check('...and says to sign in', /sign in/i.test(String(viaToken.json?.message)), JSON.stringify(viaToken.json));
+const pendingInvite = await ok(admin, 'POST', `/workspaces/${ws.id}/invitations`, { email: `token2-${sfx}@test.local`, role: 'MEMBER' });
+await expectStatus('an API token cannot revoke an invitation', 403, adminToken, 'DELETE', `/workspaces/${ws.id}/invitations/${pendingInvite.id}`);
+await expectStatus('...while a signed-in admin can', 204, admin, 'DELETE', `/workspaces/${ws.id}/invitations/${pendingInvite.id}`);
+
 console.log('--- Workspace membership and roles ---');
 const wsAsUser = await ok(user, 'GET', `/workspaces/${ws.id}`);
 check('workspace response role: MEMBER', wsAsUser.currentUserRole === 'MEMBER', JSON.stringify(wsAsUser));
@@ -129,6 +137,7 @@ const adminMember = wsMembers.find((m) => m.user.email === ADMIN_EMAIL);
 const userMember = wsMembers.find((m) => m.user.email === email.toLowerCase());
 await expectStatus('last admin cannot be demoted to member', 400, admin, 'PATCH', `/workspaces/${ws.id}/members/${adminMember.id}`, { role: 'MEMBER' });
 await expectStatus('last admin cannot be removed', 400, admin, 'DELETE', `/workspaces/${ws.id}/members/${adminMember.id}`);
+await expectStatus('an API token cannot change a member role', 403, adminToken, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'ADMIN' });
 await ok(admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'ADMIN' });
 await expectStatus('an admin can be demoted while there is a second admin', 200, admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'MEMBER' });
 

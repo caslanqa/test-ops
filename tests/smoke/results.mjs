@@ -175,5 +175,50 @@ await expectStatus('...and a bulk upload', 403, ci, 'POST', `${P}/runs/${correct
 await expectStatus('a project admin reopens it', 201, ci, 'POST', `${P}/runs/${corrected.id}/reopen`);
 await expectStatus('the reopened run accepts results again', 201, ci, 'POST', `${P}/runs/${corrected.id}/results`, { testCaseId: cases[12].id, status: 'PASSED' });
 
+// ---------- blank externalTestId
+console.log('--- Blank externalTestId ---');
+const blank = await newRun('Blank keys');
+for (const key of ['', '   ']) {
+  const a = await expectStatus(`externalTestId ${JSON.stringify(key)} is accepted`, 201, ci, 'POST', `${P}/runs/${blank.id}/results`, { testCaseId: cases[13].id, status: 'PASSED', externalTestId: key });
+  const b = await expectStatus(`...and again for the same case (no 409)`, 201, ci, 'POST', `${P}/runs/${blank.id}/results`, { testCaseId: cases[13].id, status: 'FAILED', externalTestId: key });
+  check('...each is its own attempt without a key', a.json?.id !== b.json?.id && a.json?.externalTestId === null && b.json?.externalTestId === null, JSON.stringify([a.json, b.json]));
+}
+const blankBulk = await expectStatus('a bulk upload with blank keys repeated for one case', 201, ci, 'POST', `${P}/runs/${blank.id}/results/bulk`, {
+  results: [{ testCaseId: cases[14].id, status: 'PASSED', externalTestId: '' }, { testCaseId: cases[14].id, status: 'FAILED', externalTestId: '' }],
+});
+check('...stores two attempts', blankBulk.json?.results?.length === 2 && blankBulk.json.results[0].id !== blankBulk.json.results[1].id);
+
+// ---------- request size and field caps
+console.log('--- Request size and field caps ---');
+const big = 'x'.repeat(150 * 1024);
+await expectStatus('a >100 KB login body is rejected', 413, null, 'POST', '/auth/login', { email: `${big}@test.local`, password: 'x' });
+await expectStatus('a >100 KB register body is rejected', 413, null, 'POST', '/auth/register', { email: 'a@test.local', displayName: big, password: 'x' });
+await expectStatus('a >100 KB body on another authenticated route is rejected', 413, ci, 'POST', `${P}/runs/${blank.id}/results`, { testCaseId: cases[0].id, status: 'PASSED', comment: big });
+check('...while the large bulk upload above was accepted', bulk.status === 201);
+const capRun = await newRun('Caps');
+const one = { testCaseId: cases[15].id, status: 'FAILED' };
+await expectStatus('a comment of 10,000 characters is accepted', 201, ci, 'POST', `${P}/runs/${capRun.id}/results`, { ...one, comment: 'c'.repeat(10_000) });
+await expectStatus('a longer comment is rejected', 400, ci, 'POST', `${P}/runs/${capRun.id}/results`, { ...one, comment: 'c'.repeat(10_001) });
+const steps = (n) => Array.from({ length: n }, (_, i) => ({ stepPosition: i, status: 'PASSED' }));
+await expectStatus('200 step results are accepted', 201, ci, 'POST', `${P}/runs/${capRun.id}/results`, { ...one, stepResults: steps(200) });
+await expectStatus('201 step results are rejected', 400, ci, 'POST', `${P}/runs/${capRun.id}/results`, { ...one, stepResults: steps(201) });
+await expectStatus('a step comment over 2,000 characters is rejected', 400, ci, 'POST', `${P}/runs/${capRun.id}/results`, { ...one, stepResults: [{ stepPosition: 0, status: 'FAILED', comment: 'c'.repeat(2_001) }] });
+await expectStatus('the caps apply inside a bulk upload', 400, ci, 'POST', `${P}/runs/${capRun.id}/results/bulk`, { results: [{ ...one, stepResults: steps(201) }] });
+const capped = await ok(ci, 'POST', `${P}/runs/${capRun.id}/results`, one);
+await expectStatus('a corrected comment over the cap is rejected', 400, ci, 'PATCH', `${P}/runs/${capRun.id}/results/${capped.id}`, { comment: 'c'.repeat(10_001) });
+
+// ---------- parallel plan item adds
+console.log('--- Parallel plan item adds ---');
+const plan = await ok(ci, 'POST', `${P}/plans`, { title: 'Parallel plan' });
+const adds = await Promise.all(cases.slice(0, 8).map((c) => call(ci, 'POST', `${P}/plans/${plan.id}/cases`, { testCaseIds: [c.id] })));
+check('parallel adds all succeed', adds.every((r) => r.status === 201), JSON.stringify(adds.map((r) => r.status)));
+const planItems = (await ok(ci, 'GET', `${P}/plans/${plan.id}`)).items;
+check('...and get distinct positions', planItems.length === 8 && new Set(planItems.map((i) => i.position)).size === 8, JSON.stringify(planItems.map((i) => i.position)));
+const parallelNew = await newRun('Parallel new cases');
+const adders = await Promise.all(cases.slice(40, 48).map((c) => call(ci, 'POST', `${P}/runs/${parallelNew.id}/results`, { testCaseId: c.id, status: 'PASSED' })));
+check('parallel results adding new cases to a run all succeed', adders.every((r) => r.status === 201), JSON.stringify(adders.map((r) => r.status)));
+const runItems = (await ok(ci, 'GET', `${P}/runs/${parallelNew.id}`)).runCases;
+check('...and the added cases get distinct positions', runItems.length === 8 && new Set(runItems.map((i) => i.position)).size === 8, JSON.stringify(runItems.map((i) => i.position)));
+
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);
 process.exit(failures === 0 ? 0 : 1);
