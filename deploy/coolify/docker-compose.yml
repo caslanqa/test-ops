@@ -25,7 +25,7 @@ services:
       - no-new-privileges:true
 
   app:
-    image: ghcr.io/caslanqa/testops:0.6.0
+    image: ghcr.io/caslanqa/testops:0.7.0
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
@@ -35,7 +35,7 @@ services:
       - JWT_SECRET=${SERVICE_HEX_64_JWTSECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-8h}
       - SELF_REGISTRATION=${SELF_REGISTRATION:-true}
-      - TRUST_PROXY=${TRUST_PROXY:-}
+      - TRUST_PROXY=${TRUST_PROXY:-2}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-}
       - AUTH_RATE_LIMIT_PER_MINUTE=${AUTH_RATE_LIMIT_PER_MINUTE:-}
       - AUTH_IP_RATE_LIMIT_PER_MINUTE=${AUTH_IP_RATE_LIMIT_PER_MINUTE:-}
