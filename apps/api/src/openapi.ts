@@ -34,6 +34,11 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       "**Account → API tokens** in the app) or the session token returned by `POST /api/v1/auth/login`. " +
       "Choose **Authorize** to try requests from this page.",
     "",
+    "**API tokens** expire after 90 days unless `expiresInDays` (1-365) says otherwise; send `null` for no " +
+      "expiration. A token cannot manage API tokens, change the password, or add workspace members and change " +
+      "their roles (403): those need a web session. Changing the password returns 200 with a fresh session " +
+      "token, signs out other sessions and revokes all of the user's API tokens.",
+    "",
     "**Errors** are JSON: `{ \"statusCode\": 404, \"message\": \"…\", \"error\": \"Not Found\" }`. " +
       "Validation failures return 400 with `message` as a list of problems.",
     "",
