@@ -1,0 +1,69 @@
+# TestOps on Coolify (testops.caslanqa.com) — public demo.
+# Differences from the root docker-compose.yml (local/installer use):
+#   - pinned image tags, no published host ports (traffic only via Coolify proxy / Cloudflare Tunnel)
+#   - secrets are Coolify magic variables (generated and stored by Coolify)
+#   - lower attachment limits and memory caps (shared server, public sign-up)
+#   - extra volume for pg_dump files shipped off-server by Coolify Backups
+services:
+  postgres:
+    image: postgres:16.15-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=testops
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DB=testops
+    volumes:
+      - testops-pgdata:/var/lib/postgresql/data
+      - testops-db-dumps:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testops -d testops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    image: ghcr.io/caslanqa/testops:0.6.0
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment:
+      - SERVICE_URL_APP_3000
+      - DATABASE_URL=postgresql://testops:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/testops?schema=public
+      - JWT_SECRET=${SERVICE_HEX_64_JWTSECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-8h}
+      - SELF_REGISTRATION=${SELF_REGISTRATION:-true}
+      - TRUST_PROXY=${TRUST_PROXY:-}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-}
+      - AUTH_RATE_LIMIT_PER_MINUTE=${AUTH_RATE_LIMIT_PER_MINUTE:-}
+      - AUTH_IP_RATE_LIMIT_PER_MINUTE=${AUTH_IP_RATE_LIMIT_PER_MINUTE:-}
+      - JSON_MAX_REQUEST_SIZE_BYTES=${JSON_MAX_REQUEST_SIZE_BYTES:-}
+      - ATTACHMENTS_DIR=/data/attachments
+      # Public demo: 5 MB per file, 20 MB per request, 5 files (app defaults: 32 MB / 128 MB / 20)
+      - ATTACHMENT_MAX_FILE_SIZE_BYTES=${ATTACHMENT_MAX_FILE_SIZE_BYTES:-5242880}
+      - ATTACHMENT_MAX_REQUEST_SIZE_BYTES=${ATTACHMENT_MAX_REQUEST_SIZE_BYTES:-20971520}
+      - ATTACHMENT_MAX_FILES_PER_REQUEST=${ATTACHMENT_MAX_FILES_PER_REQUEST:-5}
+      - ATTACHMENT_ALLOWED_EXTENSIONS=${ATTACHMENT_ALLOWED_EXTENSIONS:-}
+      - PORT=3000
+    volumes:
+      - testops-attachments:/data/attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    mem_limit: 1g
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  testops-pgdata:
+  testops-db-dumps:
+  testops-attachments:
