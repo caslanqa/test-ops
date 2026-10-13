@@ -4,7 +4,7 @@
 //   SELF_REGISTRATION=false docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/closed-install.mjs
 // BASE, ADMIN_EMAIL and ADMIN_PASSWORD change the target. Not part of `test:smoke`, which runs
-// against the default open configuration.
+// against the default open configuration; CI runs it as a separate step after recreating the app.
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'ChangeMe123!';
