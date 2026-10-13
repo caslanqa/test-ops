@@ -678,7 +678,7 @@ export function SuitesCasesPage() {
     return list;
   }, [cases, selection, nodesById, query]);
 
-  // As in Qase, cases are listed in suite tree order under suite headings; within the
+  // As in common test management tools, cases are listed in suite tree order under suite headings; within the
   // same suite creation order is kept (the API returns the newest first).
   const groups = useMemo(() => {
     const order = new Map(flattenTree(tree).map((node, i) => [node.id, i]));

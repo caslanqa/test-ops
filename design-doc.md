@@ -2,7 +2,7 @@
 
 **Version:** 0.2 (draft)  
 **Date:** 1 October 2026  
-**Product approach:** Qase-like workflows; independent product, self-hosted deployment  
+**Product approach:** familiar test management workflows; independent product, self-hosted deployment  
 **Deployment:** Docker image + Docker Compose  
 **Database:** PostgreSQL
 
@@ -12,7 +12,7 @@ TestOps is a test management platform in which test cases are managed and linked
 
 The product is not just a test case repository. The web interface, the public REST API, CI/test framework reporters and issue tracker integrations all use the same test data. The test plan bridges manual QA and automation; every result becomes traceable to its related case, requirement, run and evidence files.
 
-Qase's product scope and public documentation are used as a functional reference; its brand, visual design and proprietary code are not copied.
+Established commercial test management tools serve as a functional reference; no brand, visual design or proprietary code is copied.
 
 ## 2. Scope and key decisions
 
@@ -252,14 +252,3 @@ The case view also summarizes the latest result and a consecutive failed-run cou
 - The first framework reporter should be chosen based on users' automation stacks; this document takes JUnit XML as the general starting point.
 - Initial performance targets will be determined through real-world usage and load testing.
 - Automatic synchronization of requirement content from external systems such as Jira/GitHub is outside the MVP; in the MVP only the external reference (ID/URL) is stored, and the content is entered manually or via import.
-
-## 12. References
-
-- [Qase product page](https://www.qase.io/product/)
-- [Qase integrations](https://www.qase.io/integrations/)
-- [Qase API introduction and authentication](https://developers.qase.io/reference/introduction-to-the-qase-api)
-- [Test plans and combining manual/automated results](https://developers.qase.io/docs/test-plans)
-- [How reporters work](https://developers.qase.io/docs/start-here)
-- [Matching automation to tests by test case ID](https://developers.qase.io/docs/linking-tests)
-- [Run configuration and submitting results to an existing run](https://developers.qase.io/docs/test-runs)
-- [Adding attachments to test results](https://developers.qase.io/docs/attachments)
