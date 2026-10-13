@@ -6,7 +6,7 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
-import { requireWebSession } from "../common/require-web-session";
+import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
 
 @ApiTags("workspaces")
 @Controller("workspaces/:workspaceId/invitations")
@@ -14,16 +14,17 @@ export class WorkspaceInvitationsController {
   constructor(private readonly invitationsService: InvitationsService) {}
 
   /**
-   * Invites an email address to the workspace (workspace admins only, signed in; not with an API token). The response carries the
+   * Invites an email address to the workspace (workspace admins only). The response carries the
    * invitation link's token once; it looks the same whether or not the address has an account.
+   * Web session only: a link lets someone join long after a leaked token is revoked.
    */
+  @WebSessionOnly()
   @Post()
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Param("workspaceId") workspaceId: string,
     @Body() dto: CreateInvitationDto,
   ) {
-    requireWebSession(user);
     return this.invitationsService.create(user.id, workspaceId, dto);
   }
 
@@ -36,7 +37,8 @@ export class WorkspaceInvitationsController {
     return this.invitationsService.list(user.id, workspaceId);
   }
 
-  /** Revokes a pending invitation; its link stops working (workspace admins only, signed in; not with an API token). */
+  /** Revokes a pending invitation; its link stops working (workspace admins only, web session only). */
+  @WebSessionOnly()
   @Delete(":invitationId")
   @HttpCode(204)
   async revoke(
@@ -44,7 +46,6 @@ export class WorkspaceInvitationsController {
     @Param("workspaceId") workspaceId: string,
     @Param("invitationId") invitationId: string,
   ) {
-    requireWebSession(user);
     await this.invitationsService.revoke(user.id, workspaceId, invitationId);
   }
 }

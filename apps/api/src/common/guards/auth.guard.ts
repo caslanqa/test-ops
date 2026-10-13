@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -11,6 +12,10 @@ import type { Request, Response } from "express";
 import { PrismaService } from "../../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 import { AuthenticatedUser } from "../decorators/current-user.decorator";
+import {
+  WEB_SESSION_ONLY_KEY,
+  WEB_SESSION_ONLY_MESSAGE,
+} from "../decorators/web-session-only.decorator";
 import { AuthFailureLimiter } from "../rate-limit";
 
 /**
@@ -49,7 +54,6 @@ export class AuthGuard implements CanActivate {
     const request = http.getRequest();
     try {
       request.user = await this.authenticate(request, http.getResponse());
-      return true;
     } catch (error) {
       // Requests that fail to authenticate count against the client's address (FR-077).
       if (error instanceof UnauthorizedException && !(error instanceof SessionEndedException)) {
@@ -58,6 +62,17 @@ export class AuthGuard implements CanActivate {
       }
       throw error;
     }
+
+    // Endpoints marked @WebSessionOnly() refuse API tokens, so a leaked token can't use them to
+    // keep or widen its access. A 403, not a failed authentication: the limiter doesn't count it.
+    const webSessionOnly = this.reflector.getAllAndOverride<boolean>(WEB_SESSION_ONLY_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (webSessionOnly && request.user.authMethod !== "jwt") {
+      throw new ForbiddenException(WEB_SESSION_ONLY_MESSAGE);
+    }
+    return true;
   }
 
   /** The user behind the request's bearer token; 401 when it is missing or not valid. */
@@ -70,7 +85,7 @@ export class AuthGuard implements CanActivate {
 
     // JWTs have three dot-separated segments; API tokens are a single random string.
     if (token.split(".").length === 3) {
-      let payload: { sub?: string };
+      let payload: { sub?: string; sv?: number };
       try {
         payload = await this.jwtService.verifyAsync(token);
       } catch (error) {
@@ -85,7 +100,9 @@ export class AuthGuard implements CanActivate {
       const user = payload.sub
         ? await this.prisma.user.findUnique({ where: { id: payload.sub } })
         : null;
-      if (!user || !user.isActive) {
+      // A password change raises sessionVersion and so ends the sessions signed in before it.
+      // Tokens issued before session versions existed carry no `sv` and count as version 0.
+      if (!user || !user.isActive || (payload.sv ?? 0) !== user.sessionVersion) {
         throw new SessionEndedException();
       }
       return {
@@ -93,6 +110,7 @@ export class AuthGuard implements CanActivate {
         email: user.email,
         displayName: user.displayName,
         authMethod: "jwt",
+        sessionVersion: user.sessionVersion,
       };
     }
 
@@ -108,6 +126,11 @@ export class AuthGuard implements CanActivate {
     });
     if (!apiToken || apiToken.revokedAt || !apiToken.user.isActive) {
       throw new UnauthorizedException("Invalid or revoked API token");
+    }
+    if (apiToken.expiresAt && apiToken.expiresAt <= new Date()) {
+      throw new UnauthorizedException(
+        "This API token has expired; create a new one under Account → API tokens",
+      );
     }
     await this.prisma.apiToken.update({
       where: { id: apiToken.id },
