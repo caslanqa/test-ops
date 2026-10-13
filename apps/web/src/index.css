@@ -2228,6 +2228,12 @@ input[readonly] {
   min-width: 14rem;
 }
 
+/* The lifetime choice is short; it shouldn't take as much room as the token name. */
+.token-create .token-lifetime {
+  flex: 0 1 10rem;
+  min-width: 9rem;
+}
+
 .token-reveal {
   display: flex;
   flex-direction: column;

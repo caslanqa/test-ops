@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -9,6 +10,10 @@ import { JwtService } from "@nestjs/jwt";
 import * as crypto from "crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
+import {
+  WEB_SESSION_ONLY_KEY,
+  WEB_SESSION_ONLY_MESSAGE,
+} from "../decorators/web-session-only.decorator";
 
 // A single Authorization: Bearer <value> scheme accepts both the web session JWT
 // and automation/CI API tokens (FR: API operations are subject to the user's
@@ -44,7 +49,9 @@ export class AuthGuard implements CanActivate {
         const user = await this.prisma.user.findUnique({
           where: { id: payload.sub },
         });
-        if (!user || !user.isActive) {
+        // A password change raises sessionVersion and so ends the sessions signed in before it.
+        // Tokens issued before session versions existed carry no `sv` and count as version 0.
+        if (!user || !user.isActive || (payload.sv ?? 0) !== user.sessionVersion) {
           throw new UnauthorizedException("User not found or inactive");
         }
         request.user = {
@@ -52,6 +59,7 @@ export class AuthGuard implements CanActivate {
           email: user.email,
           displayName: user.displayName,
           authMethod: "jwt",
+          sessionVersion: user.sessionVersion,
         };
         return true;
       } catch {
@@ -67,6 +75,11 @@ export class AuthGuard implements CanActivate {
     if (!apiToken || apiToken.revokedAt || !apiToken.user.isActive) {
       throw new UnauthorizedException("Invalid or revoked API token");
     }
+    if (apiToken.expiresAt && apiToken.expiresAt <= new Date()) {
+      throw new UnauthorizedException(
+        "This API token has expired; create a new one under Account → API tokens",
+      );
+    }
     await this.prisma.apiToken.update({
       where: { id: apiToken.id },
       data: { lastUsedAt: new Date() },
@@ -77,6 +90,16 @@ export class AuthGuard implements CanActivate {
       displayName: apiToken.user.displayName,
       authMethod: "api-token",
     };
+
+    // Endpoints marked @WebSessionOnly() refuse API tokens, so a leaked token can't use them to
+    // keep or widen its access.
+    const webSessionOnly = this.reflector.getAllAndOverride<boolean>(
+      WEB_SESSION_ONLY_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (webSessionOnly) {
+      throw new ForbiddenException(WEB_SESSION_ONLY_MESSAGE);
+    }
     return true;
   }
 }
