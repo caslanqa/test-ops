@@ -70,28 +70,30 @@ export class AuthGuard implements CanActivate {
 
     // JWTs have three dot-separated segments; API tokens are a single random string.
     if (token.split(".").length === 3) {
+      let payload: { sub?: string };
       try {
-        const payload = await this.jwtService.verifyAsync(token);
-        const user = await this.prisma.user.findUnique({
-          where: { id: payload.sub },
-        });
-        if (!user || !user.isActive) {
-          throw new UnauthorizedException("User not found or inactive");
-        }
-        return {
-          id: user.id,
-          email: user.email,
-          displayName: user.displayName,
-          authMethod: "jwt",
-        };
+        payload = await this.jwtService.verifyAsync(token);
       } catch (error) {
-        // The signature is checked before the expiry, and the user only after both; either way
-        // the server signed this token, so the session ended rather than being guessed.
-        if (error instanceof TokenExpiredError || error instanceof UnauthorizedException) {
-          throw new SessionEndedException();
-        }
+        // The signature is checked before the expiry, so an expired token is one this server
+        // signed: the session ended rather than being guessed.
+        if (error instanceof TokenExpiredError) throw new SessionEndedException();
         throw new UnauthorizedException("Invalid or expired session token");
       }
+      // Outside the try block on purpose: a database error or pool timeout here is not an
+      // authentication failure. It propagates as 5xx, so the web app doesn't sign the user out
+      // and the failure limiter doesn't count it.
+      const user = payload.sub
+        ? await this.prisma.user.findUnique({ where: { id: payload.sub } })
+        : null;
+      if (!user || !user.isActive) {
+        throw new SessionEndedException();
+      }
+      return {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        authMethod: "jwt",
+      };
     }
 
     // An address over its failure limit gets no API token lookups, so a flood of guessed tokens
