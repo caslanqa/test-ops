@@ -5,6 +5,8 @@ export interface AuthenticatedUser {
   email: string;
   displayName: string;
   authMethod: "jwt" | "api-token";
+  /** The session version the web session was checked against; only set for `jwt`. */
+  sessionVersion?: number;
 }
 
 export const CurrentUser = createParamDecorator(

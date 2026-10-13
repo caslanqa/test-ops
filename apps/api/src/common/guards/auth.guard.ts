@@ -59,6 +59,7 @@ export class AuthGuard implements CanActivate {
           email: user.email,
           displayName: user.displayName,
           authMethod: "jwt",
+          sessionVersion: user.sessionVersion,
         };
         return true;
       } catch {

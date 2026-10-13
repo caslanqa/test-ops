@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import * as crypto from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
@@ -35,19 +36,29 @@ export class ApiTokensService {
       .createHash("sha256")
       .update(plainToken)
       .digest("hex");
-    const apiToken = await this.prisma.apiToken.create({
-      data: {
-        userId: user.id,
-        name: dto.name,
-        tokenHash,
-        // Omitted: the default lifetime. An explicit null: no expiration.
-        expiresAt:
-          dto.expiresInDays === null
-            ? null
-            : new Date(
-                Date.now() + (dto.expiresInDays ?? DEFAULT_LIFETIME_DAYS) * DAY_MS,
-              ),
-      },
+    const apiToken = await this.prisma.$transaction(async (tx) => {
+      // A password change revokes every token and bumps sessionVersion under the user row lock.
+      // Holding a share lock on that row and re-checking the version means a session that a
+      // concurrent password change just ended can't slip a new token in after the revocation.
+      const [row] = await tx.$queryRaw<{ sessionVersion: number }[]>`
+        SELECT "sessionVersion" FROM users WHERE id = ${user.id} FOR SHARE`;
+      if (!row || row.sessionVersion !== user.sessionVersion) {
+        throw new UnauthorizedException("Your session has ended; sign in again.");
+      }
+      return tx.apiToken.create({
+        data: {
+          userId: user.id,
+          name: dto.name,
+          tokenHash,
+          // Omitted: the default lifetime. An explicit null: no expiration.
+          expiresAt:
+            dto.expiresInDays === null
+              ? null
+              : new Date(
+                  Date.now() + (dto.expiresInDays ?? DEFAULT_LIFETIME_DAYS) * DAY_MS,
+                ),
+        },
+      });
     });
     return {
       id: apiToken.id,
