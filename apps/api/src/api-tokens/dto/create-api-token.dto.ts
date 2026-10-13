@@ -1,6 +1,6 @@
 import { IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from "class-validator";
 
-/** Longest lifetime a token can be given; a token without a lifetime doesn't expire. */
+/** Longest lifetime a token can be given; only an explicit null gives a token that doesn't expire. */
 export const API_TOKEN_MAX_LIFETIME_DAYS = 365;
 
 export class CreateApiTokenDto {
@@ -10,12 +10,13 @@ export class CreateApiTokenDto {
   name!: string;
 
   /**
-   * Days until the token stops working (1-365). Omit it for a token that doesn't expire.
+   * Days until the token stops working (1-365). Omit it for the default of 90 days; send `null`
+   * for a token that never expires.
    * @example 90
    */
-  @IsOptional()
+  @IsOptional() // skips the checks below for both undefined (default) and null (no expiration)
   @IsInt()
   @Min(1)
   @Max(API_TOKEN_MAX_LIFETIME_DAYS)
-  expiresInDays?: number;
+  expiresInDays?: number | null;
 }

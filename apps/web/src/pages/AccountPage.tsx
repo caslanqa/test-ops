@@ -140,7 +140,7 @@ function PasswordSection() {
         <FormError message={error} />
         <div className="settings-actions">
           <button type="submit" className="btn btn-primary" disabled={saving}>Change password</button>
-          <span className="save-status" role="status">{saved && 'Password changed. You were signed out everywhere else.'}</span>
+          <span className="save-status" role="status">{saved && 'Password changed. You were signed out everywhere else and your API tokens were revoked.'}</span>
         </div>
       </form>
     </section>
@@ -202,7 +202,8 @@ function ApiTokensSection() {
     try {
       const created = await api.post<{ token: string }>('/api-tokens', {
         name,
-        expiresInDays: lifetime ? Number(lifetime) : undefined,
+        // null asks for a token that never expires; leaving it out would apply the API default.
+        expiresInDays: lifetime ? Number(lifetime) : null,
       });
       setNewToken(created.token);
       setName('');
