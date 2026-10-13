@@ -40,7 +40,7 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
       const http = host.switchToHttp();
       const request = http.getRequest<Request>();
       this.logger.warn(
-        `${request.method} ${request.originalUrl ?? request.url}: ${describe(exception)} -> ${mapped.getStatus()}`,
+        `${request.method} ${pathOf(request)}: ${describe(exception)} -> ${mapped.getStatus()}`,
       );
       if (mapped instanceof ServiceUnavailableException) {
         http.getResponse<Response>().setHeader("Retry-After", String(RETRY_AFTER_SECONDS));
@@ -50,10 +50,18 @@ export class PrismaExceptionFilter extends BaseExceptionFilter {
   }
 }
 
-/** "P2002 on ProjectMember (userId, projectId)": the code, model and target of the error. */
+/** The request path without its query string, which can carry tokens or personal data. */
+function pathOf(request: Request) {
+  return (request.originalUrl ?? request.url).split("?")[0];
+}
+
+/**
+ * "P2002 on ProjectMember (userId, projectId)": the code, model and field or constraint names.
+ * Never the error message or meta values: Prisma embeds argument values (emails, tokens) there.
+ */
 function describe(error: PrismaRequestError) {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
-    return `unknown request error (${error.message.split("\n").pop()?.trim()})`;
+    return "unknown request error";
   }
   const meta = error.meta ?? {};
   const model = typeof meta.modelName === "string" ? ` on ${meta.modelName}` : "";
