@@ -459,6 +459,8 @@ export function RunDetailPage() {
   };
   const [actionError, setActionError] = useState<string | null>(null);
   const [onlyMine, setOnlyMine] = useState(false);
+  // Status chosen on the ribbon or legend; choosing it again shows every case.
+  const [statusFilter, setStatusFilter] = useState<ResultStatus | null>(null);
   const [confirmingComplete, setConfirmingComplete] = useState(false);
   const [editingRun, setEditingRun] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -560,7 +562,11 @@ export function RunDetailPage() {
   // Admins and testers assign cases; a tester can narrow the list to their own.
   const canAssign = editRepository;
   const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
-  const shownCases = onlyMine ? runCases.filter((rc) => rc.assigneeId === user?.id) : runCases;
+  const shownCases = runCases.filter(
+    (rc) => (!onlyMine || rc.assigneeId === user?.id) && (!statusFilter || rc.status === statusFilter),
+  );
+  const toggleStatus = (status: ResultStatus) => setStatusFilter((current) => (current === status ? null : status));
+  const filterName = statusFilter ? STATUS_META[statusFilter].label.toLowerCase() : null;
 
   function closePanel() {
     const id = openCaseId;
@@ -654,14 +660,32 @@ export function RunDetailPage() {
             )}
           </p>
         </div>
-        <ResultRibbon statuses={statuses} size="lg" label="Run results" showCounts />
-        <StatusLegend counts={counts} />
+        <ResultRibbon
+          statuses={statuses}
+          size="lg"
+          label="Run results"
+          showCounts
+          selected={statusFilter}
+          onSelect={toggleStatus}
+        />
+        <StatusLegend counts={counts} selected={statusFilter} onSelect={toggleStatus} />
+        <p className="visually-hidden" role="status">
+          {filterName ? `Showing ${plural(shownCases.length, `${filterName} case`)}.` : ''}
+        </p>
       </section>
 
       <div className="segmented" role="group" aria-label="Filter cases by assignee">
         <button type="button" aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>All cases</button>
         <button type="button" aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>Assigned to me</button>
       </div>
+      {statusFilter && (
+        <p className="filter-note">
+          Showing only <StatusChip status={statusFilter} /> cases.{' '}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStatusFilter(null)}>
+            Show all cases
+          </button>
+        </p>
+      )}
 
       <div className={`run-body${openCase ? ' run-body--with-panel' : ''}`}>
         <div className="surface table-wrap">
@@ -743,7 +767,13 @@ export function RunDetailPage() {
             <p className="table-empty">This run has no cases. Start a new run from a plan or by picking cases.</p>
           )}
           {runCases.length > 0 && shownCases.length === 0 && (
-            <p className="table-empty">No cases in this run are assigned to you.</p>
+            <p className="table-empty">
+              {filterName && onlyMine
+                ? `None of your cases in this run are ${filterName}.`
+                : filterName
+                  ? `No cases in this run are ${filterName}.`
+                  : 'No cases in this run are assigned to you.'}
+            </p>
           )}
         </div>
         {openCase && (

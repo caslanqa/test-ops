@@ -1433,6 +1433,69 @@ input[type='checkbox'] {
   font-weight: 650;
 }
 
+/* Which status the case list is filtered to, with the way back to all cases. */
+.filter-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin: -0.25rem 0 0.75rem;
+  font-size: var(--text-sm);
+}
+
+/* A legend entry that filters the cases; it keeps the entry's look until hovered or pressed. */
+.legend-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.75rem;
+  margin: -0.25rem -0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.legend-button:not(:disabled):hover {
+  background: var(--surface-hover);
+}
+
+.legend-button[aria-pressed='true'] {
+  border-color: currentColor;
+  background: var(--surface-hover);
+}
+
+.legend-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Ribbon segments that filter the cases. */
+.ribbon--interactive .ribbon-segment {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+.ribbon--interactive .ribbon-segment:focus-visible {
+  z-index: 1;
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
+/* While filtered, the other statuses step back so the chosen one stands out. */
+.ribbon--filtered .ribbon-segment:not([aria-pressed='true']) {
+  opacity: 0.35;
+}
+
+.ribbon--interactive .ribbon-segment:hover {
+  opacity: 1;
+  filter: brightness(1.08);
+}
+
 .legend-label {
   color: var(--ink);
   font-weight: 500;
