@@ -71,12 +71,10 @@ interface RunDetail {
 interface ResultRow {
   id: string;
   source: 'MANUAL' | 'AUTOMATION';
-  automationSourceLabel: string | null;
-  authorUserId: string | null;
   runCase: { testCaseId: string };
 }
 
-/** Where a case's latest result came from: a tester in the app, or CI through the API. */
+/** Where a case's latest result came from: a tester in the app, or automation through the API. */
 type SourceFilter = 'ALL' | 'MANUAL' | 'AUTOMATION';
 
 function EditRunDialog({ open, ...props }: Parameters<typeof EditRunForm>[0] & { open: boolean }) {
@@ -268,21 +266,14 @@ function ResultHistory({
   );
 }
 
-/**
- * Where the case's latest result came from: "Manual" with the tester's name, or "CI" with the job
- * label the pipeline sent. Icons and text together, so the source doesn't rely on the icon alone.
- */
-function SourceLabel({ result, memberName }: { result: ResultRow | undefined; memberName: Map<string, string> }) {
+/** Where the case's latest result came from, as an icon plus text so it doesn't rely on the icon alone. */
+function SourceLabel({ result }: { result: ResultRow | undefined }) {
   if (!result) return <span className="muted">—</span>;
   const manual = result.source === 'MANUAL';
-  const detail = manual
-    ? result.authorUserId && memberName.get(result.authorUserId)
-    : result.automationSourceLabel;
   return (
-    <span className={`source-label source-label--${manual ? 'manual' : 'ci'}`}>
+    <span className="source-label">
       {manual ? <Hand size={14} aria-hidden="true" /> : <Bot size={14} aria-hidden="true" />}
-      <span>{manual ? 'Manual' : 'CI'}</span>
-      {detail && <span className="source-detail muted" title={detail}>{detail}</span>}
+      {manual ? 'Manual' : 'Automation'}
     </span>
   );
 }
@@ -736,7 +727,7 @@ export function RunDetailPage() {
           <Hand size={14} aria-hidden="true" /> Manual
         </button>
         <button type="button" aria-pressed={sourceFilter === 'AUTOMATION'} onClick={() => setSourceFilter('AUTOMATION')}>
-          <Bot size={14} aria-hidden="true" /> CI
+          <Bot size={14} aria-hidden="true" /> Automation
         </button>
       </div>
       {statusFilter && (
@@ -780,7 +771,7 @@ export function RunDetailPage() {
                     {/* On narrow screens the assignee and source columns are hidden, so they sit under the title. */}
                     <div className="runcase-assignee show-sm">
                       {assigneeControl(rc)}
-                      <SourceLabel result={latestResultByCase.get(rc.testCaseId)} memberName={memberName} />
+                      <SourceLabel result={latestResultByCase.get(rc.testCaseId)} />
                     </div>
                     {canRecord && (
                       <div className="show-sm cell-actions-sm">
@@ -801,7 +792,7 @@ export function RunDetailPage() {
                     </span>
                   </td>
                   <td className="hide-sm">
-                    <SourceLabel result={latestResultByCase.get(rc.testCaseId)} memberName={memberName} />
+                    <SourceLabel result={latestResultByCase.get(rc.testCaseId)} />
                   </td>
                   <td className="hide-sm num muted">{formatDuration(rc.durationMs)}</td>
                   {canRecord && (
