@@ -204,3 +204,7 @@ The repository is a pnpm workspace:
 - [Design document](design-doc.md) · [Development plan](PLAN.md).
 
 Compose commands run inside the repository also load `docker-compose.override.yml`, which builds the local image and exposes PostgreSQL only on `127.0.0.1:5432`. The installer uses `docker-compose.yml` alone.
+
+## License
+
+TestOps is open source under the [MIT License](LICENSE). Third-party components bundled with it, such as the interface font, keep their own licenses; see [NOTICE](NOTICE).
