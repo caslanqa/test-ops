@@ -70,6 +70,18 @@ export class RunsController {
     return this.runsService.assignCase(user.id, projectId, runId, runCaseId, dto.assigneeId);
   }
 
+  /** "Run again": the case gets the Retest status until its next result (open runs only). */
+  @Post(":runId/cases/:runCaseId/retest")
+  @HttpCode(200)
+  retestCase(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Param("runCaseId") runCaseId: string,
+  ) {
+    return this.runsService.retestCase(user.id, projectId, runId, runCaseId);
+  }
+
   @Post(":runId/complete")
   complete(
     @CurrentUser() user: AuthenticatedUser,

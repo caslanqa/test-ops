@@ -17,6 +17,7 @@ import {
   STATUS_META,
   isResultStatus,
   normalizeCounts,
+  pendingCount,
   type ResultStatus,
 } from '../../lib/status';
 import { useProjectPermissions } from '../../lib/permissions';
@@ -294,6 +295,7 @@ function RunCasePanel({
   canRecord,
   memberName,
   onSaved,
+  onRetest,
   onClose,
 }: {
   projectId: string;
@@ -302,9 +304,12 @@ function RunCasePanel({
   canRecord: boolean;
   memberName: Map<string, string>;
   onSaved: (message: string, saved: SavedResult) => void;
+  onRetest: (rc: RunCase) => void;
   onClose: () => void;
 }) {
   const [version, setVersion] = useState(0);
+  // A case with a result can be run again; one already waiting for it can't.
+  const canRunAgain = canRecord && runCase.status !== 'UNTESTED' && runCase.status !== 'RETEST';
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
   const snapshot = runCase.caseSnapshot;
@@ -325,6 +330,15 @@ function RunCasePanel({
         </button>
       </div>
       <p className="detail-path">Steps as they were when the run started</p>
+      {canRunAgain && (
+        <div className="run-panel-actions">
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => onRetest(runCase)}>
+            <RotateCcw size={14} aria-hidden="true" />
+            Run again
+          </button>
+          <span className="field-hint">Marks the case Retest; earlier attempts stay below.</span>
+        </div>
+      )}
       <section className="detail-section">
         <h3>Preconditions</h3>
         <p className={snapshot?.preconditions ? 'prose' : 'muted'}>
@@ -506,6 +520,17 @@ export function RunDetailPage() {
     }
   }
 
+  async function retest(rc: RunCase) {
+    setActionError(null);
+    try {
+      await api.post(`/projects/${projectId}/runs/${runId}/cases/${rc.id}/retest`);
+      setNotice({ text: `${rc.caseSnapshot?.title ?? rc.testCase.title} set to retest.` });
+      runRes.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't mark the case for retest");
+    }
+  }
+
   // The latest result of the case gets the defect; the dialog creates one or links an open one.
   function openDefect(rc: RunCase) {
     setActionError(null);
@@ -529,7 +554,7 @@ export function RunDetailPage() {
   const statuses = runCases.map((rc) => (isResultStatus(rc.status) ? rc.status : 'UNTESTED'));
   const counts = normalizeCounts(run.progress);
   const total = runCases.length;
-  const done = total - counts.UNTESTED;
+  const done = total - pendingCount(counts);
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   const openCase = runCases.find((rc) => rc.id === openCaseId) ?? null;
   // Admins and testers assign cases; a tester can narrow the list to their own.
@@ -740,6 +765,7 @@ export function RunDetailPage() {
                 });
               }
             }}
+            onRetest={retest}
             onClose={closePanel}
           />
         )}

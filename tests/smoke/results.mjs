@@ -254,5 +254,22 @@ check('the run progress counts Invalid', manualRun.progress.INVALID === 1, JSON.
 const invalidFilter = await call(ci, 'GET', `${P}/results?runId=${manual.id}&status=INVALID`);
 check('results filter by Invalid', invalidFilter.status === 200 && total(invalidFilter) === 1, `${invalidFilter.status} ${total(invalidFilter)}`);
 
+// Run again: the case waits for another attempt, its history stays, the next result replaces Retest.
+const manualCase = (await ok(ci, 'GET', `${P}/runs/${manual.id}`)).runCases;
+const withResult = manualCase.find((rc) => rc.testCaseId === cases[48].id);
+const noResult = manualCase.find((rc) => rc.testCaseId === cases[49].id);
+const retest = await call(ci, 'POST', `${P}/runs/${manual.id}/cases/${withResult.id}/retest`);
+check(`[${retest.status}] Run again sets the case to Retest`, retest.status === 200 && retest.json.status === 'RETEST', JSON.stringify(retest.json));
+const again2 = await call(ci, 'POST', `${P}/runs/${manual.id}/cases/${withResult.id}/retest`);
+check(`[${again2.status}] Run again twice is harmless`, again2.status === 200 && again2.json.status === 'RETEST');
+await expectStatus('a case without a result has nothing to run again', 400, ci, 'POST', `${P}/runs/${manual.id}/cases/${noResult.id}/retest`);
+await expectStatus('Run again on a case of another run is not found', 404, ci, 'POST', `${P}/runs/${nightly.id}/cases/${withResult.id}/retest`);
+const afterRetest = await ok(ci, 'GET', `${P}/runs/${manual.id}`);
+check('the run counts Retest and keeps the attempts', afterRetest.progress.RETEST === 1 && afterRetest.runCases.find((rc) => rc.id === withResult.id).attemptCount === 2, JSON.stringify(afterRetest.progress));
+await ok(ci, 'POST', `${P}/runs/${manual.id}/results`, { testCaseId: cases[48].id, status: 'PASSED', source: 'MANUAL' });
+check('the next result replaces Retest', (await caseStatus(manual.id, cases[48].id)) === 'PASSED');
+await ok(session, 'POST', `${P}/runs/${manual.id}/complete`);
+await expectStatus('Run again on a completed run is refused', 403, ci, 'POST', `${P}/runs/${manual.id}/cases/${withResult.id}/retest`);
+
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);
 process.exit(failures === 0 ? 0 : 1);

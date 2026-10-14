@@ -12,7 +12,7 @@ import { RUN_SOURCE_LABEL, RUN_STATUS_LABEL, labelOf } from '../../lib/labels';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useAuth } from '../../auth/AuthContext';
 import { useProjectInfo } from '../../lib/projectInfo';
-import { normalizeCounts } from '../../lib/status';
+import { normalizeCounts, pendingCount } from '../../lib/status';
 import type { Suite } from '../../lib/suites';
 import { usePageTitle, useResource } from '../../lib/useResource';
 
@@ -220,7 +220,7 @@ export function RunsPage() {
               {runs.map((run) => {
                 const counts = normalizeCounts(run.progress);
                 const total = Object.values(counts).reduce((a, b) => a + b, 0);
-                const done = total - counts.UNTESTED;
+                const done = total - pendingCount(counts);
                 return (
                   <tr key={run.id}>
                     <td>

@@ -70,6 +70,10 @@
   --invalid-ink: #5b3a9e;
   --invalid-bg: #efe9fb;
   --invalid-stripe: #9a80d6;
+  --retest: #2f6fd6;
+  --retest-ink: #1d4f9e;
+  --retest-bg: #e3edfb;
+  --retest-stripe: #7fa7e8;
   --untested: #d5dbe2;
   --untested-stripe: #e9edf1;
   --untested-ink: #55606e;
@@ -145,6 +149,10 @@
   --invalid-ink: #cdb8ff;
   --invalid-bg: #251d3a;
   --invalid-stripe: #7d62c2;
+  --retest: #5b9cf0;
+  --retest-ink: #a9cbff;
+  --retest-bg: #15243a;
+  --retest-stripe: #3d6fb8;
   --untested: #3a424c;
   --untested-stripe: #2a3038;
   --untested-ink: #a0aab6;
@@ -199,6 +207,10 @@
     --invalid-ink: #cdb8ff;
     --invalid-bg: #251d3a;
     --invalid-stripe: #7d62c2;
+    --retest: #5b9cf0;
+    --retest-ink: #a9cbff;
+    --retest-bg: #15243a;
+    --retest-stripe: #3d6fb8;
     --untested: #3a424c;
     --untested-stripe: #2a3038;
     --untested-ink: #a0aab6;
@@ -1167,6 +1179,7 @@ input[type='checkbox'] {
 .chip--blocked { background: var(--blocked-bg); color: var(--blocked-ink); }
 .chip--skipped { background: var(--skipped-bg); color: var(--skipped-ink); }
 .chip--invalid { background: var(--invalid-bg); color: var(--invalid-ink); }
+.chip--retest { background: var(--retest-bg); color: var(--retest-ink); }
 .chip--untested { background: var(--untested-bg); color: var(--untested-ink); box-shadow: inset 0 0 0 1px var(--line); }
 
 .tag {
@@ -1257,6 +1270,15 @@ input[type='checkbox'] {
   );
 }
 
+/* Retest has horizontal bands: it waits for a result, like untested, but has been run before. */
+.status-bg--retest {
+  background: repeating-linear-gradient(
+    0deg,
+    var(--retest) 0 3px,
+    var(--retest-stripe) 3px 5px
+  );
+}
+
 .status-bg--untested {
   background: repeating-linear-gradient(
     135deg,
@@ -1270,6 +1292,7 @@ input[type='checkbox'] {
 .status-fg--blocked { color: var(--blocked-ink); }
 .status-fg--skipped { color: var(--skipped-ink); }
 .status-fg--invalid { color: var(--invalid-ink); }
+.status-fg--retest { color: var(--retest-ink); }
 .status-fg--untested { color: var(--untested-ink); }
 
 .ribbon {
@@ -1651,6 +1674,15 @@ input[type='checkbox'] {
 
 .field-label svg {
   vertical-align: -0.125em;
+}
+
+/* Actions under the case panel's title, such as "Run again". */
+.run-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 /* A checkbox with its label on one line. */

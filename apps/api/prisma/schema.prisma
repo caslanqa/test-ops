@@ -396,6 +396,7 @@ enum RunCaseStatus {
   BLOCKED
   SKIPPED
   INVALID // could not be finished properly, so the outcome is inconclusive
+  RETEST // to be run again; its earlier attempts stay in the run's history
 }
 
 // A snapshot of the test case is taken when the run starts (FR: case version is preserved)
