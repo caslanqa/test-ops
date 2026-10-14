@@ -214,7 +214,9 @@ export function Select({
     const rect = trigger.getBoundingClientRect();
     const below = window.innerHeight - rect.bottom - GAP * 2;
     const above = rect.top - GAP * 2;
-    const natural = Math.min(list.scrollHeight, MAX_LIST_HEIGHT);
+    // scrollHeight leaves out the border, which max-height (border-box) includes.
+    const frame = list.offsetHeight - list.clientHeight;
+    const natural = Math.min(list.scrollHeight + frame, MAX_LIST_HEIGHT);
     const openUp = below < natural && above > below;
     const height = Math.min(natural, openUp ? above : below);
     list.style.left = `${rect.left}px`;
@@ -284,7 +286,12 @@ export function Select({
         aria-describedby={ariaDescribedBy}
         aria-required={required || undefined}
         disabled={disabled}
-        onClick={() => (open ? close() : openList())}
+        onClick={() => {
+          // Safari doesn't focus a button on click; the keys only work while the field has focus.
+          triggerRef.current?.focus();
+          if (open) close();
+          else openList();
+        }}
         onKeyDown={onKeyDown}
         onBlur={(event) => {
           // Focus leaving for anything but the list (e.g. a click elsewhere) closes it.
