@@ -346,7 +346,7 @@ export function RequirementsPage() {
                         <Tag tone="outline">No coverage</Tag>
                       ) : (
                         <div className="ribbon-cell-wrap">
-                          <ResultRibbon counts={coverageCounts(coverage)} size="sm" label={r.title} />
+                          <ResultRibbon counts={coverageCounts(coverage)} size="md" label={r.title} showCounts />
                           <span className="ribbon-fraction num">{plural(r.cases.length, 'case')}</span>
                         </div>
                       )}

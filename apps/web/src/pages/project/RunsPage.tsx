@@ -235,7 +235,7 @@ export function RunsPage() {
                     </td>
                     <td className="col-ribbon">
                       <div className="ribbon-cell-wrap">
-                        <ResultRibbon counts={run.progress} size="sm" label={run.title} />
+                        <ResultRibbon counts={run.progress} size="md" label={run.title} showCounts />
                         <span className="ribbon-fraction num">{done}/{total}</span>
                       </div>
                     </td>

@@ -15,9 +15,14 @@ interface RibbonProps {
   statuses?: ResultStatus[];
   /** Status → count; without `statuses`, proportional segments are drawn. */
   counts?: Record<string, number>;
-  size?: 'sm' | 'lg';
+  size?: 'sm' | 'md' | 'lg';
   /** Context prepended to the screen reader summary (e.g. the run name). */
   label?: string;
+  /**
+   * Writes each status's count (and, where it fits, its name) on its segment. Draws proportional
+   * segments even when `statuses` is given, since a count belongs to a status, not to a case.
+   */
+  showCounts?: boolean;
 }
 
 /**
@@ -30,6 +35,7 @@ export function ResultRibbon({
   counts,
   size = 'lg',
   label,
+  showCounts = false,
 }: RibbonProps) {
   const totals = normalizeCounts(
     counts ??
@@ -40,11 +46,11 @@ export function ResultRibbon({
   );
   const summary = describeCounts(totals);
   const total = STATUS_ORDER.reduce((sum, s) => sum + totals[s], 0);
-  const perCase = statuses && statuses.length <= MAX_CELLS;
+  const perCase = !showCounts && statuses && statuses.length <= MAX_CELLS;
 
   return (
     <div
-      className={`ribbon ribbon--${size}${perCase ? ' ribbon--cells' : ''}`}
+      className={`ribbon ribbon--${size}${perCase ? ' ribbon--cells' : ''}${showCounts ? ' ribbon--counts' : ''}`}
       role="img"
       aria-label={label ? `${label}: ${summary}` : summary}
     >
@@ -64,7 +70,16 @@ export function ResultRibbon({
               className={`ribbon-segment status-bg--${status.toLowerCase()}`}
               style={{ flexGrow: totals[status] }}
               title={`${STATUS_META[status].label}: ${totals[status]}`}
-            />
+            >
+              {/* The role="img" label already reads the counts out, so this copy is visual only.
+                  Container queries drop the name, then the number, on segments too narrow for them. */}
+              {showCounts && (
+                <span className={`ribbon-count ribbon-count--${status.toLowerCase()}`} aria-hidden="true">
+                  <span className="num">{totals[status]}</span>
+                  <span className="ribbon-count-label">{STATUS_META[status].label}</span>
+                </span>
+              )}
+            </span>
           ))}
     </div>
   );

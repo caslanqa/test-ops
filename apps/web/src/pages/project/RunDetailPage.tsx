@@ -654,7 +654,7 @@ export function RunDetailPage() {
             )}
           </p>
         </div>
-        <ResultRibbon statuses={statuses} size="lg" label="Run results" />
+        <ResultRibbon statuses={statuses} size="lg" label="Run results" showCounts />
         <StatusLegend counts={counts} />
       </section>
 

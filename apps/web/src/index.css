@@ -1069,7 +1069,8 @@ input[type='checkbox'] {
 }
 
 .col-ribbon {
-  width: clamp(11rem, 18vw, 22rem);
+  /* Wide enough for the counts written on the ribbon's segments. */
+  width: clamp(13rem, 26vw, 28rem);
 }
 
 .cell-title,
@@ -1326,6 +1327,69 @@ input[type='checkbox'] {
 .ribbon-segment {
   flex-basis: 0;
   min-width: 3px;
+}
+
+.ribbon--md {
+  height: 1.25rem;
+  gap: 1px;
+  border-radius: 3px;
+}
+
+/* Counts on the segments: a chip in the status's own colors keeps the number readable on stripes. */
+.ribbon--counts .ribbon-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: inline-size;
+}
+
+.ribbon-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  padding: 0.0625rem 0.4375rem;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.ribbon--md .ribbon-count {
+  padding: 0 0.25rem;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+
+.ribbon-count--passed { background: var(--passed-bg); color: var(--passed-ink); }
+.ribbon-count--failed { background: var(--failed-bg); color: var(--failed-ink); }
+.ribbon-count--blocked { background: var(--blocked-bg); color: var(--blocked-ink); }
+.ribbon-count--skipped { background: var(--skipped-bg); color: var(--skipped-ink); }
+.ribbon-count--invalid { background: var(--invalid-bg); color: var(--invalid-ink); }
+.ribbon-count--retest { background: var(--retest-bg); color: var(--retest-ink); }
+.ribbon-count--untested { background: var(--untested-bg); color: var(--untested-ink); }
+
+/* Lists only have room for the number. */
+.ribbon--md .ribbon-count-label {
+  display: none;
+}
+
+@container (max-width: 6.5rem) {
+  .ribbon-count-label {
+    display: none;
+  }
+}
+
+@container (max-width: 1.75rem) {
+  .ribbon--lg .ribbon-count {
+    display: none;
+  }
+}
+
+@container (max-width: 1.125rem) {
+  .ribbon-count {
+    display: none;
+  }
 }
 
 .ribbon-empty {
