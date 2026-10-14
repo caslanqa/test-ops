@@ -395,6 +395,7 @@ enum RunCaseStatus {
   FAILED
   BLOCKED
   SKIPPED
+  INVALID // could not be finished properly, so the outcome is inconclusive
 }
 
 // A snapshot of the test case is taken when the run starts (FR: case version is preserved)
@@ -420,6 +421,7 @@ enum ResultStatus {
   FAILED
   BLOCKED
   SKIPPED
+  INVALID // could not be finished properly, so the outcome is inconclusive
   UNTESTED
 }
 

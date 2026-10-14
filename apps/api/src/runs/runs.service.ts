@@ -110,7 +110,7 @@ export class RunsService {
       return acc;
     }, {});
     // What deleting the run would remove besides the run itself, so clients can say so in their confirmation.
-    const [resultCount, attachmentCount] = await this.prisma.$transaction([
+    const [resultCount, attachmentCount, attemptTotals] = await this.prisma.$transaction([
       this.prisma.result.count({ where: { runCase: { runId } } }),
       this.prisma.attachment.count({
         where: {
@@ -120,8 +120,26 @@ export class RunsService {
           ],
         },
       }),
+      this.prisma.result.groupBy({
+        by: ["runCaseId"],
+        where: { runCase: { runId } },
+        orderBy: { runCaseId: "asc" },
+        _count: { _all: true },
+        _sum: { durationMs: true },
+      }),
     ]);
-    return { ...run, progress, resultCount, attachmentCount };
+    // Per case: how many attempts it has and the time they took together, as the run list shows them.
+    const totalsByRunCase = new Map(attemptTotals.map((row) => [row.runCaseId, row]));
+    const runCases = run.runCases.map((rc) => {
+      const totals = totalsByRunCase.get(rc.id);
+      return {
+        ...rc,
+        attemptCount: typeof totals?._count === "object" ? (totals._count._all ?? 0) : 0,
+        durationMs: totals?._sum?.durationMs ?? null,
+      };
+    });
+    const durationMs = runCases.reduce((sum, rc) => sum + (rc.durationMs ?? 0), 0);
+    return { ...run, runCases, progress, resultCount, attachmentCount, durationMs };
   }
 
   async create(userId: string, projectId: string, dto: CreateRunDto) {

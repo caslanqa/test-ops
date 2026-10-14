@@ -2,6 +2,7 @@ import {
   Ban,
   CircleCheck,
   CircleDashed,
+  CircleHelp,
   CircleMinus,
   CircleX,
   type LucideIcon,
@@ -12,6 +13,7 @@ export type ResultStatus =
   | 'FAILED'
   | 'BLOCKED'
   | 'SKIPPED'
+  | 'INVALID'
   | 'UNTESTED';
 
 /** Fixed order in the ribbon and legend: results first, untested last. */
@@ -20,6 +22,7 @@ export const STATUS_ORDER: ResultStatus[] = [
   'FAILED',
   'BLOCKED',
   'SKIPPED',
+  'INVALID',
   'UNTESTED',
 ];
 
@@ -29,7 +32,19 @@ export const RESULT_CHOICES: Exclude<ResultStatus, 'UNTESTED'>[] = [
   'FAILED',
   'BLOCKED',
   'SKIPPED',
+  'INVALID',
 ];
+
+/** Results a step can get; Invalid describes a whole case, so it isn't offered per step. */
+export const STEP_RESULT_CHOICES: Exclude<ResultStatus, 'UNTESTED' | 'INVALID'>[] = [
+  'PASSED',
+  'FAILED',
+  'BLOCKED',
+  'SKIPPED',
+];
+
+/** Results that usually need a defect, so the result form offers one by default. */
+export const DEFECT_STATUSES: ResultStatus[] = ['FAILED', 'BLOCKED', 'INVALID'];
 
 // Each status has a label and an icon so that color alone carries no meaning (WCAG 1.4.1).
 export const STATUS_META: Record<
@@ -40,6 +55,7 @@ export const STATUS_META: Record<
   FAILED: { label: 'Failed', icon: CircleX },
   BLOCKED: { label: 'Blocked', icon: Ban },
   SKIPPED: { label: 'Skipped', icon: CircleMinus },
+  INVALID: { label: 'Invalid', icon: CircleHelp },
   UNTESTED: { label: 'Untested', icon: CircleDashed },
 };
 
@@ -56,6 +72,7 @@ export function normalizeCounts(
     FAILED: 0,
     BLOCKED: 0,
     SKIPPED: 0,
+    INVALID: 0,
     UNTESTED: 0,
   };
   for (const [status, count] of Object.entries(counts ?? {})) {
