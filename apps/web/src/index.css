@@ -531,82 +531,131 @@ textarea {
 }
 
 /*
- * Drop-down lists. Browsers that support customizable selects (Chromium) open the list right under
- * the field, at the field's width and in the app's theme, instead of the operating system's menu,
- * which macOS centres over the field, enlarges and draws in the system theme. Other browsers keep
- * their native list. Keyboard use, typeahead and screen reader support stay the browser's own.
+ * Drop-down lists (components/Select): the field looks like the other inputs and its list opens
+ * right under it, at its width and in the theme's colours, in every browser.
  */
-@supports (appearance: base-select) {
-  select,
-  ::picker(select) {
-    appearance: base-select;
-  }
+.select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
 
-  select {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-  }
+.select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0.4375rem 0.625rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--text-md);
+  line-height: 1.4;
+  text-align: start;
+}
 
-  select::picker-icon {
-    margin-inline-start: auto;
-    color: var(--ink-muted);
-    transition: rotate 120ms ease;
-  }
+.select-trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+  border-color: var(--focus);
+}
 
-  select:open::picker-icon {
-    rotate: 180deg;
-  }
+.select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 
-  ::picker(select) {
-    /* Under the field when there is room, above it only when there isn't. */
-    position-area: block-end span-inline-end;
-    position-try-order: normal;
-    position-try-fallbacks: flip-block;
-    inline-size: anchor-size(self-inline);
-    max-block-size: min(20rem, 50vh);
-    margin-block: 0.25rem;
-    padding: 0.25rem;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-md);
-    background: var(--surface);
-    color: var(--ink);
-    box-shadow: var(--shadow-pop);
-  }
+.select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
 
-  option {
-    padding: 0.4375rem 0.5rem;
-    border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
-    /* Long names wrap inside the field's width instead of being cut off. */
-    white-space: normal;
-    overflow-wrap: break-word;
-    cursor: pointer;
-  }
+.select-icon {
+  flex: none;
+  color: var(--ink-muted);
+  transition: rotate 120ms ease;
+}
 
-  option:hover,
-  option:focus-visible {
-    outline: none;
-    background: var(--surface-hover);
-  }
+.select-trigger[aria-expanded='true'] .select-icon {
+  rotate: 180deg;
+}
 
-  option:checked {
-    font-weight: 650;
-  }
+/* Lets a required list take part in the browser's form check without being seen. */
+.select-validation {
+  position: absolute;
+  inset: auto 0 0;
+  width: 100%;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 
-  option::checkmark {
-    color: var(--ink);
-  }
+/* A popover: the top layer keeps it above dialogs and outside scrolling tables. */
+.select-list {
+  position: fixed;
+  inset: auto;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-pop);
+  list-style: none;
+}
 
-  option:disabled {
-    color: var(--ink-muted);
-    cursor: default;
-  }
+.select-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.select-option > span {
+  min-width: 0;
+  /* Keeps indentation (e.g. sub-suites) and wraps long names instead of cutting them off. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.select-option.is-active {
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.select-option[aria-selected='true'] {
+  font-weight: 650;
+}
+
+.select-check {
+  flex: none;
+  margin-top: 0.1875rem;
+  visibility: hidden;
+}
+
+.select-option[aria-selected='true'] .select-check {
+  visibility: visible;
+}
+
+.select-option[aria-disabled='true'] {
+  color: var(--ink-muted);
+  cursor: default;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  select::picker-icon {
+  .select-icon {
     transition: none;
   }
 }

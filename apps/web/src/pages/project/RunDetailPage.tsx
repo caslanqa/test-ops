@@ -25,6 +25,7 @@ import { useProjectMembers } from '../../lib/members';
 import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
 import { CaseExecution, DefectForResultDialog, type SavedResult } from './RunExecution';
+import { Select } from '../../components/Select';
 
 interface CaseSnapshot {
   title: string;
@@ -594,7 +595,7 @@ export function RunDetailPage() {
   function assigneeControl(rc: RunCase) {
     const title = rc.caseSnapshot?.title ?? rc.testCase.title;
     return canAssign ? (
-      <select
+      <Select
         className="inline-select"
         aria-label={`Assignee for ${title}`}
         value={rc.assigneeId ?? ''}
@@ -605,7 +606,7 @@ export function RunDetailPage() {
         {(members.data ?? []).map((m) => (
           <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
         ))}
-      </select>
+      </Select>
     ) : (
       <span className="muted">{rc.assigneeId ? memberName.get(rc.assigneeId) ?? 'Assigned' : 'Unassigned'}</span>
     );

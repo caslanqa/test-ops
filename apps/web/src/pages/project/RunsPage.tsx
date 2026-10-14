@@ -15,6 +15,7 @@ import { useProjectInfo } from '../../lib/projectInfo';
 import { normalizeCounts, pendingCount } from '../../lib/status';
 import type { Suite } from '../../lib/suites';
 import { usePageTitle, useResource } from '../../lib/useResource';
+import { Select } from '../../components/Select';
 
 interface RunRow {
   id: string;
@@ -113,10 +114,10 @@ function CreateRunForm({
       <div className="field-grid">
         <div className="field">
           <label htmlFor={ids.plan} className="field-label">Plan</label>
-          <select id={ids.plan} value={planId} onChange={(e) => setPlanId(e.target.value)}>
+          <Select id={ids.plan} value={planId} onChange={(e) => setPlanId(e.target.value)}>
             <option value="">No plan, I'll pick cases</option>
             {plans.data?.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="field">
           <label htmlFor={ids.env} className="field-label">Environment</label>

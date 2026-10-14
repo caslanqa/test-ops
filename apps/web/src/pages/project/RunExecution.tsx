@@ -13,6 +13,7 @@ import {
   STEP_RESULT_CHOICES,
   type ResultStatus,
 } from '../../lib/status';
+import { Select } from '../../components/Select';
 
 export interface CaseStep {
   position: number;
@@ -312,11 +313,11 @@ export function CaseExecution({
           <div className="field-grid">
             <div className="field">
               <label htmlFor={ids.status} className="field-label">Result</label>
-              <select id={ids.status} value={status} onChange={(e) => setStatus(e.target.value as ResultStatus)}>
+              <Select id={ids.status} value={status} onChange={(e) => setStatus(e.target.value as ResultStatus)}>
                 {RESULT_CHOICES.map((choice) => (
                   <option key={choice} value={choice}>{STATUS_META[choice].label}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="field">
               <label htmlFor={ids.time} className="field-label">
@@ -508,20 +509,20 @@ function DefectForResultForm({
           <div className="field-grid">
             <div className="field">
               <label htmlFor={ids.severity} className="field-label">Severity</label>
-              <select id={ids.severity} value={severity} onChange={(e) => setSeverity(e.target.value)}>
+              <Select id={ids.severity} value={severity} onChange={(e) => setSeverity(e.target.value)}>
                 {Object.entries(DEFECT_SEVERITY_LABEL).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="field">
               <label htmlFor={ids.assignee} className="field-label">Assignee</label>
-              <select id={ids.assignee} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+              <Select id={ids.assignee} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
                 <option value="">Unassigned</option>
                 {(members.data ?? []).map((m) => (
                   <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
         </>
@@ -532,12 +533,12 @@ function DefectForResultForm({
       ) : (
         <div className="field">
           <label htmlFor={ids.defect} className="field-label">Defect</label>
-          <select id={ids.defect} value={defectId} required onChange={(e) => setDefectId(e.target.value)}>
+          <Select id={ids.defect} value={defectId} required onChange={(e) => setDefectId(e.target.value)}>
             <option value="">Choose a defect</option>
             {(defects ?? []).map((d) => (
               <option key={d.id} value={d.id}>{d.title}</option>
             ))}
-          </select>
+          </Select>
         </div>
       )}
       <FormError message={error} />

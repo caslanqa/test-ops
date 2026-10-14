@@ -10,6 +10,7 @@ import { PROJECT_ROLE_DESCRIPTION, PROJECT_ROLE_LABEL, type ProjectRole } from '
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectInfo } from '../../lib/projectInfo';
 import { usePageTitle, useResource } from '../../lib/useResource';
+import { Select } from '../../components/Select';
 
 const ROLE_OPTIONS = (Object.keys(PROJECT_ROLE_LABEL) as ProjectRole[]).map((role) => ({
   value: role,
@@ -73,14 +74,14 @@ function AddProjectMemberForm({
       ) : (
         <div className="field">
           <label htmlFor={personId} className="field-label">Person</label>
-          <select id={personId} value={email} required onChange={(e) => setEmail(e.target.value)}>
+          <Select id={personId} value={email} required onChange={(e) => setEmail(e.target.value)}>
             <option value="">Choose a workspace member</option>
             {candidates.map((m) => (
               <option key={m.id} value={m.user.email}>
                 {m.user.displayName} ({m.user.email})
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       )}
       <RoleRadioGroup legend="Project role" name="project-role" value={role} options={ROLE_OPTIONS} onChange={setRole} />

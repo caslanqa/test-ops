@@ -43,6 +43,7 @@ import {
 } from '../../lib/suites';
 import { foldForSearch, plural } from '../../lib/format';
 import { usePageTitle, useResource } from '../../lib/useResource';
+import { Select } from '../../components/Select';
 
 interface TestCaseStep {
   id: string;
@@ -290,7 +291,7 @@ function SuiteSelect({
 }) {
   const options = flattenTree(buildSuiteTree(suites)).filter((s) => !exclude?.has(s.id));
   return (
-    <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+    <Select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">{emptyLabel}</option>
       {options.map((s) => (
         <option key={s.id} value={s.id}>
@@ -298,7 +299,7 @@ function SuiteSelect({
           {s.name}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -531,27 +532,27 @@ function CaseForm({
         </div>
         <div className="field">
           <label htmlFor={ids.priority} className="field-label">Priority</label>
-          <select id={ids.priority} value={priority} onChange={(e) => setPriority(e.target.value)}>
+          <Select id={ids.priority} value={priority} onChange={(e) => setPriority(e.target.value)}>
             {Object.entries(PRIORITY_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="field">
           <label htmlFor={ids.severity} className="field-label">Severity</label>
-          <select id={ids.severity} value={severity} onChange={(e) => setSeverity(e.target.value)}>
+          <Select id={ids.severity} value={severity} onChange={(e) => setSeverity(e.target.value)}>
             {Object.entries(CASE_SEVERITY_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="field">
           <label htmlFor={ids.type} className="field-label">Type</label>
-          <select id={ids.type} value={type} onChange={(e) => setType(e.target.value)}>
+          <Select id={ids.type} value={type} onChange={(e) => setType(e.target.value)}>
             {Object.entries(CASE_TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="field">
           <label htmlFor={ids.automation} className="field-label">Automation</label>
-          <select id={ids.automation} value={automationStatus} onChange={(e) => setAutomationStatus(e.target.value)}>
+          <Select id={ids.automation} value={automationStatus} onChange={(e) => setAutomationStatus(e.target.value)}>
             {Object.entries(AUTOMATION_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </Select>
         </div>
       </div>
       <div className="field">
