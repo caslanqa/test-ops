@@ -530,6 +530,87 @@ textarea {
   line-height: 1.5;
 }
 
+/*
+ * Drop-down lists. Browsers that support customizable selects (Chromium) open the list right under
+ * the field, at the field's width and in the app's theme, instead of the operating system's menu,
+ * which macOS centres over the field, enlarges and draws in the system theme. Other browsers keep
+ * their native list. Keyboard use, typeahead and screen reader support stay the browser's own.
+ */
+@supports (appearance: base-select) {
+  select,
+  ::picker(select) {
+    appearance: base-select;
+  }
+
+  select {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+  }
+
+  select::picker-icon {
+    margin-inline-start: auto;
+    color: var(--ink-muted);
+    transition: rotate 120ms ease;
+  }
+
+  select:open::picker-icon {
+    rotate: 180deg;
+  }
+
+  ::picker(select) {
+    /* Under the field when there is room, above it only when there isn't. */
+    position-area: block-end span-inline-end;
+    position-try-order: normal;
+    position-try-fallbacks: flip-block;
+    inline-size: anchor-size(self-inline);
+    max-block-size: min(20rem, 50vh);
+    margin-block: 0.25rem;
+    padding: 0.25rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow-pop);
+  }
+
+  option {
+    padding: 0.4375rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    /* Long names wrap inside the field's width instead of being cut off. */
+    white-space: normal;
+    overflow-wrap: break-word;
+    cursor: pointer;
+  }
+
+  option:hover,
+  option:focus-visible {
+    outline: none;
+    background: var(--surface-hover);
+  }
+
+  option:checked {
+    font-weight: 650;
+  }
+
+  option::checkmark {
+    color: var(--ink);
+  }
+
+  option:disabled {
+    color: var(--ink-muted);
+    cursor: default;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  select::picker-icon {
+    transition: none;
+  }
+}
+
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
@@ -1806,7 +1887,9 @@ input[type='checkbox'] {
 }
 
 .run-body td.runcase-assignee .inline-select {
-  max-width: 11rem;
+  /* Wide enough that its list, which has the field's width, fits a name. */
+  min-width: 10rem;
+  max-width: 12rem;
 }
 
 /* A step's own result in the run case panel; the labels are icons with hidden text to fit the panel. */
