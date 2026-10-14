@@ -7,6 +7,7 @@ import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../compon
 import { Tag } from '../components/StatusChip';
 import { formatDate } from '../lib/format';
 import { usePageTitle, useResource } from '../lib/useResource';
+import { Select } from '../components/Select';
 
 interface ApiToken {
   id: string;
@@ -230,9 +231,9 @@ function ApiTokensSection() {
         </div>
         <div className="field token-lifetime">
           <label htmlFor={lifetimeId} className="field-label">Expires after</label>
-          <select id={lifetimeId} value={lifetime} onChange={(e) => setLifetime(e.target.value)}>
+          <Select id={lifetimeId} value={lifetime} onChange={(e) => setLifetime(e.target.value)}>
             {TOKEN_LIFETIMES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
+          </Select>
         </div>
         <button type="submit" className="btn btn-primary" disabled={saving}>
           <Plus size={16} aria-hidden="true" />

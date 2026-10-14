@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { UserMinus } from 'lucide-react';
 import { Dialog } from './Dialog';
 import { FormError } from './Page';
+import { Select } from './Select';
 
 export interface MemberRow {
   id: string;
@@ -124,7 +125,7 @@ export function MemberTable({
                   </td>
                   <td>
                     {canManage ? (
-                      <select
+                      <Select
                         className="inline-select"
                         aria-label={`Role for ${member.user.displayName}`}
                         value={member.role}
@@ -134,7 +135,7 @@ export function MemberTable({
                         {roleOptions.map((o) => (
                           <option key={o.value} value={o.value}>{o.label}</option>
                         ))}
-                      </select>
+                      </Select>
                     ) : (
                       labelOfRole(member.role)
                     )}

@@ -1,4 +1,5 @@
-// OpenAPI smoke test: the published API reference stays complete and matches what AuthGuard enforces.
+// OpenAPI smoke test: the published API reference stays complete and matches what AuthGuard enforces;
+// also the security headers a plain-HTTP install sends.
 // Runs against a running stack:
 //   docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/openapi.mjs
@@ -101,6 +102,18 @@ check(
   JSON.stringify(infoBody),
 );
 check('the public document does not reveal the release version', doc.info?.version === 'v1' && !JSON.stringify(doc).includes(infoBody.version) || infoBody.version === 'dev', doc.info?.version);
+
+// A plain-HTTP install must not ask browsers to switch to HTTPS: Safari upgrades every asset request
+// to https:// even on localhost, finds no TLS and shows a blank page. The stack under test runs on
+// plain HTTP without a trusted proxy, so a forged X-Forwarded-Proto must not change that either.
+for (const forwarded of [undefined, 'https']) {
+  const page = await fetch(`${ORIGIN}/login`, forwarded ? { headers: { 'x-forwarded-proto': forwarded } } : undefined);
+  const csp = page.headers.get('content-security-policy') ?? '';
+  const label = forwarded ? 'with an untrusted X-Forwarded-Proto' : 'over plain HTTP';
+  check(`[${page.status}] the app shell keeps its CSP ${label}`, page.status === 200 && csp.includes("default-src 'self'"), csp);
+  check(`no upgrade-insecure-requests ${label}`, !csp.includes('upgrade-insecure-requests'), csp);
+  check(`no Strict-Transport-Security ${label}`, !page.headers.has('strict-transport-security'), page.headers.get('strict-transport-security'));
+}
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);
 process.exit(failures === 0 ? 0 : 1);

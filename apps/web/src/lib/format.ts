@@ -67,3 +67,38 @@ export function formatBytes(bytes: number): string {
   }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
+
+/** "1h 4m", "3m 7s", "42s" or "850ms" for a duration; the two largest units are enough to compare runs. */
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const totalSeconds = Math.round(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return `${seconds}s`;
+}
+
+/** A timer reading such as "0:05:09"; used in the editable time spent field. */
+export function formatClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+/**
+ * Reads a time typed by a tester: "1:05:09", "5:09" (minutes and seconds) or "45" (seconds).
+ * Returns milliseconds, or null when the text isn't a time.
+ */
+export function parseClock(text: string): number | null {
+  const parts = text.trim().split(':');
+  if (parts.length === 0 || parts.length > 3 || parts.some((p) => !/^\d+$/.test(p))) return null;
+  const [s = 0, m = 0, h = 0] = parts.map(Number).reverse();
+  if (parts.length > 1 && s >= 60) return null;
+  if (parts.length > 2 && m >= 60) return null;
+  return ((h * 60 + m) * 60 + s) * 1000;
+}

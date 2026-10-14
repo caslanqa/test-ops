@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import * as crypto from "crypto";
-import { Prisma, ProjectRole, RunStatus } from "@prisma/client";
+import { Prisma, ProjectRole, RunCaseStatus, RunStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRunDto } from "./dto/create-run.dto";
@@ -110,7 +110,7 @@ export class RunsService {
       return acc;
     }, {});
     // What deleting the run would remove besides the run itself, so clients can say so in their confirmation.
-    const [resultCount, attachmentCount] = await this.prisma.$transaction([
+    const [resultCount, attachmentCount, attemptTotals] = await this.prisma.$transaction([
       this.prisma.result.count({ where: { runCase: { runId } } }),
       this.prisma.attachment.count({
         where: {
@@ -120,8 +120,26 @@ export class RunsService {
           ],
         },
       }),
+      this.prisma.result.groupBy({
+        by: ["runCaseId"],
+        where: { runCase: { runId } },
+        orderBy: { runCaseId: "asc" },
+        _count: { _all: true },
+        _sum: { durationMs: true },
+      }),
     ]);
-    return { ...run, progress, resultCount, attachmentCount };
+    // Per case: how many attempts it has and the time they took together, as the run list shows them.
+    const totalsByRunCase = new Map(attemptTotals.map((row) => [row.runCaseId, row]));
+    const runCases = run.runCases.map((rc) => {
+      const totals = totalsByRunCase.get(rc.id);
+      return {
+        ...rc,
+        attemptCount: typeof totals?._count === "object" ? (totals._count._all ?? 0) : 0,
+        durationMs: totals?._sum?.durationMs ?? null,
+      };
+    });
+    const durationMs = runCases.reduce((sum, rc) => sum + (rc.durationMs ?? 0), 0);
+    return { ...run, runCases, progress, resultCount, attachmentCount, durationMs };
   }
 
   async create(userId: string, projectId: string, dto: CreateRunDto) {
@@ -261,6 +279,31 @@ export class RunsService {
     });
     if (count === 0) throw new NotFoundException("Test case is not in this run");
     return this.prisma.runCase.findUniqueOrThrow({ where: { id: runCaseId } });
+  }
+
+  /**
+   * "Run again": marks a case that has a result for another attempt. Its earlier attempts stay in
+   * the run; the next result replaces the Retest status. Only open runs, like any result write,
+   * and under the same per-case lock, so a result arriving at the same time can't be overwritten.
+   */
+  async retestCase(userId: string, projectId: string, runId: string, runCaseId: string) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertWritableRun(tx, projectId, runId);
+      const runCase = await tx.runCase.findFirst({ where: { id: runCaseId, runId } });
+      if (!runCase) throw new NotFoundException("Test case is not in this run");
+      const key = `result:${runId}:${runCase.testCaseId}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+      const current = await tx.runCase.findUniqueOrThrow({ where: { id: runCaseId } });
+      if (current.status === RunCaseStatus.UNTESTED) {
+        throw new BadRequestException("This case has no result yet, so there is nothing to run again");
+      }
+      if (current.status === RunCaseStatus.RETEST) return current;
+      return tx.runCase.update({
+        where: { id: runCaseId },
+        data: { status: RunCaseStatus.RETEST },
+      });
+    });
   }
 
   async complete(userId: string, projectId: string, runId: string) {

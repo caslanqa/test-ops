@@ -12,9 +12,10 @@ import { RUN_SOURCE_LABEL, RUN_STATUS_LABEL, labelOf } from '../../lib/labels';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useAuth } from '../../auth/AuthContext';
 import { useProjectInfo } from '../../lib/projectInfo';
-import { normalizeCounts } from '../../lib/status';
+import { normalizeCounts, pendingCount } from '../../lib/status';
 import type { Suite } from '../../lib/suites';
 import { usePageTitle, useResource } from '../../lib/useResource';
+import { Select } from '../../components/Select';
 
 interface RunRow {
   id: string;
@@ -113,10 +114,10 @@ function CreateRunForm({
       <div className="field-grid">
         <div className="field">
           <label htmlFor={ids.plan} className="field-label">Plan</label>
-          <select id={ids.plan} value={planId} onChange={(e) => setPlanId(e.target.value)}>
+          <Select id={ids.plan} value={planId} onChange={(e) => setPlanId(e.target.value)}>
             <option value="">No plan, I'll pick cases</option>
             {plans.data?.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="field">
           <label htmlFor={ids.env} className="field-label">Environment</label>
@@ -220,7 +221,7 @@ export function RunsPage() {
               {runs.map((run) => {
                 const counts = normalizeCounts(run.progress);
                 const total = Object.values(counts).reduce((a, b) => a + b, 0);
-                const done = total - counts.UNTESTED;
+                const done = total - pendingCount(counts);
                 return (
                   <tr key={run.id}>
                     <td>
@@ -235,7 +236,7 @@ export function RunsPage() {
                     </td>
                     <td className="col-ribbon">
                       <div className="ribbon-cell-wrap">
-                        <ResultRibbon counts={run.progress} size="sm" label={run.title} />
+                        <ResultRibbon counts={run.progress} size="md" label={run.title} showCounts />
                         <span className="ribbon-fraction num">{done}/{total}</span>
                       </div>
                     </td>

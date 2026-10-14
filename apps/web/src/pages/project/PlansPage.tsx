@@ -18,6 +18,7 @@ import { useProjectMembers } from '../../lib/members';
 import { useProjectInfo } from '../../lib/projectInfo';
 import type { Suite } from '../../lib/suites';
 import { usePageTitle, useResource } from '../../lib/useResource';
+import { Select } from '../../components/Select';
 
 /** Name of a run started from a plan: plan name + start time (so several runs from the same plan can be told apart). */
 function runTitleFor(planTitle: string): string {
@@ -231,12 +232,12 @@ function CreatePlanForm({
       </div>
       <div className="field">
         <label htmlFor={assigneeFieldId} className="field-label">Assign the cases to</label>
-        <select id={assigneeFieldId} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+        <Select id={assigneeFieldId} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
           <option value="">Nobody yet</option>
           {(members.data ?? []).map((m) => (
             <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
           ))}
-        </select>
+        </Select>
         <p className="field-hint">Runs started from this plan take over the assignment.</p>
       </div>
       {cases.data && suites.data ? (

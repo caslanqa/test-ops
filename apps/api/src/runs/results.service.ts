@@ -389,6 +389,8 @@ export class ResultsService {
         where,
         include: {
           runCase: { select: { runId: true, testCaseId: true } },
+          // The run case panel shows each attempt's failed steps with their actual results.
+          stepResults: { orderBy: { stepPosition: "asc" } },
         },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
         ...pageArgs(query),

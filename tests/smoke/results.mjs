@@ -1,6 +1,7 @@
 // Result ingestion smoke test: the CI flow with an API token, bulk uploads of realistic size,
 // all-or-nothing uploads, idempotent re-sends, parallel CI jobs and completed runs
-// (FR-034, FR-035, FR-043, FR-074, FR-075). Runs against a running stack and creates its own data:
+// (FR-034, FR-035, FR-043, FR-074, FR-075), and manual execution with step results, the Invalid status
+// and time spent (FR-040). Runs against a running stack and creates its own data:
 //   docker compose up -d --wait
 //   node tests/smoke/results.mjs
 // Signs up its own user, so it needs SELF_REGISTRATION=true (the default). BASE changes the target.
@@ -219,6 +220,56 @@ const adders = await Promise.all(cases.slice(40, 48).map((c) => call(ci, 'POST',
 check('parallel results adding new cases to a run all succeed', adders.every((r) => r.status === 201), JSON.stringify(adders.map((r) => r.status)));
 const runItems = (await ok(ci, 'GET', `${P}/runs/${parallelNew.id}`)).runCases;
 check('...and the added cases get distinct positions', runItems.length === 8 && new Set(runItems.map((i) => i.position)).size === 8, JSON.stringify(runItems.map((i) => i.position)));
+
+// ---------- manual execution: step results, invalid, time spent, attempts
+console.log('--- Manual execution ---');
+const manual = await newRun('Manual execution', { source: 'MANUAL', testCaseIds: [cases[48].id, cases[49].id] });
+const stepped = await ok(ci, 'POST', `${P}/runs/${manual.id}/results`, {
+  testCaseId: cases[48].id,
+  status: 'FAILED',
+  source: 'MANUAL',
+  durationMs: 4000,
+  stepResults: [
+    { stepPosition: 1, status: 'FAILED', comment: 'The total shows 0.00' },
+    { stepPosition: 0, status: 'PASSED' },
+  ],
+});
+check('a manual result keeps its step results', stepped.stepResults?.length === 2, JSON.stringify(stepped.stepResults));
+const listed = (await runResults(manual.id)).find((r) => r.id === stepped.id);
+check(
+  'the project results list includes step results in step order',
+  listed?.stepResults?.map((s) => s.stepPosition).join(',') === '0,1' && listed.stepResults[1].comment === 'The total shows 0.00',
+  JSON.stringify(listed?.stepResults),
+);
+const invalid = await call(ci, 'POST', `${P}/runs/${manual.id}/results`, { testCaseId: cases[48].id, status: 'INVALID', source: 'MANUAL', durationMs: 1500 });
+check(`[${invalid.status}] Invalid is a result status`, invalid.status === 201 && invalid.json.status === 'INVALID', JSON.stringify(invalid.json));
+check('an Invalid result sets the case status', (await caseStatus(manual.id, cases[48].id)) === 'INVALID');
+const manualRun = await ok(ci, 'GET', `${P}/runs/${manual.id}`);
+const steppedCase = manualRun.runCases.find((rc) => rc.testCaseId === cases[48].id);
+const untouched = manualRun.runCases.find((rc) => rc.testCaseId === cases[49].id);
+check('a run case counts its attempts', steppedCase?.attemptCount === 2 && untouched?.attemptCount === 0, JSON.stringify({ steppedCase, untouched }));
+check('a run case sums the time of its attempts', steppedCase?.durationMs === 5500 && untouched?.durationMs === null, `${steppedCase?.durationMs} ${untouched?.durationMs}`);
+check('the run sums the time of its cases', manualRun.durationMs === 5500, `${manualRun.durationMs}`);
+check('the run progress counts Invalid', manualRun.progress.INVALID === 1, JSON.stringify(manualRun.progress));
+const invalidFilter = await call(ci, 'GET', `${P}/results?runId=${manual.id}&status=INVALID`);
+check('results filter by Invalid', invalidFilter.status === 200 && total(invalidFilter) === 1, `${invalidFilter.status} ${total(invalidFilter)}`);
+
+// Run again: the case waits for another attempt, its history stays, the next result replaces Retest.
+const manualCase = (await ok(ci, 'GET', `${P}/runs/${manual.id}`)).runCases;
+const withResult = manualCase.find((rc) => rc.testCaseId === cases[48].id);
+const noResult = manualCase.find((rc) => rc.testCaseId === cases[49].id);
+const retest = await call(ci, 'POST', `${P}/runs/${manual.id}/cases/${withResult.id}/retest`);
+check(`[${retest.status}] Run again sets the case to Retest`, retest.status === 200 && retest.json.status === 'RETEST', JSON.stringify(retest.json));
+const again2 = await call(ci, 'POST', `${P}/runs/${manual.id}/cases/${withResult.id}/retest`);
+check(`[${again2.status}] Run again twice is harmless`, again2.status === 200 && again2.json.status === 'RETEST');
+await expectStatus('a case without a result has nothing to run again', 400, ci, 'POST', `${P}/runs/${manual.id}/cases/${noResult.id}/retest`);
+await expectStatus('Run again on a case of another run is not found', 404, ci, 'POST', `${P}/runs/${nightly.id}/cases/${withResult.id}/retest`);
+const afterRetest = await ok(ci, 'GET', `${P}/runs/${manual.id}`);
+check('the run counts Retest and keeps the attempts', afterRetest.progress.RETEST === 1 && afterRetest.runCases.find((rc) => rc.id === withResult.id).attemptCount === 2, JSON.stringify(afterRetest.progress));
+await ok(ci, 'POST', `${P}/runs/${manual.id}/results`, { testCaseId: cases[48].id, status: 'PASSED', source: 'MANUAL' });
+check('the next result replaces Retest', (await caseStatus(manual.id, cases[48].id)) === 'PASSED');
+await ok(session, 'POST', `${P}/runs/${manual.id}/complete`);
+await expectStatus('Run again on a completed run is refused', 403, ci, 'POST', `${P}/runs/${manual.id}/cases/${withResult.id}/retest`);
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -135,7 +135,7 @@ The case view also summarizes the latest result and a consecutive failed-run cou
 
 ### 6.5 Execution and results
 
-- **FR-040:** Test results must support at least the Passed, Failed, Blocked, Skipped and Untested statuses.
+- **FR-040:** Test results must support at least the Passed, Failed, Blocked, Skipped, Invalid (could not be finished properly, so inconclusive) and Untested statuses.
 - **FR-041:** In manual execution, a result, comment and evidence must be recordable for each case and step.
 - **FR-042:** A result must be associated with the run, case, user/automation source, start/end time and duration.
 - **FR-043:** Retries must be viewable without losing history; the current status must be distinguishable from previous attempts.

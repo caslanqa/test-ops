@@ -25,7 +25,18 @@ async function bootstrap() {
   // client address is read from X-Forwarded-For only if the proxy is declared trusted.
   app.set("trust proxy", config.get("rateLimit.trustProxy"));
 
-  app.use(helmet());
+  // Over HTTPS the defaults apply, including HSTS and upgrade-insecure-requests. A plain-HTTP
+  // install (e.g. http://192.168.1.10:8080 or http://localhost) must not get them: Safari upgrades
+  // every asset request to https:// even on localhost, finds no TLS there and shows a blank page.
+  // req.secure is also true behind a TLS-terminating proxy when TRUST_PROXY trusts it.
+  const httpsHeaders = helmet();
+  const plainHttpHeaders = helmet({
+    contentSecurityPolicy: { directives: { "upgrade-insecure-requests": null } },
+    strictTransportSecurity: false,
+  });
+  app.use((req: Request, res: Response, next: NextFunction) =>
+    (req.secure ? httpsHeaders : plainHttpHeaders)(req, res, next),
+  );
   // Browsers only expose these response headers to cross-origin scripts when listed here.
   app.enableCors({
     exposedHeaders: [

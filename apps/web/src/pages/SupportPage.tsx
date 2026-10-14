@@ -118,7 +118,8 @@ function CiSection({ baseUrl }: { baseUrl: string }) {
         </li>
         <li>
           Send the results; a test case that isn't in the run yet is added to it. Status is one of{' '}
-          <code>PASSED</code>, <code>FAILED</code>, <code>BLOCKED</code> or <code>SKIPPED</code>; up to 500 results
+          <code>PASSED</code>, <code>FAILED</code>, <code>BLOCKED</code>, <code>SKIPPED</code> or{' '}
+          <code>INVALID</code> (the test couldn't finish properly, so the outcome is inconclusive); up to 500 results
           per request.
         </li>
       </ol>

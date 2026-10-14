@@ -16,6 +16,7 @@ import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectInfo } from '../../lib/projectInfo';
 import { plural } from '../../lib/format';
 import { usePageTitle, useResource } from '../../lib/useResource';
+import { Select } from '../../components/Select';
 
 interface Defect {
   id: string;
@@ -132,25 +133,25 @@ function EditDefectForm({
       <div className="field-grid">
         <div className="field">
           <label htmlFor={ids.status} className="field-label">Status</label>
-          <select id={ids.status} value={status} onChange={(e) => setStatus(e.target.value)}>
+          <Select id={ids.status} value={status} onChange={(e) => setStatus(e.target.value)}>
             {Object.entries(DEFECT_STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="field">
           <label htmlFor={ids.severity} className="field-label">Severity</label>
-          <select id={ids.severity} value={severity} onChange={(e) => setSeverity(e.target.value)}>
+          <Select id={ids.severity} value={severity} onChange={(e) => setSeverity(e.target.value)}>
             {Object.entries(DEFECT_SEVERITY_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="field">
           <label htmlFor={ids.assignee} className="field-label">Assignee</label>
-          <select id={ids.assignee} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+          <Select id={ids.assignee} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
             <option value="">Unassigned</option>
             {defect.assigneeId && !members.some((m) => m.user.id === defect.assigneeId) && (
               <option value={defect.assigneeId}>Current assignee</option>
             )}
             {members.map((m) => <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>)}
-          </select>
+          </Select>
         </div>
       </div>
       <div className="field-grid">

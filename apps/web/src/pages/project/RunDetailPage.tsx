@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Bug, CheckCheck, Paperclip, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { Bot, Bug, CheckCheck, Hand, Paperclip, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import { api, downloadFile } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
@@ -9,19 +9,23 @@ import { useNotice } from '../../lib/notice';
 import { ResultRibbon, StatusLegend } from '../../components/ResultRibbon';
 import { StatusChip, Tag } from '../../components/StatusChip';
 import { changedFields, hasChanges } from '../../lib/changes';
-import { formatBytes, formatDate, formatDateTime, plural } from '../../lib/format';
+import { formatBytes, formatDate, formatDateTime, formatDuration, plural } from '../../lib/format';
 import { RUN_SOURCE_LABEL, RUN_STATUS_LABEL, labelOf } from '../../lib/labels';
 import {
+  DEFECT_STATUSES,
   RESULT_CHOICES,
   STATUS_META,
   isResultStatus,
   normalizeCounts,
+  pendingCount,
   type ResultStatus,
 } from '../../lib/status';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectMembers } from '../../lib/members';
 import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
+import { CaseExecution, DefectForResultDialog, type SavedResult } from './RunExecution';
+import { Select } from '../../components/Select';
 
 interface CaseSnapshot {
   title: string;
@@ -38,6 +42,10 @@ interface RunCase {
   position: number;
   caseSnapshot: CaseSnapshot | null;
   testCase: { id: string; title: string };
+  /** Results recorded for the case in this run; more than one means it was retried. */
+  attemptCount: number;
+  /** Time of all its attempts together, when they reported one. */
+  durationMs: number | null;
 }
 
 interface RunDetail {
@@ -56,12 +64,19 @@ interface RunDetail {
   /** What deleting the run removes with it. */
   resultCount: number;
   attachmentCount: number;
+  /** Sum of the case durations: the testing time, not the time since the run started. */
+  durationMs: number;
 }
 
+/** The latest result of each case in the run. */
 interface ResultRow {
   id: string;
+  source: 'MANUAL' | 'AUTOMATION';
   runCase: { testCaseId: string };
 }
+
+/** Where a case's latest result came from: a tester in the app, or automation through the API. */
+type SourceFilter = 'ALL' | 'MANUAL' | 'AUTOMATION';
 
 function EditRunDialog({ open, ...props }: Parameters<typeof EditRunForm>[0] & { open: boolean }) {
   return (
@@ -165,6 +180,8 @@ interface ResultEntry {
   automationSourceLabel: string | null;
   authorUserId: string | null;
   createdAt: string;
+  durationMs: number | null;
+  stepResults: { stepPosition: number; status: string; comment: string | null }[];
 }
 
 interface AttachmentInfo {
@@ -173,111 +190,19 @@ interface AttachmentInfo {
   sizeBytes: number;
 }
 
-/** A result with its comment, as entered in the case panel; files are uploaded after it is saved. */
-function RecordResultForm({
-  projectId,
-  runId,
-  runCase,
-  onSaved,
-}: {
-  projectId: string;
-  runId: string;
-  runCase: RunCase;
-  onSaved: (message: string) => void;
-}) {
-  const [status, setStatus] = useState<ResultStatus>('PASSED');
-  const [comment, setComment] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const statusId = useId();
-  const commentId = useId();
-  const filesId = useId();
-  const filesHintId = useId();
-  const title = runCase.caseSnapshot?.title ?? runCase.testCase.title;
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      const result = await api.post<{ id: string }>(`/projects/${projectId}/runs/${runId}/results`, {
-        testCaseId: runCase.testCaseId,
-        status,
-        comment: comment.trim() || undefined,
-        source: 'MANUAL',
-      });
-      let message = `${title} marked as ${STATUS_META[status].label.toLowerCase()}.`;
-      if (files.length > 0) {
-        const form = new FormData();
-        for (const file of files) form.append('files', file);
-        try {
-          await api.upload(`/projects/${projectId}/results/${result.id}/attachments`, form);
-        } catch (err) {
-          // The result stays; only the files are missing, so say exactly that.
-          setError(`The result was saved, but the files weren't: ${err instanceof Error ? err.message : 'upload failed'}`);
-          message = `${title} marked as ${STATUS_META[status].label.toLowerCase()}, without the files.`;
-          onSaved(message);
-          return;
-        }
-      }
-      setComment('');
-      setFiles([]);
-      if (fileInput.current) fileInput.current.value = '';
-      onSaved(message);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save the result");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form className="record-result" onSubmit={onSubmit}>
-      <div className="field">
-        <label htmlFor={statusId} className="field-label">Result</label>
-        <select id={statusId} value={status} onChange={(e) => setStatus(e.target.value as ResultStatus)}>
-          {RESULT_CHOICES.map((choice) => (
-            <option key={choice} value={choice}>{STATUS_META[choice].label}</option>
-          ))}
-        </select>
-      </div>
-      <div className="field">
-        <label htmlFor={commentId} className="field-label">Comment</label>
-        <textarea id={commentId} rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
-      </div>
-      <div className="field">
-        <label htmlFor={filesId} className="field-label">Evidence</label>
-        <input
-          id={filesId}
-          ref={fileInput}
-          type="file"
-          multiple
-          aria-describedby={filesHintId}
-          onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-        />
-        <p id={filesHintId} className="field-hint">Screenshots, logs or recordings; the server's size and type limits apply.</p>
-      </div>
-      <FormError message={error} />
-      <button type="submit" className="btn btn-primary" disabled={saving}>
-        {saving ? 'Saving…' : 'Save result'}
-      </button>
-    </form>
-  );
-}
-
 /** Earlier attempts of the case in this run, newest first, with comments and files (FR-043). */
 function ResultHistory({
   projectId,
   runId,
   runCase,
+  steps,
   memberName,
   version,
 }: {
   projectId: string;
   runId: string;
   runCase: RunCase;
+  steps: CaseSnapshot['steps'];
   memberName: Map<string, string>;
   version: number;
 }) {
@@ -317,9 +242,11 @@ function ResultHistory({
                 {r.source === 'AUTOMATION'
                   ? r.automationSourceLabel ?? 'Automation'
                   : (r.authorUserId && memberName.get(r.authorUserId)) ?? 'A project member'}
+                {r.durationMs !== null && <> · <span className="num">{formatDuration(r.durationMs)}</span></>}
               </span>
             </div>
             {r.comment && <p className="prose">{r.comment}</p>}
+            <StepOutcomes stepResults={r.stepResults} steps={steps} />
             {r.attachments.length > 0 && (
               <ul className="attachment-list">
                 {r.attachments.map((file) => (
@@ -340,9 +267,44 @@ function ResultHistory({
   );
 }
 
+/** Where the case's latest result came from, as an icon plus text so it doesn't rely on the icon alone. */
+function SourceLabel({ result }: { result: ResultRow | undefined }) {
+  if (!result) return <span className="muted">—</span>;
+  const manual = result.source === 'MANUAL';
+  return (
+    <span className="source-label">
+      {manual ? <Hand size={14} aria-hidden="true" /> : <Bot size={14} aria-hidden="true" />}
+      {manual ? 'Manual' : 'Automation'}
+    </span>
+  );
+}
+
+/** The steps of an attempt that didn't pass, with what actually happened; passed steps stay quiet. */
+function StepOutcomes({
+  stepResults,
+  steps,
+}: {
+  stepResults: ResultEntry['stepResults'];
+  steps: CaseSnapshot['steps'];
+}) {
+  const notable = stepResults.filter((s) => s.status !== 'PASSED' || s.comment);
+  if (notable.length === 0) return null;
+  const number = new Map(steps.map((step, index) => [step.position, index + 1]));
+  return (
+    <ul className="step-outcomes">
+      {notable.map((s) => (
+        <li key={s.stepPosition}>
+          <StatusChip status={s.status} /> Step {number.get(s.stepPosition) ?? s.stepPosition + 1}
+          {s.comment && <>: <span className="prose">{s.comment}</span></>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
- * The case's steps as they were when the run started (snapshot), the form for a result with a
- * comment and evidence, and the case's results in this run.
+ * The case's steps as they were when the run started (snapshot) with a result per step, the form
+ * for the case result with time spent, a comment and evidence, and the case's results in this run.
  */
 function RunCasePanel({
   projectId,
@@ -351,6 +313,7 @@ function RunCasePanel({
   canRecord,
   memberName,
   onSaved,
+  onRetest,
   onClose,
 }: {
   projectId: string;
@@ -358,10 +321,13 @@ function RunCasePanel({
   runCase: RunCase;
   canRecord: boolean;
   memberName: Map<string, string>;
-  onSaved: (message: string) => void;
+  onSaved: (message: string, saved: SavedResult) => void;
+  onRetest: (rc: RunCase) => void;
   onClose: () => void;
 }) {
   const [version, setVersion] = useState(0);
+  // A case with a result can be run again; one already waiting for it can't.
+  const canRunAgain = canRecord && runCase.status !== 'UNTESTED' && runCase.status !== 'RETEST';
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
   const snapshot = runCase.caseSnapshot;
@@ -382,55 +348,66 @@ function RunCasePanel({
         </button>
       </div>
       <p className="detail-path">Steps as they were when the run started</p>
+      {canRunAgain && (
+        <div className="run-panel-actions">
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => onRetest(runCase)}>
+            <RotateCcw size={14} aria-hidden="true" />
+            Run again
+          </button>
+          <span className="field-hint">Marks the case Retest; earlier attempts stay below.</span>
+        </div>
+      )}
       <section className="detail-section">
         <h3>Preconditions</h3>
         <p className={snapshot?.preconditions ? 'prose' : 'muted'}>
           {snapshot?.preconditions ?? 'No preconditions.'}
         </p>
       </section>
-      <section className="detail-section">
-        <h3>Steps</h3>
-        {steps.length === 0 ? (
-          <p className="muted">This case has no steps.</p>
-        ) : (
-          <ol className="steps">
-            {steps.map((step) => (
-              <li key={step.position} className="step">
-                <p className="step-action">{step.action}</p>
-                {step.expectedResult && (
-                  <p className="step-expected">
-                    <span className="step-expected-label">Expected:</span> {step.expectedResult}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
-      {canRecord && (
+      {canRecord ? (
+        <CaseExecution
+          projectId={projectId}
+          runId={runId}
+          runCaseId={runCase.id}
+          testCaseId={runCase.testCaseId}
+          title={snapshot?.title ?? runCase.testCase.title}
+          steps={steps}
+          onSaved={(message, saved) => {
+            setVersion((v) => v + 1);
+            onSaved(message, saved);
+          }}
+        />
+      ) : (
         <section className="detail-section">
-          <h3>Record a result</h3>
-          <RecordResultForm
-            projectId={projectId}
-            runId={runId}
-            runCase={runCase}
-            onSaved={(message) => {
-              setVersion((v) => v + 1);
-              onSaved(message);
-            }}
-          />
+          <h3>Steps</h3>
+          {steps.length === 0 ? (
+            <p className="muted">This case has no steps.</p>
+          ) : (
+            <ol className="steps">
+              {steps.map((step) => (
+                <li key={step.position} className="step">
+                  <p className="step-action">{step.action}</p>
+                  {step.expectedResult && (
+                    <p className="step-expected">
+                      <span className="step-expected-label">Expected:</span> {step.expectedResult}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
       )}
       <section className="detail-section">
         <h3>Results in this run</h3>
-        <ResultHistory projectId={projectId} runId={runId} runCase={runCase} memberName={memberName} version={version} />
+        <ResultHistory projectId={projectId} runId={runId} runCase={runCase} steps={steps} memberName={memberName} version={version} />
       </section>
     </aside>
   );
 }
 
 /**
- * Result buttons for a case (current status via aria-pressed) and, if it failed, filing a defect.
+ * Result buttons for a case (current status via aria-pressed) and, for a failed, blocked or invalid
+ * case, filing or linking a defect.
  * Shown in a separate column on desktop and under the case title on narrow screens; the hidden
  * copy is also removed from the accessibility tree by display:none.
  */
@@ -466,10 +443,10 @@ function ResultActions({
           );
         })}
       </div>
-      {runCase.status === 'FAILED' && (
+      {isResultStatus(runCase.status) && DEFECT_STATUSES.includes(runCase.status) && (
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDefect(runCase)}>
           <Bug size={16} aria-hidden="true" />
-          Create defect
+          Defect
         </button>
       )}
     </div>
@@ -500,12 +477,16 @@ export function RunDetailPage() {
   };
   const [actionError, setActionError] = useState<string | null>(null);
   const [onlyMine, setOnlyMine] = useState(false);
+  // Status chosen on the ribbon or legend; choosing it again shows every case.
+  const [statusFilter, setStatusFilter] = useState<ResultStatus | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('ALL');
   const [confirmingComplete, setConfirmingComplete] = useState(false);
   const [editingRun, setEditingRun] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [defectFor, setDefectFor] = useState<{ resultId: string; caseTitle: string; summary: string } | null>(null);
 
   const latestResultByCase = new Map(
-    (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r.id]),
+    (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r]),
   );
 
   function reload() {
@@ -560,18 +541,26 @@ export function RunDetailPage() {
     }
   }
 
-  async function createDefect(rc: RunCase) {
+  async function retest(rc: RunCase) {
     setActionError(null);
-    const resultId = latestResultByCase.get(rc.testCaseId);
     try {
-      await api.post(`/projects/${projectId}/defects`, {
-        title: `Failed: ${rc.testCase.title}`,
-        resultIds: resultId ? [resultId] : [],
-      });
-      setNotice({ text: `Defect created for "${rc.testCase.title}".`, defectLink: true });
+      await api.post(`/projects/${projectId}/runs/${runId}/cases/${rc.id}/retest`);
+      setNotice({ text: `${rc.caseSnapshot?.title ?? rc.testCase.title} set to retest.` });
+      runRes.reload();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Couldn't create the defect");
+      setActionError(err instanceof Error ? err.message : "Couldn't mark the case for retest");
     }
+  }
+
+  // The latest result of the case gets the defect; the dialog creates one or links an open one.
+  function openDefect(rc: RunCase) {
+    setActionError(null);
+    const resultId = latestResultByCase.get(rc.testCaseId)?.id;
+    if (!resultId) {
+      setActionError(`"${rc.testCase.title}" has no result to file a defect for yet.`);
+      return;
+    }
+    setDefectFor({ resultId, caseTitle: rc.caseSnapshot?.title ?? rc.testCase.title, summary: '' });
   }
 
   if (runRes.error && !run) return <LoadError message={runRes.error} onRetry={reload} />;
@@ -586,13 +575,42 @@ export function RunDetailPage() {
   const statuses = runCases.map((rc) => (isResultStatus(rc.status) ? rc.status : 'UNTESTED'));
   const counts = normalizeCounts(run.progress);
   const total = runCases.length;
-  const done = total - counts.UNTESTED;
+  const done = total - pendingCount(counts);
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   const openCase = runCases.find((rc) => rc.id === openCaseId) ?? null;
   // Admins and testers assign cases; a tester can narrow the list to their own.
   const canAssign = editRepository;
   const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
-  const shownCases = onlyMine ? runCases.filter((rc) => rc.assigneeId === user?.id) : runCases;
+  // Cases without a result have no source, so a source filter leaves them out.
+  const shownCases = runCases.filter(
+    (rc) =>
+      (!onlyMine || rc.assigneeId === user?.id) &&
+      (!statusFilter || rc.status === statusFilter) &&
+      (sourceFilter === 'ALL' || latestResultByCase.get(rc.testCaseId)?.source === sourceFilter),
+  );
+  const toggleStatus = (status: ResultStatus) => setStatusFilter((current) => (current === status ? null : status));
+  const filterName = statusFilter ? STATUS_META[statusFilter].label.toLowerCase() : null;
+
+  /** Who tests the case: a select for admins and testers, the name for everyone else. */
+  function assigneeControl(rc: RunCase) {
+    const title = rc.caseSnapshot?.title ?? rc.testCase.title;
+    return canAssign ? (
+      <Select
+        className="inline-select"
+        aria-label={`Assignee for ${title}`}
+        value={rc.assigneeId ?? ''}
+        onChange={(e) => assign(rc, e.target.value)}
+      >
+        <option value="">Unassigned</option>
+        {rc.assigneeId && !memberName.has(rc.assigneeId) && <option value={rc.assigneeId}>Assigned</option>}
+        {(members.data ?? []).map((m) => (
+          <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
+        ))}
+      </Select>
+    ) : (
+      <span className="muted">{rc.assigneeId ? memberName.get(rc.assigneeId) ?? 'Assigned' : 'Unassigned'}</span>
+    );
+  }
 
   function closePanel() {
     const id = openCaseId;
@@ -679,16 +697,48 @@ export function RunDetailPage() {
           <p className="run-progress-text">
             <span className="run-percent num">{percent}%</span>
             <span className="muted num">{done}/{total} cases have a result</span>
+            {run.durationMs > 0 && (
+              <span className="muted num" title="Sum of the time spent on each case">
+                · {formatDuration(run.durationMs)} testing time
+              </span>
+            )}
           </p>
         </div>
-        <ResultRibbon statuses={statuses} size="lg" label="Run results" />
-        <StatusLegend counts={counts} />
+        <ResultRibbon
+          statuses={statuses}
+          size="lg"
+          label="Run results"
+          showCounts
+          selected={statusFilter}
+          onSelect={toggleStatus}
+        />
+        <StatusLegend counts={counts} selected={statusFilter} onSelect={toggleStatus} />
+        <p className="visually-hidden" role="status">
+          {filterName ? `Showing ${plural(shownCases.length, `${filterName} case`)}.` : ''}
+        </p>
       </section>
 
       <div className="segmented" role="group" aria-label="Filter cases by assignee">
         <button type="button" aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>All cases</button>
         <button type="button" aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>Assigned to me</button>
       </div>
+      <div className="segmented" role="group" aria-label="Filter cases by result source">
+        <button type="button" aria-pressed={sourceFilter === 'ALL'} onClick={() => setSourceFilter('ALL')}>All sources</button>
+        <button type="button" aria-pressed={sourceFilter === 'MANUAL'} onClick={() => setSourceFilter('MANUAL')}>
+          <Hand size={14} aria-hidden="true" /> Manual
+        </button>
+        <button type="button" aria-pressed={sourceFilter === 'AUTOMATION'} onClick={() => setSourceFilter('AUTOMATION')}>
+          <Bot size={14} aria-hidden="true" /> Automation
+        </button>
+      </div>
+      {statusFilter && (
+        <p className="filter-note">
+          Showing only <StatusChip status={statusFilter} /> cases.{' '}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStatusFilter(null)}>
+            Show all cases
+          </button>
+        </p>
+      )}
 
       <div className={`run-body${openCase ? ' run-body--with-panel' : ''}`}>
         <div className="surface table-wrap">
@@ -698,7 +748,10 @@ export function RunDetailPage() {
               <tr>
                 <th scope="col" className="col-index hide-sm">Order</th>
                 <th scope="col" className="col-main">Test case</th>
+                <th scope="col" className="hide-sm">Assignee</th>
                 <th scope="col">Status</th>
+                <th scope="col" className="hide-sm">Source</th>
+                <th scope="col" className="hide-sm num">Duration</th>
                 {canRecord && <th scope="col" className="hide-sm">Record result</th>}
               </tr>
             </thead>
@@ -716,38 +769,36 @@ export function RunDetailPage() {
                     >
                       {rc.caseSnapshot?.title ?? rc.testCase.title}
                     </button>
-                    <div className="runcase-assignee">
-                      {canAssign ? (
-                        <select
-                          className="inline-select"
-                          aria-label={`Assignee for ${rc.caseSnapshot?.title ?? rc.testCase.title}`}
-                          value={rc.assigneeId ?? ''}
-                          onChange={(e) => assign(rc, e.target.value)}
-                        >
-                          <option value="">Unassigned</option>
-                          {rc.assigneeId && !memberName.has(rc.assigneeId) && (
-                            <option value={rc.assigneeId}>Assigned</option>
-                          )}
-                          {(members.data ?? []).map((m) => (
-                            <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="muted">
-                          {rc.assigneeId ? memberName.get(rc.assigneeId) ?? 'Assigned' : 'Unassigned'}
-                        </span>
-                      )}
+                    {/* On narrow screens the assignee and source columns are hidden, so they sit under the title. */}
+                    <div className="runcase-assignee show-sm">
+                      {assigneeControl(rc)}
+                      <SourceLabel result={latestResultByCase.get(rc.testCaseId)} />
                     </div>
                     {canRecord && (
                       <div className="show-sm cell-actions-sm">
-                        <ResultActions runCase={rc} pending={pending === rc.id} onMark={markResult} onDefect={createDefect} />
+                        <ResultActions runCase={rc} pending={pending === rc.id} onMark={markResult} onDefect={openDefect} />
                       </div>
                     )}
                   </td>
-                  <td><StatusChip status={rc.status} /></td>
+                  <td className="hide-sm runcase-assignee">{assigneeControl(rc)}</td>
+                  <td>
+                    <span className="status-cell">
+                      <StatusChip status={rc.status} />
+                      {rc.attemptCount > 1 && (
+                        <span className="attempt-count" title={`${plural(rc.attemptCount, 'attempt')} in this run`}>
+                          +{rc.attemptCount - 1}
+                          <span className="visually-hidden"> earlier {rc.attemptCount === 2 ? 'attempt' : 'attempts'}</span>
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="hide-sm">
+                    <SourceLabel result={latestResultByCase.get(rc.testCaseId)} />
+                  </td>
+                  <td className="hide-sm num muted">{formatDuration(rc.durationMs)}</td>
                   {canRecord && (
                     <td className="hide-sm">
-                      <ResultActions runCase={rc} pending={pending === rc.id} onMark={markResult} onDefect={createDefect} />
+                      <ResultActions runCase={rc} pending={pending === rc.id} onMark={markResult} onDefect={openDefect} />
                     </td>
                   )}
                 </tr>
@@ -758,7 +809,7 @@ export function RunDetailPage() {
             <p className="table-empty">This run has no cases. Start a new run from a plan or by picking cases.</p>
           )}
           {runCases.length > 0 && shownCases.length === 0 && (
-            <p className="table-empty">No cases in this run are assigned to you.</p>
+            <p className="table-empty">No cases in this run match the chosen filters.</p>
           )}
         </div>
         {openCase && (
@@ -769,10 +820,18 @@ export function RunDetailPage() {
             runCase={openCase}
             canRecord={canRecord}
             memberName={memberName}
-            onSaved={(message) => {
+            onSaved={(message, saved) => {
               setNotice({ text: message });
               reload();
+              if (saved.wantsDefect) {
+                setDefectFor({
+                  resultId: saved.resultId,
+                  caseTitle: openCase.caseSnapshot?.title ?? openCase.testCase.title,
+                  summary: saved.summary,
+                });
+              }
             }}
+            onRetest={retest}
             onClose={closePanel}
           />
         )}
@@ -786,6 +845,18 @@ export function RunDetailPage() {
         confirmLabel="Complete run"
         onConfirm={completeRun}
         onClose={() => setConfirmingComplete(false)}
+      />
+      <DefectForResultDialog
+        open={defectFor !== null}
+        projectId={projectId}
+        resultId={defectFor?.resultId ?? ''}
+        caseTitle={defectFor?.caseTitle ?? ''}
+        summary={defectFor?.summary ?? ''}
+        onClose={() => setDefectFor(null)}
+        onDone={(message) => {
+          setDefectFor(null);
+          setNotice({ text: message, defectLink: true });
+        }}
       />
       <EditRunDialog
         projectId={projectId}
