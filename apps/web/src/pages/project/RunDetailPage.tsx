@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Bug, CheckCheck, Paperclip, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { Bot, Bug, CheckCheck, Hand, Paperclip, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import { api, downloadFile } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
@@ -67,10 +67,17 @@ interface RunDetail {
   durationMs: number;
 }
 
+/** The latest result of each case in the run. */
 interface ResultRow {
   id: string;
+  source: 'MANUAL' | 'AUTOMATION';
+  automationSourceLabel: string | null;
+  authorUserId: string | null;
   runCase: { testCaseId: string };
 }
+
+/** Where a case's latest result came from: a tester in the app, or CI through the API. */
+type SourceFilter = 'ALL' | 'MANUAL' | 'AUTOMATION';
 
 function EditRunDialog({ open, ...props }: Parameters<typeof EditRunForm>[0] & { open: boolean }) {
   return (
@@ -258,6 +265,25 @@ function ResultHistory({
         ))}
       </ol>
     </>
+  );
+}
+
+/**
+ * Where the case's latest result came from: "Manual" with the tester's name, or "CI" with the job
+ * label the pipeline sent. Icons and text together, so the source doesn't rely on the icon alone.
+ */
+function SourceLabel({ result, memberName }: { result: ResultRow | undefined; memberName: Map<string, string> }) {
+  if (!result) return <span className="muted">—</span>;
+  const manual = result.source === 'MANUAL';
+  const detail = manual
+    ? result.authorUserId && memberName.get(result.authorUserId)
+    : result.automationSourceLabel;
+  return (
+    <span className={`source-label source-label--${manual ? 'manual' : 'ci'}`}>
+      {manual ? <Hand size={14} aria-hidden="true" /> : <Bot size={14} aria-hidden="true" />}
+      <span>{manual ? 'Manual' : 'CI'}</span>
+      {detail && <span className="source-detail muted" title={detail}>{detail}</span>}
+    </span>
   );
 }
 
@@ -461,13 +487,14 @@ export function RunDetailPage() {
   const [onlyMine, setOnlyMine] = useState(false);
   // Status chosen on the ribbon or legend; choosing it again shows every case.
   const [statusFilter, setStatusFilter] = useState<ResultStatus | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('ALL');
   const [confirmingComplete, setConfirmingComplete] = useState(false);
   const [editingRun, setEditingRun] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [defectFor, setDefectFor] = useState<{ resultId: string; caseTitle: string; summary: string } | null>(null);
 
   const latestResultByCase = new Map(
-    (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r.id]),
+    (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r]),
   );
 
   function reload() {
@@ -536,7 +563,7 @@ export function RunDetailPage() {
   // The latest result of the case gets the defect; the dialog creates one or links an open one.
   function openDefect(rc: RunCase) {
     setActionError(null);
-    const resultId = latestResultByCase.get(rc.testCaseId);
+    const resultId = latestResultByCase.get(rc.testCaseId)?.id;
     if (!resultId) {
       setActionError(`"${rc.testCase.title}" has no result to file a defect for yet.`);
       return;
@@ -562,11 +589,36 @@ export function RunDetailPage() {
   // Admins and testers assign cases; a tester can narrow the list to their own.
   const canAssign = editRepository;
   const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
+  // Cases without a result have no source, so a source filter leaves them out.
   const shownCases = runCases.filter(
-    (rc) => (!onlyMine || rc.assigneeId === user?.id) && (!statusFilter || rc.status === statusFilter),
+    (rc) =>
+      (!onlyMine || rc.assigneeId === user?.id) &&
+      (!statusFilter || rc.status === statusFilter) &&
+      (sourceFilter === 'ALL' || latestResultByCase.get(rc.testCaseId)?.source === sourceFilter),
   );
   const toggleStatus = (status: ResultStatus) => setStatusFilter((current) => (current === status ? null : status));
   const filterName = statusFilter ? STATUS_META[statusFilter].label.toLowerCase() : null;
+
+  /** Who tests the case: a select for admins and testers, the name for everyone else. */
+  function assigneeControl(rc: RunCase) {
+    const title = rc.caseSnapshot?.title ?? rc.testCase.title;
+    return canAssign ? (
+      <select
+        className="inline-select"
+        aria-label={`Assignee for ${title}`}
+        value={rc.assigneeId ?? ''}
+        onChange={(e) => assign(rc, e.target.value)}
+      >
+        <option value="">Unassigned</option>
+        {rc.assigneeId && !memberName.has(rc.assigneeId) && <option value={rc.assigneeId}>Assigned</option>}
+        {(members.data ?? []).map((m) => (
+          <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
+        ))}
+      </select>
+    ) : (
+      <span className="muted">{rc.assigneeId ? memberName.get(rc.assigneeId) ?? 'Assigned' : 'Unassigned'}</span>
+    );
+  }
 
   function closePanel() {
     const id = openCaseId;
@@ -678,6 +730,15 @@ export function RunDetailPage() {
         <button type="button" aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>All cases</button>
         <button type="button" aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>Assigned to me</button>
       </div>
+      <div className="segmented" role="group" aria-label="Filter cases by result source">
+        <button type="button" aria-pressed={sourceFilter === 'ALL'} onClick={() => setSourceFilter('ALL')}>All sources</button>
+        <button type="button" aria-pressed={sourceFilter === 'MANUAL'} onClick={() => setSourceFilter('MANUAL')}>
+          <Hand size={14} aria-hidden="true" /> Manual
+        </button>
+        <button type="button" aria-pressed={sourceFilter === 'AUTOMATION'} onClick={() => setSourceFilter('AUTOMATION')}>
+          <Bot size={14} aria-hidden="true" /> CI
+        </button>
+      </div>
       {statusFilter && (
         <p className="filter-note">
           Showing only <StatusChip status={statusFilter} /> cases.{' '}
@@ -695,7 +756,9 @@ export function RunDetailPage() {
               <tr>
                 <th scope="col" className="col-index hide-sm">Order</th>
                 <th scope="col" className="col-main">Test case</th>
+                <th scope="col" className="hide-sm">Assignee</th>
                 <th scope="col">Status</th>
+                <th scope="col" className="hide-sm">Source</th>
                 <th scope="col" className="hide-sm num">Duration</th>
                 {canRecord && <th scope="col" className="hide-sm">Record result</th>}
               </tr>
@@ -714,27 +777,10 @@ export function RunDetailPage() {
                     >
                       {rc.caseSnapshot?.title ?? rc.testCase.title}
                     </button>
-                    <div className="runcase-assignee">
-                      {canAssign ? (
-                        <select
-                          className="inline-select"
-                          aria-label={`Assignee for ${rc.caseSnapshot?.title ?? rc.testCase.title}`}
-                          value={rc.assigneeId ?? ''}
-                          onChange={(e) => assign(rc, e.target.value)}
-                        >
-                          <option value="">Unassigned</option>
-                          {rc.assigneeId && !memberName.has(rc.assigneeId) && (
-                            <option value={rc.assigneeId}>Assigned</option>
-                          )}
-                          {(members.data ?? []).map((m) => (
-                            <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="muted">
-                          {rc.assigneeId ? memberName.get(rc.assigneeId) ?? 'Assigned' : 'Unassigned'}
-                        </span>
-                      )}
+                    {/* On narrow screens the assignee and source columns are hidden, so they sit under the title. */}
+                    <div className="runcase-assignee show-sm">
+                      {assigneeControl(rc)}
+                      <SourceLabel result={latestResultByCase.get(rc.testCaseId)} memberName={memberName} />
                     </div>
                     {canRecord && (
                       <div className="show-sm cell-actions-sm">
@@ -742,6 +788,7 @@ export function RunDetailPage() {
                       </div>
                     )}
                   </td>
+                  <td className="hide-sm runcase-assignee">{assigneeControl(rc)}</td>
                   <td>
                     <span className="status-cell">
                       <StatusChip status={rc.status} />
@@ -752,6 +799,9 @@ export function RunDetailPage() {
                         </span>
                       )}
                     </span>
+                  </td>
+                  <td className="hide-sm">
+                    <SourceLabel result={latestResultByCase.get(rc.testCaseId)} memberName={memberName} />
                   </td>
                   <td className="hide-sm num muted">{formatDuration(rc.durationMs)}</td>
                   {canRecord && (
@@ -767,13 +817,7 @@ export function RunDetailPage() {
             <p className="table-empty">This run has no cases. Start a new run from a plan or by picking cases.</p>
           )}
           {runCases.length > 0 && shownCases.length === 0 && (
-            <p className="table-empty">
-              {filterName && onlyMine
-                ? `None of your cases in this run are ${filterName}.`
-                : filterName
-                  ? `No cases in this run are ${filterName}.`
-                  : 'No cases in this run are assigned to you.'}
-            </p>
+            <p className="table-empty">No cases in this run match the chosen filters.</p>
           )}
         </div>
         {openCase && (
