@@ -1,9 +1,28 @@
+import type { Prisma } from "@prisma/client";
+
 // FR-045 reference values: ~32 MB per file, ~128 MB total per request,
 // at most ~20 files per request. Runtime values are read from ConfigService
 // (ATTACHMENT_* env); these are the defaults when no env is given.
 export const ATTACHMENT_DEFAULT_MAX_FILE_SIZE_BYTES = 32 * 1024 * 1024;
 export const ATTACHMENT_DEFAULT_MAX_REQUEST_SIZE_BYTES = 128 * 1024 * 1024;
 export const ATTACHMENT_DEFAULT_MAX_FILES_PER_REQUEST = 20;
+
+/**
+ * Attachment fields that responses may show. The storage key is an internal path and is never
+ * exposed; files are downloaded by id.
+ */
+export const ATTACHMENT_METADATA_SELECT = {
+  id: true,
+  fileName: true,
+  mimeType: true,
+  sizeBytes: true,
+  checksumSha256: true,
+  resultId: true,
+  stepResultId: true,
+  defectId: true,
+  uploaderUserId: true,
+  createdAt: true,
+} satisfies Prisma.AttachmentSelect;
 
 /** Directory inside the attachment volume where uploads are written before being moved into place. */
 export const ATTACHMENT_TMP_DIRNAME = ".tmp";

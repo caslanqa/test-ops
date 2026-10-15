@@ -1,6 +1,18 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Bot, Bug, CheckCheck, Hand, Paperclip, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import {
+  Bot,
+  Bug,
+  CheckCheck,
+  ChevronLeft,
+  ChevronRight,
+  Hand,
+  Paperclip,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { api, downloadFile } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
@@ -24,7 +36,7 @@ import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectMembers } from '../../lib/members';
 import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
-import { CaseExecution, DefectForResultDialog, type SavedResult } from './RunExecution';
+import { CaseExecution, DefectForResultDialog, EditResultDialog, type SavedResult } from './RunExecution';
 import { Select } from '../../components/Select';
 
 interface CaseSnapshot {
@@ -77,6 +89,41 @@ interface ResultRow {
 
 /** Where a case's latest result came from: a tester in the app, or automation through the API. */
 type SourceFilter = 'ALL' | 'MANUAL' | 'AUTOMATION';
+
+/**
+ * The run page's filters and open case live in the URL (?status=failed&source=manual&assignee=me
+ * &case=…), so a reload, a shared link or the way back from another page shows the same list.
+ * Unknown values are ignored. The URL is replaced rather than pushed, so Back leaves the run
+ * instead of stepping through every filter and case.
+ */
+function useRunView() {
+  const [params, setParams] = useSearchParams();
+  const status = params.get('status')?.toUpperCase() ?? '';
+  const source = params.get('source')?.toUpperCase();
+  function update(changes: Partial<Record<'status' | 'source' | 'assignee' | 'case', string | null>>) {
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        for (const [key, value] of Object.entries(changes)) {
+          if (value === null) next.delete(key);
+          else next.set(key, value);
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
+  return {
+    statusFilter: isResultStatus(status) ? status : null,
+    sourceFilter: (source === 'MANUAL' || source === 'AUTOMATION' ? source : 'ALL') as SourceFilter,
+    onlyMine: params.get('assignee') === 'me',
+    openCaseId: params.get('case'),
+    setStatusFilter: (value: ResultStatus | null) => update({ status: value?.toLowerCase() ?? null }),
+    setSourceFilter: (value: SourceFilter) => update({ source: value === 'ALL' ? null : value.toLowerCase() }),
+    setOnlyMine: (value: boolean) => update({ assignee: value ? 'me' : null }),
+    setOpenCaseId: (value: string | null) => update({ case: value }),
+  };
+}
 
 function EditRunDialog({ open, ...props }: Parameters<typeof EditRunForm>[0] & { open: boolean }) {
   return (
@@ -171,26 +218,50 @@ function EditRunForm({
   );
 }
 
-interface ResultEntry {
-  id: string;
-  status: string;
-  comment: string | null;
-  attemptNumber: number;
-  source: string;
-  automationSourceLabel: string | null;
-  authorUserId: string | null;
-  createdAt: string;
-  durationMs: number | null;
-  stepResults: { stepPosition: number; status: string; comment: string | null }[];
-}
-
 interface AttachmentInfo {
   id: string;
   fileName: string;
   sizeBytes: number;
 }
 
-/** Earlier attempts of the case in this run, newest first, with comments and files (FR-043). */
+interface ResultEntry {
+  id: string;
+  status: string;
+  comment: string | null;
+  attemptNumber: number;
+  /** The attempt that sets the case's status; the only one the panel lets testers correct. */
+  isLatest: boolean;
+  source: string;
+  automationSourceLabel: string | null;
+  authorUserId: string | null;
+  createdAt: string;
+  durationMs: number | null;
+  attachments: AttachmentInfo[];
+  stepResults: { stepPosition: number; status: string; comment: string | null; attachments: AttachmentInfo[] }[];
+}
+
+/** Files as download buttons with their size. */
+function AttachmentList({ files, onDownload }: { files: AttachmentInfo[]; onDownload: (file: AttachmentInfo) => void }) {
+  if (files.length === 0) return null;
+  return (
+    <ul className="attachment-list">
+      {files.map((file) => (
+        <li key={file.id}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDownload(file)}>
+            <Paperclip size={14} aria-hidden="true" />
+            {file.fileName}
+            <span className="muted">{formatBytes(file.sizeBytes)}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Attempts of the case in this run, newest first, with comments, step results and files (FR-043).
+ * The latest attempt can be corrected when `onEdit` is given.
+ */
 function ResultHistory({
   projectId,
   runId,
@@ -198,6 +269,7 @@ function ResultHistory({
   steps,
   memberName,
   version,
+  onEdit,
 }: {
   projectId: string;
   runId: string;
@@ -205,17 +277,14 @@ function ResultHistory({
   steps: CaseSnapshot['steps'];
   memberName: Map<string, string>;
   version: number;
+  onEdit?: (result: ResultEntry) => void;
 }) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const history = useResource(async () => {
-    const results = await api.get<ResultEntry[]>(
-      `/projects/${projectId}/results?runId=${runId}&testCaseId=${runCase.testCaseId}&limit=20`,
-    );
-    const files = await Promise.all(
-      results.map((r) => api.get<AttachmentInfo[]>(`/projects/${projectId}/attachments?resultId=${r.id}`)),
-    );
-    return results.map((r, i) => ({ ...r, attachments: files[i] }));
-  }, [projectId, runId, runCase.testCaseId, version]);
+  // Each result comes with its own and its steps' file details, so one request fills the list.
+  const history = useResource(
+    () => api.get<ResultEntry[]>(`/projects/${projectId}/results?runId=${runId}&testCaseId=${runCase.testCaseId}&limit=20`),
+    [projectId, runId, runCase.testCaseId, version],
+  );
 
   async function download(file: AttachmentInfo) {
     setDownloadError(null);
@@ -237,29 +306,28 @@ function ResultHistory({
           <li key={r.id}>
             <div className="result-history-head">
               <StatusChip status={r.status} />
-              <span className="muted">
+              <span className="muted result-history-meta">
                 Attempt {r.attemptNumber} · {formatDateTime(r.createdAt)} ·{' '}
                 {r.source === 'AUTOMATION'
                   ? r.automationSourceLabel ?? 'Automation'
                   : (r.authorUserId && memberName.get(r.authorUserId)) ?? 'A project member'}
                 {r.durationMs !== null && <> · <span className="num">{formatDuration(r.durationMs)}</span></>}
               </span>
+              {onEdit && r.isLatest && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => onEdit(r)}
+                  aria-label={`Edit attempt ${r.attemptNumber}`}
+                >
+                  <Pencil size={14} aria-hidden="true" />
+                  Edit
+                </button>
+              )}
             </div>
             {r.comment && <p className="prose">{r.comment}</p>}
-            <StepOutcomes stepResults={r.stepResults} steps={steps} />
-            {r.attachments.length > 0 && (
-              <ul className="attachment-list">
-                {r.attachments.map((file) => (
-                  <li key={file.id}>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => download(file)}>
-                      <Paperclip size={14} aria-hidden="true" />
-                      {file.fileName}
-                      <span className="muted">{formatBytes(file.sizeBytes)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <StepOutcomes stepResults={r.stepResults} steps={steps} onDownload={download} />
+            <AttachmentList files={r.attachments} onDownload={download} />
           </li>
         ))}
       </ol>
@@ -279,23 +347,31 @@ function SourceLabel({ result }: { result: ResultRow | undefined }) {
   );
 }
 
-/** The steps of an attempt that didn't pass, with what actually happened; passed steps stay quiet. */
+/**
+ * The steps of an attempt that didn't pass or have a note or files, with what actually happened;
+ * plain passed steps stay quiet.
+ */
 function StepOutcomes({
   stepResults,
   steps,
+  onDownload,
 }: {
   stepResults: ResultEntry['stepResults'];
   steps: CaseSnapshot['steps'];
+  onDownload: (file: AttachmentInfo) => void;
 }) {
-  const notable = stepResults.filter((s) => s.status !== 'PASSED' || s.comment);
+  const notable = stepResults.filter((s) => s.status !== 'PASSED' || s.comment || s.attachments.length > 0);
   if (notable.length === 0) return null;
   const number = new Map(steps.map((step, index) => [step.position, index + 1]));
   return (
     <ul className="step-outcomes">
       {notable.map((s) => (
         <li key={s.stepPosition}>
-          <StatusChip status={s.status} /> Step {number.get(s.stepPosition) ?? s.stepPosition + 1}
-          {s.comment && <>: <span className="prose">{s.comment}</span></>}
+          <span>
+            <StatusChip status={s.status} /> Step {number.get(s.stepPosition) ?? s.stepPosition + 1}
+            {s.comment && <>: <span className="prose">{s.comment}</span></>}
+          </span>
+          <AttachmentList files={s.attachments} onDownload={onDownload} />
         </li>
       ))}
     </ul>
@@ -312,7 +388,12 @@ function RunCasePanel({
   runCase,
   canRecord,
   memberName,
+  place,
+  previousCase,
+  nextCase,
+  onOpenCase,
   onSaved,
+  onEdited,
   onRetest,
   onClose,
 }: {
@@ -321,11 +402,18 @@ function RunCasePanel({
   runCase: RunCase;
   canRecord: boolean;
   memberName: Map<string, string>;
+  /** Where the case is in the list as filtered, e.g. "Case 3 of 12"; null when the filters hide it. */
+  place: string | null;
+  previousCase: RunCase | null;
+  nextCase: RunCase | null;
+  onOpenCase: (rc: RunCase) => void;
   onSaved: (message: string, saved: SavedResult) => void;
+  onEdited: (message: string) => void;
   onRetest: (rc: RunCase) => void;
   onClose: () => void;
 }) {
   const [version, setVersion] = useState(0);
+  const [editing, setEditing] = useState<ResultEntry | null>(null);
   // A case with a result can be run again; one already waiting for it can't.
   const canRunAgain = canRecord && runCase.status !== 'UNTESTED' && runCase.status !== 'RETEST';
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -348,6 +436,27 @@ function RunCasePanel({
         </button>
       </div>
       <p className="detail-path">Steps as they were when the run started</p>
+      <nav className="run-panel-nav" aria-label="Cases in this run">
+        {place && <span className="muted num">{place}</span>}
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={!previousCase}
+          onClick={() => previousCase && onOpenCase(previousCase)}
+        >
+          <ChevronLeft size={14} aria-hidden="true" />
+          Previous case
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={!nextCase}
+          onClick={() => nextCase && onOpenCase(nextCase)}
+        >
+          Next case
+          <ChevronRight size={14} aria-hidden="true" />
+        </button>
+      </nav>
       {canRunAgain && (
         <div className="run-panel-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => onRetest(runCase)}>
@@ -371,6 +480,7 @@ function RunCasePanel({
           testCaseId={runCase.testCaseId}
           title={snapshot?.title ?? runCase.testCase.title}
           steps={steps}
+          hasNext={nextCase !== null}
           onSaved={(message, saved) => {
             setVersion((v) => v + 1);
             onSaved(message, saved);
@@ -399,8 +509,27 @@ function RunCasePanel({
       )}
       <section className="detail-section">
         <h3>Results in this run</h3>
-        <ResultHistory projectId={projectId} runId={runId} runCase={runCase} steps={steps} memberName={memberName} version={version} />
+        <ResultHistory
+          projectId={projectId}
+          runId={runId}
+          runCase={runCase}
+          steps={steps}
+          memberName={memberName}
+          version={version}
+          onEdit={canRecord ? setEditing : undefined}
+        />
       </section>
+      <EditResultDialog
+        projectId={projectId}
+        runId={runId}
+        result={editing}
+        onClose={() => setEditing(null)}
+        onSaved={(message) => {
+          setEditing(null);
+          setVersion((v) => v + 1);
+          onEdited(message);
+        }}
+      />
     </aside>
   );
 }
@@ -467,7 +596,16 @@ export function RunDetailPage() {
   const { user } = useAuth();
   usePageTitle(run?.title);
 
-  const [openCaseId, setOpenCaseId] = useState<string | null>(null);
+  const {
+    statusFilter,
+    sourceFilter,
+    onlyMine,
+    openCaseId,
+    setStatusFilter,
+    setSourceFilter,
+    setOnlyMine,
+    setOpenCaseId,
+  } = useRunView();
   const [pending, setPending] = useState<string | null>(null);
   const { notify, dismiss } = useNotice();
   // Messages go to the app-wide live region (components/Notice) so that they are announced on every page.
@@ -476,14 +614,16 @@ export function RunDetailPage() {
     else dismiss();
   };
   const [actionError, setActionError] = useState<string | null>(null);
-  const [onlyMine, setOnlyMine] = useState(false);
-  // Status chosen on the ribbon or legend; choosing it again shows every case.
-  const [statusFilter, setStatusFilter] = useState<ResultStatus | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('ALL');
   const [confirmingComplete, setConfirmingComplete] = useState(false);
   const [editingRun, setEditingRun] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [defectFor, setDefectFor] = useState<{ resultId: string; caseTitle: string; summary: string } | null>(null);
+  // thenOpen: the case to open once the defect dialog closes, after "Save and next".
+  const [defectFor, setDefectFor] = useState<{
+    resultId: string;
+    caseTitle: string;
+    summary: string;
+    thenOpen?: string;
+  } | null>(null);
 
   const latestResultByCase = new Map(
     (resultsRes.data ?? []).map((r) => [r.runCase.testCaseId, r]),
@@ -582,14 +722,32 @@ export function RunDetailPage() {
   const canAssign = editRepository;
   const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
   // Cases without a result have no source, so a source filter leaves them out.
-  const shownCases = runCases.filter(
-    (rc) =>
-      (!onlyMine || rc.assigneeId === user?.id) &&
-      (!statusFilter || rc.status === statusFilter) &&
-      (sourceFilter === 'ALL' || latestResultByCase.get(rc.testCaseId)?.source === sourceFilter),
-  );
-  const toggleStatus = (status: ResultStatus) => setStatusFilter((current) => (current === status ? null : status));
+  const matchesFilters = (rc: RunCase) =>
+    (!onlyMine || rc.assigneeId === user?.id) &&
+    (!statusFilter || rc.status === statusFilter) &&
+    (sourceFilter === 'ALL' || latestResultByCase.get(rc.testCaseId)?.source === sourceFilter);
+  const shownCases = runCases.filter(matchesFilters);
+  const filtered = onlyMine || statusFilter !== null || sourceFilter !== 'ALL';
+  // Choosing the selected status again shows every case.
+  const toggleStatus = (status: ResultStatus) => setStatusFilter(statusFilter === status ? null : status);
   const filterName = statusFilter ? STATUS_META[statusFilter].label.toLowerCase() : null;
+
+  /**
+   * The nearest case before or after the open one that the filters show, in run order. The open
+   * case itself may no longer match (its new result can fall outside a status filter), so this
+   * walks the whole run instead of the shown list; with "Untested" chosen, Next skips done cases.
+   */
+  function neighbour(step: 1 | -1): RunCase | null {
+    const at = runCases.findIndex((rc) => rc.id === openCaseId);
+    if (at < 0) return null;
+    for (let i = at + step; i >= 0 && i < runCases.length; i += step) {
+      if (matchesFilters(runCases[i])) return runCases[i];
+    }
+    return null;
+  }
+  const openIndex = openCase ? shownCases.indexOf(openCase) : -1;
+  const place =
+    openIndex < 0 ? null : `Case ${openIndex + 1} of ${shownCases.length}${filtered ? ' shown' : ''}`;
 
   /** Who tests the case: a select for admins and testers, the name for everyone else. */
   function assigneeControl(rc: RunCase) {
@@ -616,6 +774,15 @@ export function RunDetailPage() {
     const id = openCaseId;
     setOpenCaseId(null);
     if (id) requestAnimationFrame(() => document.getElementById(`runcase-${id}`)?.focus());
+  }
+
+  // After "Save and next" with a defect to file, the next case opens once the dialog has closed
+  // and handed focus back, so that the next case's title can take focus.
+  function closeDefectDialog(message?: string) {
+    const next = defectFor?.thenOpen;
+    setDefectFor(null);
+    if (message) setNotice({ text: message, defectLink: true });
+    if (next) requestAnimationFrame(() => setOpenCaseId(next));
   }
 
   return (
@@ -820,16 +987,28 @@ export function RunDetailPage() {
             runCase={openCase}
             canRecord={canRecord}
             memberName={memberName}
+            place={place}
+            previousCase={neighbour(-1)}
+            nextCase={neighbour(1)}
+            onOpenCase={(rc) => setOpenCaseId(rc.id)}
             onSaved={(message, saved) => {
               setNotice({ text: message });
               reload();
+              const next = saved.openNext ? neighbour(1)?.id : undefined;
               if (saved.wantsDefect) {
                 setDefectFor({
                   resultId: saved.resultId,
                   caseTitle: openCase.caseSnapshot?.title ?? openCase.testCase.title,
                   summary: saved.summary,
+                  thenOpen: next,
                 });
+              } else if (next) {
+                setOpenCaseId(next);
               }
+            }}
+            onEdited={(message) => {
+              setNotice({ text: message });
+              reload();
             }}
             onRetest={retest}
             onClose={closePanel}
@@ -852,11 +1031,8 @@ export function RunDetailPage() {
         resultId={defectFor?.resultId ?? ''}
         caseTitle={defectFor?.caseTitle ?? ''}
         summary={defectFor?.summary ?? ''}
-        onClose={() => setDefectFor(null)}
-        onDone={(message) => {
-          setDefectFor(null);
-          setNotice({ text: message, defectLink: true });
-        }}
+        onClose={() => closeDefectDialog()}
+        onDone={(message) => closeDefectDialog(message)}
       />
       <EditRunDialog
         projectId={projectId}

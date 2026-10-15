@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
 import { FormError } from '../../components/Page';
 import { DEFECT_SEVERITY_LABEL } from '../../lib/labels';
+import { changedFields, hasChanges } from '../../lib/changes';
 import { formatClock, parseClock } from '../../lib/format';
 import { useProjectMembers } from '../../lib/members';
 import {
@@ -44,6 +45,35 @@ export interface SavedResult {
   wantsDefect: boolean;
   /** Comment and failed steps, as a starting point for the defect's actual result. */
   summary: string;
+  /** "Save and next" was used and every file went up, so the following case opens. */
+  openNext: boolean;
+}
+
+/** The parts of a saved result the API returns that the form needs for the step files. */
+interface CreatedResult {
+  id: string;
+  stepResults: { id: string; stepPosition: number }[];
+}
+
+const TIME_FORMAT_ERROR = 'Time spent must look like 1:05:09, 5:09 or 45.';
+
+/**
+ * Uploads each group of files to its own target, one request per group. Returns a line for every
+ * group that failed, so the caller can say exactly which files are missing; the others stay.
+ */
+async function uploadAll(uploads: { label: string; path: string; files: File[] }[]): Promise<string[]> {
+  const failed: string[] = [];
+  for (const upload of uploads) {
+    if (upload.files.length === 0) continue;
+    const form = new FormData();
+    for (const file of upload.files) form.append('files', file);
+    try {
+      await api.upload(upload.path, form);
+    } catch (err) {
+      failed.push(`${upload.label}: ${err instanceof Error ? err.message : 'upload failed'}`);
+    }
+  }
+  return failed;
 }
 
 // The draft lives in sessionStorage so step marks and the timer survive a reload or a visit to
@@ -116,9 +146,10 @@ function describeOutcome(steps: CaseStep[], marks: Record<number, StepMark>, com
 }
 
 /**
- * Executes a case: a result per step with what actually happened, a timer for the time spent,
- * and the case result with a comment and evidence. A failed or blocked step sets the case result
- * accordingly; the tester can still change it before saving.
+ * Executes a case: a result per step with what actually happened and its own files, a timer for
+ * the time spent, and the case result with a comment and evidence. A failed or blocked step sets
+ * the case result accordingly; the tester can still change it before saving. "Save and next"
+ * saves and moves on to the following case, so a run can be worked through case by case.
  */
 export function CaseExecution({
   projectId,
@@ -127,6 +158,7 @@ export function CaseExecution({
   testCaseId,
   title,
   steps,
+  hasNext,
   onSaved,
 }: {
   projectId: string;
@@ -135,6 +167,8 @@ export function CaseExecution({
   testCaseId: string;
   title: string;
   steps: CaseStep[];
+  /** Whether a case follows this one in the list, for "Save and next". */
+  hasNext: boolean;
   onSaved: (message: string, saved: SavedResult) => void;
 }) {
   const [initial] = useState(() => readDraft(runCaseId));
@@ -150,6 +184,8 @@ export function CaseExecution({
   const [wantsDefect, setWantsDefect] = useState<boolean | null>(null);
   const [comment, setComment] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  // Files can't be kept in the session draft, so a step's files last while the panel is open.
+  const [stepFiles, setStepFiles] = useState<Record<number, File[]>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -173,9 +209,11 @@ export function CaseExecution({
   function markStep(step: CaseStep, index: number, stepStatus: StepStatus) {
     const current = marks[step.position];
     if (current?.status === stepStatus) {
-      // Pressing the selected result again clears it.
+      // Pressing the selected result again clears it, with the step's files.
       const { [step.position]: _removed, ...rest } = marks;
       setMarks(rest);
+      const { [step.position]: _files, ...otherFiles } = stepFiles;
+      setStepFiles(otherFiles);
       return;
     }
     setMarks({ ...marks, [step.position]: { status: stepStatus, comment: current?.comment ?? '' } });
@@ -191,11 +229,12 @@ export function CaseExecution({
     if (mark) setMarks({ ...marks, [position]: { ...mark, comment: value } });
   }
 
-  async function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const wantsNext = (e.nativeEvent as SubmitEvent).submitter?.dataset.next === 'true';
     const durationMs = typedTime === null ? elapsedMs : parseClock(typedTime);
     if (durationMs === null) {
-      setError('Time spent must look like 1:05:09, 5:09 or 45.');
+      setError(TIME_FORMAT_ERROR);
       return;
     }
     setSaving(true);
@@ -203,7 +242,7 @@ export function CaseExecution({
     const label = STATUS_META[status].label.toLowerCase();
     const summary = describeOutcome(steps, marks, comment);
     try {
-      const result = await api.post<{ id: string }>(`/projects/${projectId}/runs/${runId}/results`, {
+      const result = await api.post<CreatedResult>(`/projects/${projectId}/runs/${runId}/results`, {
         testCaseId,
         status,
         comment: comment.trim() || undefined,
@@ -219,17 +258,21 @@ export function CaseExecution({
             comment: marks[step.position].comment.trim() || undefined,
           })),
       });
+      // Files go up once the result exists: the case's evidence, then each step's own files.
+      const stepNumber = new Map(steps.map((step, index) => [step.position, index + 1]));
+      const failed = await uploadAll([
+        { label: 'Evidence', path: `/projects/${projectId}/results/${result.id}/attachments`, files },
+        ...result.stepResults.map((stepResult) => ({
+          label: `Step ${stepNumber.get(stepResult.stepPosition) ?? stepResult.stepPosition + 1}`,
+          path: `/projects/${projectId}/step-results/${stepResult.id}/attachments`,
+          files: stepFiles[stepResult.stepPosition] ?? [],
+        })),
+      ]);
       let message = `${title} marked as ${label}.`;
-      if (files.length > 0) {
-        const form = new FormData();
-        for (const file of files) form.append('files', file);
-        try {
-          await api.upload(`/projects/${projectId}/results/${result.id}/attachments`, form);
-        } catch (err) {
-          // The result stays; only the files are missing, so say exactly that.
-          setError(`The result was saved, but the files weren't: ${err instanceof Error ? err.message : 'upload failed'}`);
-          message = `${title} marked as ${label}, without the files.`;
-        }
+      if (failed.length > 0) {
+        // The result stays; only some files are missing, so say exactly which.
+        setError(`The result was saved, but some files weren't. ${failed.join(' ')}`);
+        message = `${title} marked as ${label}, without some files.`;
       }
       // The next attempt starts from scratch.
       clearDraft(runCaseId);
@@ -241,9 +284,17 @@ export function CaseExecution({
       setWantsDefect(null);
       setComment('');
       setFiles([]);
+      setStepFiles({});
       setAnnouncement('');
       if (fileInput.current) fileInput.current.value = '';
-      onSaved(message, { resultId: result.id, status, wantsDefect: defectChecked, summary });
+      onSaved(message, {
+        resultId: result.id,
+        status,
+        wantsDefect: defectChecked,
+        summary,
+        // The case stays open when files are missing, so the message about them can be read.
+        openNext: wantsNext && failed.length === 0,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save the result");
     } finally {
@@ -298,6 +349,18 @@ export function CaseExecution({
                         maxLength={2000}
                         value={mark.comment}
                         onChange={(e) => setStepComment(step.position, e.target.value)}
+                      />
+                      <label htmlFor={`${ids.files}-step-${step.position}`} className="field-label">
+                        Files <span className="visually-hidden">for step {index + 1}</span>
+                      </label>
+                      <input
+                        id={`${ids.files}-step-${step.position}`}
+                        type="file"
+                        multiple
+                        onChange={(e) => {
+                          const chosen = Array.from(e.target.files ?? []);
+                          setStepFiles((current) => ({ ...current, [step.position]: chosen }));
+                        }}
                       />
                     </div>
                   )}
@@ -365,11 +428,141 @@ export function CaseExecution({
             <label htmlFor={ids.defect}>Create or link a defect after saving</label>
           </div>
           <FormError message={error} />
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : 'Save result'}
-          </button>
+          <div className="form-buttons">
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : 'Save result'}
+            </button>
+            {hasNext && (
+              <button type="submit" className="btn btn-secondary" data-next="true" disabled={saving}>
+                Save and next
+              </button>
+            )}
+          </div>
         </div>
       </section>
+    </form>
+  );
+}
+
+/** A result as the run case panel lists it; the fields its edit form can change. */
+export interface EditableResult {
+  id: string;
+  status: string;
+  comment: string | null;
+  durationMs: number | null;
+}
+
+/** Corrects the latest result of a case: its status, time spent and comment, and adds files. */
+export function EditResultDialog({
+  projectId,
+  runId,
+  result,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  runId: string;
+  /** The result to edit; the dialog is open while it is set. */
+  result: EditableResult | null;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  return (
+    <Dialog open={result !== null} onClose={onClose} title="Edit result">
+      {result && (
+        <EditResultForm projectId={projectId} runId={runId} result={result} onClose={onClose} onSaved={onSaved} />
+      )}
+    </Dialog>
+  );
+}
+
+function EditResultForm({
+  projectId,
+  runId,
+  result,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  runId: string;
+  result: EditableResult;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const [status, setStatus] = useState(result.status);
+  const [time, setTime] = useState(result.durationMs === null ? '' : formatClock(result.durationMs));
+  const [comment, setComment] = useState(result.comment ?? '');
+  const [files, setFiles] = useState<File[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const ids = { status: useId(), time: useId(), timeHint: useId(), comment: useId(), files: useId() };
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    // An empty time removes it; anything else has to be a time.
+    const durationMs = time.trim() === '' ? null : parseClock(time);
+    if (time.trim() !== '' && durationMs === null) {
+      setError(TIME_FORMAT_ERROR);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const fields = changedFields(
+        { status: result.status, comment: result.comment, durationMs: result.durationMs },
+        { status, comment: comment.trim() || null, durationMs: durationMs === null ? null : Math.round(durationMs) },
+      );
+      if (hasChanges(fields)) await api.patch(`/projects/${projectId}/runs/${runId}/results/${result.id}`, fields);
+      const failed = await uploadAll([
+        { label: 'Files', path: `/projects/${projectId}/results/${result.id}/attachments`, files },
+      ]);
+      onSaved(failed.length === 0 ? 'Result updated.' : `Result updated, but the files weren't. ${failed.join(' ')}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save the result");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="dialog-body" onSubmit={onSubmit}>
+      <div className="field-grid">
+        <div className="field">
+          <label htmlFor={ids.status} className="field-label">Result</label>
+          <Select id={ids.status} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {RESULT_CHOICES.map((choice) => (
+              <option key={choice} value={choice}>{STATUS_META[choice].label}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="field">
+          <label htmlFor={ids.time} className="field-label">
+            <Timer size={14} aria-hidden="true" /> Time spent
+          </label>
+          <input
+            id={ids.time}
+            className="num"
+            inputMode="numeric"
+            aria-describedby={ids.timeHint}
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+          />
+        </div>
+      </div>
+      <p id={ids.timeHint} className="field-hint">Like 1:05:09, 5:09 or 45; leave it empty for no time.</p>
+      <div className="field">
+        <label htmlFor={ids.comment} className="field-label">Comment</label>
+        <textarea id={ids.comment} rows={4} maxLength={10000} value={comment} onChange={(e) => setComment(e.target.value)} />
+      </div>
+      <div className="field">
+        <label htmlFor={ids.files} className="field-label">Add files</label>
+        <input id={ids.files} type="file" multiple onChange={(e) => setFiles(Array.from(e.target.files ?? []))} />
+      </div>
+      <FormError message={error} />
+      <div className="dialog-footer">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>Save changes</button>
+      </div>
     </form>
   );
 }

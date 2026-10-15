@@ -1914,6 +1914,13 @@ input[type='checkbox'] {
   align-self: flex-start;
 }
 
+/* "Save result" and "Save and next" side by side, wrapping in a narrow panel. */
+.form-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 /* The run table has many columns, so its result buttons show icons only (each keeps a hidden
    name and a tooltip); the case panel has the labelled buttons. */
 .run-body .result-actions .result-button-label {
@@ -1959,6 +1966,20 @@ input[type='checkbox'] {
   vertical-align: -0.125em;
 }
 
+/* Previous and next case in the case panel, after the case's place in the list. */
+.run-panel-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin-top: -0.25rem;
+  font-size: var(--text-xs);
+}
+
+.run-panel-nav > span {
+  margin-inline-end: auto;
+}
+
 /* Actions under the case panel's title, such as "Run again". */
 .run-panel-actions {
   display: flex;
@@ -1996,7 +2017,7 @@ input[type='checkbox'] {
   font-weight: 650;
 }
 
-/* Results of single steps in an attempt. */
+/* Results of single steps in an attempt, each with its files under it. */
 .step-outcomes {
   display: flex;
   flex-direction: column;
@@ -2005,6 +2026,12 @@ input[type='checkbox'] {
   padding: 0;
   list-style: none;
   font-size: var(--text-sm);
+}
+
+.step-outcomes > li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 /* Attempts of a case in a run, newest first. */
@@ -2029,6 +2056,11 @@ input[type='checkbox'] {
   align-items: center;
   gap: 0.5rem;
   font-size: var(--text-xs);
+}
+
+/* The attempt's details take the rest of the line, so "Edit" stays on their line, at its end. */
+.result-history-meta {
+  flex: 1 1 12rem;
 }
 
 .attachment-list {
