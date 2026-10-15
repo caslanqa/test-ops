@@ -1,7 +1,8 @@
 name: Release
 
 # On every push/merge to master that changes the image's inputs, with no manual
-# steps: CI → compute version → publish the image to GHCR → tag + GitHub Release.
+# steps: CI → compute version → publish the image to GHCR → tag + GitHub Release →
+# redeploy the public demo on Coolify.
 # See scripts/next-version.sh for the versioning rules.
 #
 # Changes that leave the image identical (docs, CI, tests, install.sh, docker-compose.yml,
@@ -87,3 +88,32 @@ jobs:
             --title "$TAG" \
             --notes "Docker image: \`$IMAGE\` (linux/amd64, linux/arm64)" \
             --generate-notes
+
+  deploy:
+    name: Deploy the demo (Coolify)
+    # The demo (deploy/coolify/docker-compose.yml) runs the `latest` tag with pull_policy: always,
+    # so a redeploy picks up the image published above. It waits for the release so the demo only
+    # runs versions that were tagged; runs from other branches and skipped releases deploy nothing.
+    needs: release
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Redeploy on Coolify
+        env:
+          COOLIFY_DEPLOY_URL: ${{ secrets.COOLIFY_DEPLOY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          # Coolify sits behind Cloudflare Access; a service token lets the request through.
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          # Forks have no Coolify to deploy to.
+          if [ -z "$COOLIFY_DEPLOY_URL" ] || [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::notice::COOLIFY_DEPLOY_URL or COOLIFY_TOKEN is not set; nothing to deploy."
+            exit 0
+          fi
+          # --retry covers a busy deployment queue (429) and brief outages (5xx).
+          curl --fail-with-body -sS --max-time 60 --retry 3 --retry-delay 15 -X POST "$COOLIFY_DEPLOY_URL" \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"

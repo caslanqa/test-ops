@@ -1,6 +1,8 @@
 # TestOps on Coolify (testops.caslanqa.com) — public demo.
 # Differences from the root docker-compose.yml (local/installer use):
-#   - pinned image tags, no published host ports (traffic only via Coolify proxy / Cloudflare Tunnel)
+#   - the app follows the `latest` release and is pulled on every deploy; release.yml redeploys it
+#     after each release (to hold a version, set a tag such as 0.9.0 here). Postgres stays pinned.
+#   - no published host ports (traffic only via Coolify proxy / Cloudflare Tunnel)
 #   - secrets are Coolify magic variables (generated and stored by Coolify)
 #   - lower attachment limits and memory caps (shared server, public sign-up)
 #   - extra volume for pg_dump files shipped off-server by Coolify Backups
@@ -25,7 +27,8 @@ services:
       - no-new-privileges:true
 
   app:
-    image: ghcr.io/caslanqa/testops:0.8.0
+    image: ghcr.io/caslanqa/testops:latest
+    pull_policy: always
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
