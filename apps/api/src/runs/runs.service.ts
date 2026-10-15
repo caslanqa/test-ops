@@ -156,8 +156,8 @@ export class RunsService {
       dto.milestoneId,
     );
 
-    // The run's cases in order, with who tests each.
-    let items: { testCaseId: string; assigneeId: string | null }[] = [];
+    // The run's cases in order, with who tests each and, from a plan, how each runs.
+    let items: { testCaseId: string; assigneeId: string | null; executionMode?: ExecutionMode }[] = [];
     let plan: { milestoneId: string | null; environment: string | null; configuration: string | null } | null = null;
     if (dto.planId) {
       const found = await this.prisma.testPlan.findUnique({
@@ -188,6 +188,7 @@ export class RunsService {
       items = found.items.map((i) => ({
         testCaseId: i.testCaseId,
         assigneeId: i.assigneeId && assignable.has(i.assigneeId) ? i.assigneeId : null,
+        executionMode: i.executionMode,
       }));
     } else if (dto.testCaseIds) {
       // IDs from another project are rejected rather than silently dropped; otherwise
@@ -214,7 +215,8 @@ export class RunsService {
         : [];
     const caseById = new Map(testCases.map((tc) => [tc.id, tc]));
 
-    // How each case runs in this run: the request's choice, or else as the case is defined.
+    // How each case runs in this run: the request's choice; else, from a plan, as the plan says;
+    // else as the case is defined.
     let automated: Set<string> | null = null;
     if (dto.automatedCaseIds) {
       const inRun = new Set(items.map((i) => i.testCaseId));
@@ -224,10 +226,13 @@ export class RunsService {
       }
       automated = new Set(dto.automatedCaseIds);
     }
-    const modeOf = (testCaseId: string) =>
-      (automated ? automated.has(testCaseId) : caseById.get(testCaseId)!.automationStatus === AutomationStatus.AUTOMATED)
+    const modeOf = (item: (typeof items)[number]) => {
+      if (automated) return automated.has(item.testCaseId) ? ExecutionMode.AUTOMATED : ExecutionMode.MANUAL;
+      if (item.executionMode) return item.executionMode;
+      return caseById.get(item.testCaseId)!.automationStatus === AutomationStatus.AUTOMATED
         ? ExecutionMode.AUTOMATED
         : ExecutionMode.MANUAL;
+    };
 
     return this.prisma.testRun.create({
       data: {
@@ -248,7 +253,7 @@ export class RunsService {
           create: items.map((item, index) => ({
             testCaseId: item.testCaseId,
             assigneeId: item.assigneeId,
-            executionMode: modeOf(item.testCaseId),
+            executionMode: modeOf(item),
             position: index,
             caseSnapshot: buildCaseSnapshot(caseById.get(item.testCaseId)!) as Prisma.InputJsonValue,
           })),

@@ -1,6 +1,6 @@
 import { Fragment, useId, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, Bot, ChevronRight, ClipboardList, Hand, Pencil, Play, Plus } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronRight, ClipboardList, Pencil, Play, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
@@ -12,7 +12,7 @@ import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../com
 import { changedFields, hasChanges } from '../../lib/changes';
 import { useFocusFallback } from '../../lib/focus';
 import { formatDate, formatDateTime } from '../../lib/format';
-import { AUTOMATION_LABEL, labelOf } from '../../lib/labels';
+import { labelOf } from '../../lib/labels';
 import { removeLink } from '../../lib/links';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectMembers, type ProjectMember } from '../../lib/members';
@@ -37,23 +37,37 @@ interface PlanRow {
   _count: { items: number; runs: number };
 }
 
+/** How runs started from the plan run a case: by a tester, or by automation from CI. */
+type ExecutionMode = 'MANUAL' | 'AUTOMATED';
+
+const EXECUTION_MODE_LABEL: Record<ExecutionMode, string> = { MANUAL: 'Manual', AUTOMATED: 'Automation' };
+
 /** A plan with its cases in order, as GET …/plans/{planId} returns it. */
 interface PlanDetail {
   items: {
     id: string;
     assigneeId: string | null;
+    executionMode: ExecutionMode;
     testCase: { id: string; title: string; priority: string; automationStatus: string; archivedAt: string | null };
   }[];
 }
 
 /** The value of "Unassigned" in the assign-all list; its empty value is the prompt. */
 const UNASSIGN = '__unassign__';
+/** The value of "As each case is defined" in the run-all list. */
+const AS_DEFINED = '__defined__';
+
+/** A change to cases of the plan: who tests them and/or how they run. */
+interface PlanCaseChange {
+  assigneeId?: string | null;
+  executionMode?: ExecutionMode;
+}
 
 /**
- * The cases of a plan, in plan order, under its row: priority, whether each is automated, and
- * who it is assigned to. Admins and testers assign them here, one by one or all at once, while
- * planning; runs started from the plan take the assignees over. Loaded when the row opens, and
- * again after the plan is edited.
+ * The cases of a plan, in plan order, under its row: priority, how each runs (manually or from
+ * CI) and who it is assigned to. Admins and testers set both here, one by one or all at once,
+ * while planning; runs started from the plan take them over. Loaded when the row opens, and again
+ * after the plan is edited.
  */
 function PlanCases({
   id,
@@ -82,23 +96,31 @@ function PlanCases({
   // An archived plan can't start runs, so its assignees are shown but not changed.
   const editable = canAssign && !plan.archivedAt;
 
-  async function assign(testCaseIds: string[], assigneeId: string | null, message?: string) {
+  /** Saves one change for some cases; several changes (e.g. "as defined") go one after another. */
+  async function update(changes: { testCaseIds: string[]; change: PlanCaseChange }[], message?: string) {
     setSaving(true);
     setError(null);
     try {
-      if (testCaseIds.length === 1) {
-        await api.patch(`/projects/${projectId}/plans/${plan.id}/cases/${testCaseIds[0]}`, { assigneeId });
-      } else {
-        await api.patch(`/projects/${projectId}/plans/${plan.id}/cases`, { testCaseIds, assigneeId });
+      for (const { testCaseIds, change } of changes) {
+        if (testCaseIds.length === 0) continue;
+        if (testCaseIds.length === 1) {
+          await api.patch(`/projects/${projectId}/plans/${plan.id}/cases/${testCaseIds[0]}`, change);
+        } else {
+          await api.patch(`/projects/${projectId}/plans/${plan.id}/cases`, { testCaseIds, ...change });
+        }
       }
       detail.reload();
       if (message) onAssigned(message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't change the assignee");
+      setError(err instanceof Error ? err.message : "Couldn't save the change");
+      // Part of a multi-step change may have been saved; show what the plan holds now.
+      detail.reload();
     } finally {
       setSaving(false);
     }
   }
+  const assign = (testCaseIds: string[], assigneeId: string | null, message?: string) =>
+    update([{ testCaseIds, change: { assigneeId } }], message);
 
   if (detail.error) return <p id={id} className="form-error" role="alert">{detail.error}</p>;
   if (!detail.data) return <div id={id}><Loading label="Loading the plan's cases…" /></div>;
@@ -130,7 +152,37 @@ function PlanCases({
             <option value={UNASSIGN}>Unassigned</option>
             {memberOptions}
           </Select>
-          <span className="field-hint">Runs started from this plan take the assignees over.</span>
+          <Select
+            className="inline-select"
+            aria-label={`How every case of ${plan.title} runs`}
+            value=""
+            disabled={saving}
+            onChange={(e) => {
+              const ids = items.map((item) => item.testCase.id);
+              if (e.target.value === AS_DEFINED) {
+                const automated = items.filter((i) => i.testCase.automationStatus === 'AUTOMATED').map((i) => i.testCase.id);
+                update(
+                  [
+                    { testCaseIds: automated, change: { executionMode: 'AUTOMATED' } },
+                    { testCaseIds: ids.filter((id) => !automated.includes(id)), change: { executionMode: 'MANUAL' } },
+                  ],
+                  `Every case of "${plan.title}" runs as it is defined.`,
+                );
+                return;
+              }
+              const mode = e.target.value as ExecutionMode;
+              update(
+                [{ testCaseIds: ids, change: { executionMode: mode } }],
+                `Every case of "${plan.title}" runs ${mode === 'AUTOMATED' ? 'from CI' : 'manually'}.`,
+              );
+            }}
+          >
+            <option value="">Run every case…</option>
+            <option value="MANUAL">Manual</option>
+            <option value="AUTOMATED">Automation</option>
+            <option value={AS_DEFINED}>As each case is defined</option>
+          </Select>
+          <span className="field-hint">Runs started from this plan take the run modes and assignees over.</span>
         </div>
       )}
       <FormError message={error} />
@@ -143,7 +195,20 @@ function PlanCases({
               {item.testCase.archivedAt && <span className="muted"> (archived, left out of new runs)</span>}
             </span>
             <PriorityMark priority={item.testCase.priority} />
-            <span className="muted">{labelOf(AUTOMATION_LABEL, item.testCase.automationStatus)}</span>
+            {editable ? (
+              <Select
+                className="inline-select plan-case-mode"
+                aria-label={`How ${item.testCase.title} runs`}
+                value={item.executionMode}
+                disabled={saving}
+                onChange={(e) => update([{ testCaseIds: [item.testCase.id], change: { executionMode: e.target.value as ExecutionMode } }])}
+              >
+                <option value="MANUAL">Manual</option>
+                <option value="AUTOMATED">Automation</option>
+              </Select>
+            ) : (
+              <span className="muted">{labelOf(EXECUTION_MODE_LABEL, item.executionMode)}</span>
+            )}
             {editable ? (
               <Select
                 className="inline-select"
@@ -168,20 +233,13 @@ function PlanCases({
   );
 }
 
-/** How a case runs in a run: by a tester, or by automation from CI. */
-type ExecutionMode = 'MANUAL' | 'AUTOMATED';
-
-const definedMode = (testCase: { automationStatus: string }): ExecutionMode =>
-  testCase.automationStatus === 'AUTOMATED' ? 'AUTOMATED' : 'MANUAL';
-
 function StartRunDialog({ plan, ...props }: Omit<Parameters<typeof StartRunForm>[0], 'plan'> & { plan: PlanRow | null }) {
   return (
     <Dialog
       open={plan !== null}
       onClose={props.onClose}
       title="Start a run"
-      description={plan ? `From "${plan.title}". Choose how each case runs this time; the cases themselves don't change.` : undefined}
-      wide
+      description={plan ? `From "${plan.title}".` : undefined}
     >
       {plan && <StartRunForm plan={plan} {...props} />}
     </Dialog>
@@ -189,8 +247,8 @@ function StartRunDialog({ plan, ...props }: Omit<Parameters<typeof StartRunForm>
 }
 
 /**
- * Starts a run from a plan. Every case starts as its automation status says (automated cases run
- * from CI, the rest by testers), and can be switched for this run only.
+ * Starts a run from a plan. Each case runs as set in the plan's case list (manually or from CI),
+ * with its assignee; this form only names the run and says how many cases go which way.
  */
 function StartRunForm({
   projectId,
@@ -205,28 +263,23 @@ function StartRunForm({
 }) {
   const detail = useResource(() => api.get<PlanDetail>(`/projects/${projectId}/plans/${plan.id}`), [projectId, plan.id]);
   const [title, setTitle] = useState(() => runTitleFor(plan.title));
-  // The modes chosen here, by case; a case not in it runs as it is defined.
-  const [chosen, setChosen] = useState<Record<string, ExecutionMode>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const titleId = useId();
-  // Archived cases are left out of new runs, so they aren't offered.
-  const cases = (detail.data?.items ?? []).filter((item) => !item.testCase.archivedAt).map((item) => item.testCase);
-  const modeOf = (testCase: PlanDetail['items'][number]['testCase']) => chosen[testCase.id] ?? definedMode(testCase);
-  const automated = cases.filter((c) => modeOf(c) === 'AUTOMATED');
-  const setAll = (mode: ExecutionMode | null) =>
-    setChosen(mode ? Object.fromEntries(cases.map((c) => [c.id, mode])) : {});
+  // Archived cases are left out of new runs, so they aren't counted.
+  const items = (detail.data?.items ?? []).filter((item) => !item.testCase.archivedAt);
+  const automated = items.filter((item) => item.executionMode === 'AUTOMATED').length;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
     try {
+      // Without automatedCaseIds the server takes each case's mode from the plan.
       const run = await api.post<{ id: string }>(`/projects/${projectId}/runs`, {
         title: title.trim(),
         planId: plan.id,
         source: 'MANUAL',
-        automatedCaseIds: automated.map((c) => c.id),
       });
       onStarted(run.id);
     } catch (err) {
@@ -246,53 +299,15 @@ function StartRunForm({
       ) : !detail.data ? (
         <Loading label="Loading the plan's cases…" />
       ) : (
-        <fieldset className="mode-picker">
-          <legend className="field-label">How the cases run</legend>
-          <div className="mode-picker-tools">
-            <span className="muted" role="status">
-              {automated.length} automated, {cases.length - automated.length} manual
-            </span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll(null)}>As defined</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll('MANUAL')}>All manual</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll('AUTOMATED')}>All automated</button>
-          </div>
-          <p className="field-hint">Automated cases wait for their results from CI; testers record the manual ones.</p>
-          <ul className="mode-list">
-            {cases.map((testCase) => {
-              const mode = modeOf(testCase);
-              const changed = mode !== definedMode(testCase);
-              return (
-                <li key={testCase.id}>
-                  <span className="mode-case-title">
-                    {testCase.title}
-                    {changed && <span className="muted"> · changed for this run</span>}
-                  </span>
-                  <span className="segmented segmented--sm" role="group" aria-label={`How "${testCase.title}" runs`}>
-                    <button
-                      type="button"
-                      aria-pressed={mode === 'MANUAL'}
-                      onClick={() => setChosen((current) => ({ ...current, [testCase.id]: 'MANUAL' }))}
-                    >
-                      <Hand size={14} aria-hidden="true" /> Manual
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={mode === 'AUTOMATED'}
-                      onClick={() => setChosen((current) => ({ ...current, [testCase.id]: 'AUTOMATED' }))}
-                    >
-                      <Bot size={14} aria-hidden="true" /> Automation
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </fieldset>
+        <p className="field-hint">
+          {automated} automated {automated === 1 ? 'case runs' : 'cases run'} from CI and {items.length - automated} manual{' '}
+          {items.length - automated === 1 ? 'one is' : 'ones are'} for testers, as set in the plan's case list.
+        </p>
       )}
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving || !detail.data || cases.length === 0}>
+        <button type="submit" className="btn btn-primary" disabled={saving || !detail.data || items.length === 0}>
           <Play size={16} aria-hidden="true" />
           Start run
         </button>

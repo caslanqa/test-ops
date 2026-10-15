@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, ProjectRole } from "@prisma/client";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { AutomationStatus, ExecutionMode, Prisma, ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreatePlanDto } from "./dto/create-plan.dto";
@@ -9,6 +9,12 @@ import { ListPlansQueryDto } from "./dto/list-plans-query.dto";
 import { pageArgs } from "../common/pagination";
 
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
+
+/** A change to cases of a plan; a field left out stays as it is. */
+interface PlanCaseChanges {
+  assigneeId?: string | null;
+  executionMode?: ExecutionMode;
+}
 
 @Injectable()
 export class PlansService {
@@ -76,6 +82,7 @@ export class PlansService {
       dto.milestoneId,
     );
     await this.accessControl.assertAssignableUser(projectId, dto.assigneeId);
+    const modes = await this.definedModes(dto.testCaseIds ?? []);
     return this.prisma.testPlan.create({
       data: {
         projectId,
@@ -91,6 +98,7 @@ export class PlansService {
                 testCaseId,
                 position: index,
                 assigneeId: dto.assigneeId,
+                executionMode: modes.get(testCaseId),
               })),
             }
           : undefined,
@@ -159,6 +167,7 @@ export class PlansService {
     await this.getOne(userId, projectId, planId);
     await this.accessControl.assertCasesInProject(projectId, dto.testCaseIds);
     await this.accessControl.assertAssignableUser(projectId, dto.assigneeId);
+    const modes = await this.definedModes(dto.testCaseIds);
     // Added cases go to the end, in the order given; cases already in the plan stay as they are.
     // The next position is read and used under a lock per plan, so parallel adds can't both take
     // the same positions.
@@ -175,6 +184,7 @@ export class PlansService {
           testCaseId,
           position: start + index,
           assigneeId: dto.assigneeId,
+          executionMode: modes.get(testCaseId),
         })),
         skipDuplicates: true,
       });
@@ -182,36 +192,68 @@ export class PlansService {
     return this.getOne(userId, projectId, planId);
   }
 
-  /** Sets or clears who tests a case of the plan; runs started from the plan take it over. */
+  /** How each case runs when it joins a plan: as the case is defined (its automation status). */
+  private async definedModes(testCaseIds: string[]): Promise<Map<string, ExecutionMode>> {
+    if (testCaseIds.length === 0) return new Map();
+    const cases = await this.prisma.testCase.findMany({
+      where: { id: { in: [...new Set(testCaseIds)] } },
+      select: { id: true, automationStatus: true },
+    });
+    return new Map(
+      cases.map((c) => [
+        c.id,
+        c.automationStatus === AutomationStatus.AUTOMATED ? ExecutionMode.AUTOMATED : ExecutionMode.MANUAL,
+      ]),
+    );
+  }
+
   /**
-   * Sets or clears who tests several cases of the plan at once: all of them, or none if one isn't in
-   * the plan. Runs started from the plan take the assignees over.
+   * Checks a change to plan cases and turns it into the update: who tests them (null unassigns)
+   * and/or how they run. Fields left out stay as they are.
    */
-  async assignCases(
+  private async planCaseChanges(projectId: string, changes: PlanCaseChanges): Promise<Prisma.PlanCaseUpdateManyMutationInput> {
+    if (changes.assigneeId === undefined && changes.executionMode === undefined) {
+      throw new BadRequestException("Send assigneeId, executionMode or both.");
+    }
+    if (changes.assigneeId !== undefined) {
+      await this.accessControl.assertAssignableUser(projectId, changes.assigneeId);
+    }
+    return {
+      ...(changes.assigneeId !== undefined ? { assigneeId: changes.assigneeId } : {}),
+      ...(changes.executionMode !== undefined ? { executionMode: changes.executionMode } : {}),
+    };
+  }
+
+  /**
+   * Sets who tests several cases of the plan and/or how they run: all of them, or none if one
+   * isn't in the plan. Runs started from the plan take both over.
+   */
+  async updateCases(
     userId: string,
     projectId: string,
     planId: string,
     testCaseIds: string[],
-    assigneeId: string | null,
+    changes: PlanCaseChanges,
   ) {
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
     await this.getOne(userId, projectId, planId);
-    await this.accessControl.assertAssignableUser(projectId, assigneeId);
+    const data = await this.planCaseChanges(projectId, changes);
     const ids = [...new Set(testCaseIds)];
     return this.prisma.$transaction(async (tx) => {
       const found = await tx.planCase.count({ where: { planId, testCaseId: { in: ids } } });
       if (found !== ids.length) throw new NotFoundException("Some of the test cases are not in this plan");
-      const { count } = await tx.planCase.updateMany({ where: { planId, testCaseId: { in: ids } }, data: { assigneeId } });
+      const { count } = await tx.planCase.updateMany({ where: { planId, testCaseId: { in: ids } }, data });
       return { count };
     });
   }
 
-  async assignCase(
+  /** Sets who tests a case of the plan and/or how it runs; runs started from the plan take both over. */
+  async updateCase(
     userId: string,
     projectId: string,
     planId: string,
     testCaseId: string,
-    assigneeId: string | null,
+    changes: PlanCaseChanges,
   ) {
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
@@ -219,10 +261,10 @@ export class PlansService {
       WRITE_ROLES,
     );
     await this.getOne(userId, projectId, planId);
-    await this.accessControl.assertAssignableUser(projectId, assigneeId);
+    const data = await this.planCaseChanges(projectId, changes);
     const { count } = await this.prisma.planCase.updateMany({
       where: { planId, testCaseId },
-      data: { assigneeId },
+      data,
     });
     if (count === 0) {
       throw new NotFoundException("Test case is not in this plan");

@@ -297,7 +297,8 @@ const fromPlanCases = [...fromPlan.runCases].sort((a, b) => a.position - b.posit
 check('...lists the cases in release2Plan order and leaves archived ones out',
   fromPlanCases.map((rc) => rc.testCaseId).join() === [c2.id, c1.id].join(), JSON.stringify(fromPlanCases.map((rc) => rc.testCaseId)));
 check('...and takes over the assignments', fromPlanCases.every((rc) => rc.assigneeId === testerId));
-// How each case runs in a run: as the case is defined, unless the run says otherwise (this run only).
+// How each case runs in a run: as the plan says (a case joins it as it is defined), unless the run
+// says otherwise (this run only).
 check('...and its cases run as they are defined (manual here)', fromPlanCases.every((rc) => rc.executionMode === 'MANUAL'), JSON.stringify(fromPlanCases.map((rc) => rc.executionMode)));
 const chosenModes = await ok(admin, 'POST', `${P}/runs`, { title: 'Release 2 mixed', planId: release2Plan.id, automatedCaseIds: [c1.id] });
 check('a run can choose which cases automation runs',
@@ -310,6 +311,29 @@ const adHocModes = await ok(admin, 'POST', `${P}/runs`, { title: 'Ad hoc modes',
 check('an automated case runs as automated by default',
   adHocModes.runCases.find((rc) => rc.testCaseId === automatedCase.id)?.executionMode === 'AUTOMATED'
     && adHocModes.runCases.find((rc) => rc.testCaseId === c1.id)?.executionMode === 'MANUAL');
+// How each case runs is also set in the plan's case list, like its assignee; runs from the plan take it over.
+const modePlan = await ok(admin, 'POST', `${P}/plans`, { title: 'Run modes', testCaseIds: [automatedCase.id, c1.id] });
+const planModes = async () =>
+  Object.fromEntries((await ok(admin, 'GET', `${P}/plans/${modePlan.id}`)).items.map((i) => [i.testCaseId, [i.executionMode, i.assigneeId]]));
+let modes = await planModes();
+check('a case joins a plan as it is defined', modes[automatedCase.id][0] === 'AUTOMATED' && modes[c1.id][0] === 'MANUAL', JSON.stringify(modes));
+await ok(admin, 'PATCH', `${P}/plans/${modePlan.id}/cases/${c1.id}`, { assigneeId: testerId });
+await expectStatus('a tester sets a plan case to run from CI', 200, tester, 'PATCH', `${P}/plans/${modePlan.id}/cases/${c1.id}`, { executionMode: 'AUTOMATED' });
+modes = await planModes();
+check('...which keeps its assignee', modes[c1.id][0] === 'AUTOMATED' && modes[c1.id][1] === testerId, JSON.stringify(modes));
+await expectStatus('an unknown run mode is rejected', 400, admin, 'PATCH', `${P}/plans/${modePlan.id}/cases/${c1.id}`, { executionMode: 'ROBOT' });
+await expectStatus('a change names an assignee, a run mode or both', 400, admin, 'PATCH', `${P}/plans/${modePlan.id}/cases/${c1.id}`, {});
+await expectStatus('every case of a plan can be set to run manually at once', 200, admin, 'PATCH', `${P}/plans/${modePlan.id}/cases`, { testCaseIds: [automatedCase.id, c1.id], executionMode: 'MANUAL' });
+modes = await planModes();
+check('...leaving the assignees as they are', Object.values(modes).every(([mode]) => mode === 'MANUAL') && modes[c1.id][1] === testerId, JSON.stringify(modes));
+await ok(admin, 'PATCH', `${P}/plans/${modePlan.id}/cases/${c1.id}`, { executionMode: 'AUTOMATED' });
+const modeRun = await ok(admin, 'POST', `${P}/runs`, { title: 'Run modes from the plan', planId: modePlan.id });
+check("a run from the plan takes each case's run mode from it",
+  modeRun.runCases.find((rc) => rc.testCaseId === c1.id)?.executionMode === 'AUTOMATED'
+    && modeRun.runCases.find((rc) => rc.testCaseId === automatedCase.id)?.executionMode === 'MANUAL',
+  JSON.stringify(modeRun.runCases.map((rc) => rc.executionMode)));
+check('...while the cases stay as they are', (await ok(admin, 'GET', `${P}/cases/${c1.id}`)).automationStatus !== 'AUTOMATED'
+  && (await ok(admin, 'GET', `${P}/cases/${automatedCase.id}`)).automationStatus === 'AUTOMATED');
 const overridden = await ok(admin, 'POST', `${P}/runs`, { title: 'Prod check', planId: release2Plan.id, environment: 'production' });
 check('values in the request win over the release2Plan', overridden.environment === 'production' && overridden.configuration === 'chrome');
 const adHoc = await ok(admin, 'POST', `${P}/runs`, { title: 'Ad hoc', testCaseIds: [c2.id, c1.id, c2.id] });

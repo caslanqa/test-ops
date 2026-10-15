@@ -394,6 +394,9 @@ model PlanCase {
   planId     String
   testCaseId String
   assigneeId String?
+  // How runs started from the plan run this case: by a tester or by CI. Set in the plan's case
+  // list; a case joins the plan as it is defined (its automation status).
+  executionMode ExecutionMode @default(MANUAL)
   position   Int     @default(0)
 
   plan     TestPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
