@@ -78,6 +78,8 @@ const size = Math.round(JSON.stringify({ results: upload }).length / 1024);
 const bulk = await call(ci, 'POST', `${P}/runs/${nightly.id}/results/bulk`, { results: upload });
 check(`[${bulk.status}] 500 results with ~1 KB failure messages (${size} KB) are accepted`, bulk.status === 201 && bulk.json?.count === 500, JSON.stringify(bulk.json).slice(0, 200));
 const stored = await runResults(nightly.id);
+check('cases that join a run with automated results run as automated',
+  (await ok(ci, 'GET', `${P}/runs/${nightly.id}`)).runCases.every((rc) => rc.executionMode === 'AUTOMATED'));
 check('every item became a result', stored.length === 500, `${stored.length}`);
 const byCase = byTestCase(stored);
 check('attempts are numbered 1..n per case', [...byCase.values()].every((rs) => oneToN(rs.map((r) => r.attemptNumber))));

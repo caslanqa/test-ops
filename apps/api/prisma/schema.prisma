@@ -400,12 +400,20 @@ enum RunCaseStatus {
 }
 
 // A snapshot of the test case is taken when the run starts (FR: case version is preserved)
+/// How a case of a run is meant to be run: by a tester, or by automation from CI. Chosen when the
+/// run starts, for that run only; the case's own automationStatus is the default.
+enum ExecutionMode {
+  MANUAL
+  AUTOMATED
+}
+
 model RunCase {
-  id           String        @id @default(uuid())
-  runId        String
-  testCaseId   String
-  assigneeId   String?
-  status       RunCaseStatus @default(UNTESTED)
+  id            String        @id @default(uuid())
+  runId         String
+  testCaseId    String
+  assigneeId    String?
+  status        RunCaseStatus @default(UNTESTED)
+  executionMode ExecutionMode @default(MANUAL)
   caseSnapshot Json // snapshot of the case title/steps/preconditions at run start
   position     Int           @default(0)
 

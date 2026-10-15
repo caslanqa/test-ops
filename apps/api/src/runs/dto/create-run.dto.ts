@@ -48,4 +48,13 @@ export class CreateRunDto {
   @IsArray()
   @IsString({ each: true })
   testCaseIds?: string[];
+
+  /**
+   * The cases of this run that automation runs (from CI); the others are for testers. It only
+   * affects this run, not the cases. Leave it out to follow each case's automation status.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  automatedCaseIds?: string[];
 }

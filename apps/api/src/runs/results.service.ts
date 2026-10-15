@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma, ProjectRole, ResultStatus, RunCase } from "@prisma/client";
+import { ExecutionMode, ResultSource } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { RunsService, buildCaseSnapshot } from "./runs.service";
@@ -239,10 +240,13 @@ export class ResultsService {
         _max: { position: true },
       });
       const next = (last._max.position ?? -1) + 1;
+      // A case that joins the run with an automated result is one that automation runs.
+      const automated = new Set(items.filter((item) => item.source === ResultSource.AUTOMATION).map((item) => item.testCaseId));
       await tx.runCase.createMany({
         data: missing.map((testCaseId, index) => ({
           runId,
           testCaseId,
+          executionMode: automated.has(testCaseId) ? ExecutionMode.AUTOMATED : ExecutionMode.MANUAL,
           position: next + index,
           caseSnapshot: buildCaseSnapshot(
             caseById.get(testCaseId)!,

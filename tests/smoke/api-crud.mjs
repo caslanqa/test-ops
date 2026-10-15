@@ -297,6 +297,19 @@ const fromPlanCases = [...fromPlan.runCases].sort((a, b) => a.position - b.posit
 check('...lists the cases in release2Plan order and leaves archived ones out',
   fromPlanCases.map((rc) => rc.testCaseId).join() === [c2.id, c1.id].join(), JSON.stringify(fromPlanCases.map((rc) => rc.testCaseId)));
 check('...and takes over the assignments', fromPlanCases.every((rc) => rc.assigneeId === testerId));
+// How each case runs in a run: as the case is defined, unless the run says otherwise (this run only).
+check('...and its cases run as they are defined (manual here)', fromPlanCases.every((rc) => rc.executionMode === 'MANUAL'), JSON.stringify(fromPlanCases.map((rc) => rc.executionMode)));
+const chosenModes = await ok(admin, 'POST', `${P}/runs`, { title: 'Release 2 mixed', planId: release2Plan.id, automatedCaseIds: [c1.id] });
+check('a run can choose which cases automation runs',
+  chosenModes.runCases.find((rc) => rc.testCaseId === c1.id)?.executionMode === 'AUTOMATED'
+    && chosenModes.runCases.every((rc) => rc.testCaseId === c1.id || rc.executionMode === 'MANUAL'), JSON.stringify(chosenModes.runCases.map((rc) => rc.executionMode)));
+check('...without changing the case', (await ok(admin, 'GET', `${P}/cases/${c1.id}`)).automationStatus !== 'AUTOMATED');
+await expectStatus('automatedCaseIds can only name cases of the run', 400, admin, 'POST', `${P}/runs`, { title: 'Bad modes', planId: release2Plan.id, automatedCaseIds: [caseA.id] });
+const automatedCase = await ok(admin, 'POST', `${P}/cases`, { title: 'Checkout from CI', automationStatus: 'AUTOMATED' });
+const adHocModes = await ok(admin, 'POST', `${P}/runs`, { title: 'Ad hoc modes', testCaseIds: [automatedCase.id, c1.id] });
+check('an automated case runs as automated by default',
+  adHocModes.runCases.find((rc) => rc.testCaseId === automatedCase.id)?.executionMode === 'AUTOMATED'
+    && adHocModes.runCases.find((rc) => rc.testCaseId === c1.id)?.executionMode === 'MANUAL');
 const overridden = await ok(admin, 'POST', `${P}/runs`, { title: 'Prod check', planId: release2Plan.id, environment: 'production' });
 check('values in the request win over the release2Plan', overridden.environment === 'production' && overridden.configuration === 'chrome');
 const adHoc = await ok(admin, 'POST', `${P}/runs`, { title: 'Ad hoc', testCaseIds: [c2.id, c1.id, c2.id] });
