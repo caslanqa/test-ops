@@ -8,8 +8,9 @@ import { PlansModule } from "../plans/plans.module";
 import { RunsModule } from "../runs/runs.module";
 import { DefectsModule } from "../defects/defects.module";
 import { DemoService } from "./demo.service";
+import { DemoController } from "./demo.controller";
 
-/** The built-in DEMO workspace (DEMO_WORKSPACE); see DemoService. */
+/** Every user's own DEMO workspace (DEMO_WORKSPACE); see DemoService. */
 @Module({
   imports: [
     ProjectsModule,
@@ -21,6 +22,8 @@ import { DemoService } from "./demo.service";
     RunsModule,
     DefectsModule,
   ],
+  controllers: [DemoController],
   providers: [DemoService],
+  exports: [DemoService],
 })
 export class DemoModule {}

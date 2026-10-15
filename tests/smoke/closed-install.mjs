@@ -1,5 +1,6 @@
 // Closed installation smoke test: with SELF_REGISTRATION=false only admins of an existing workspace
-// may create a workspace (interim rule until the Installation Admin role, FR-090). Needs a stack
+// may create a workspace (interim rule until the Installation Admin role, FR-090), and being the
+// admin of one's own demo workspace doesn't count. Needs a stack
 // started with sign-up disabled and the seed data (the seeded admin owns the "default" workspace):
 //   SELF_REGISTRATION=false docker compose up -d --wait && docker compose exec -T app node prisma/seed.js
 //   node tests/smoke/closed-install.mjs
@@ -50,7 +51,11 @@ const email = `member-${sfx}@test.local`;
 const invite = await ok(admin, 'POST', `/workspaces/${adminWs.id}/invitations`, { email, role: 'MEMBER' });
 const member = (await ok(null, 'POST', '/auth/register', { email, displayName: 'Member', password: 'MemberPass123', inviteToken: invite.token })).accessToken;
 
-await expectStatus('a workspace member (not admin) cannot create a workspace', 403, member, 'POST', '/workspaces', { name: `Member ${sfx}`, slug: `member-${sfx}` });
+// Listing makes the member's own demo workspace, where they are the admin.
+const memberDemo = (await ok(member, 'GET', '/workspaces')).find((w) => w.isDemo);
+check('the member has a demo workspace of their own', Boolean(memberDemo));
+await expectStatus('a workspace member (not admin) cannot create a workspace, demo admin or not', 403, member, 'POST', '/workspaces', { name: `Member ${sfx}`, slug: `member-${sfx}` });
+await expectStatus('...nor invite people through their demo, which would create accounts', 403, member, 'POST', `/workspaces/${memberDemo?.id}/invitations`, { email: `friend-${sfx}@test.local`, role: 'MEMBER' });
 await expectStatus('a workspace admin can create a workspace', 201, admin, 'POST', '/workspaces', { name: `Admin ${sfx}`, slug: `admin-${sfx}` });
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} CHECKS FAILED`);

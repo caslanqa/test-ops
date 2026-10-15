@@ -61,8 +61,8 @@ export default () => ({
     // Self-registration; on closed installs people join through workspace invitation links.
     selfRegistration: process.env.SELF_REGISTRATION?.trim().toLowerCase() !== "false",
   },
-  // The built-in DEMO workspace every signed-in user can look around in, read-only (DemoService,
-  // AccessControlService). On unless DEMO_WORKSPACE=false.
+  // Every user's own DEMO workspace with an example project (DemoService). On unless
+  // DEMO_WORKSPACE=false; turning it off makes no new ones and keeps the existing ones.
   demo: {
     enabled: process.env.DEMO_WORKSPACE?.trim().toLowerCase() !== "false",
   },

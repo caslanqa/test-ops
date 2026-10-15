@@ -13,6 +13,7 @@ import { PageQueryDto, pageArgs } from "../common/pagination";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
 import { UpdateWorkspaceDto } from "./dto/update-workspace.dto";
 import { AttachmentFilesService } from "../attachments/attachment-files.service";
+import { DemoService } from "../demo/demo.service";
 
 // People join a workspace through invitations (see InvitationsService); nobody is added directly.
 @Injectable()
@@ -22,6 +23,7 @@ export class WorkspacesService {
     private readonly accessControl: AccessControlService,
     private readonly attachmentFiles: AttachmentFilesService,
     private readonly config: ConfigService,
+    private readonly demo: DemoService,
   ) {}
 
   /**
@@ -29,15 +31,16 @@ export class WorkspacesService {
    * member could create a workspace and invite arbitrary email addresses, which creates accounts
    * on a closed installation. A server without any workspace is still open so the first one can
    * be created. This is an interim rule until the Installation Admin role (FR-090) exists.
+   * Demo workspaces don't count: everyone is the admin of their own demo (DemoService).
    */
   private async assertMayCreateWorkspace(userId: string) {
     if (this.config.get<boolean>("auth.selfRegistration") ?? false) return;
     const [isAdmin, anyWorkspace] = await Promise.all([
       this.prisma.workspaceMember.findFirst({
-        where: { userId, role: WorkspaceRole.ADMIN },
+        where: { userId, role: WorkspaceRole.ADMIN, workspace: { isDemo: false } },
         select: { id: true },
       }),
-      this.prisma.workspace.findFirst({ select: { id: true } }),
+      this.prisma.workspace.findFirst({ where: { isDemo: false }, select: { id: true } }),
     ]);
     if (anyWorkspace && !isAdmin) {
       throw new ForbiddenException(
@@ -65,12 +68,13 @@ export class WorkspacesService {
     });
   }
 
-  /** The user's workspaces, plus the demo workspace that everyone can read. */
+  /**
+   * The user's workspaces. The first listing also makes their own demo workspace (DemoService), so
+   * a new user finds it waiting.
+   */
   async listForUser(userId: string, query: PageQueryDto) {
-    const demoId = this.accessControl.demoWorkspace;
-    const where: Prisma.WorkspaceWhereInput = demoId
-      ? { OR: [{ members: { some: { userId } } }, { id: demoId }] }
-      : { members: { some: { userId } } };
+    await this.demo.ensureFor(userId);
+    const where: Prisma.WorkspaceWhereInput = { members: { some: { userId } } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.workspace.findMany({
         where,
@@ -79,14 +83,11 @@ export class WorkspacesService {
       }),
       this.prisma.workspace.count({ where }),
     ]);
-    return {
-      items: items.map((w) => ({ ...w, isDemo: this.accessControl.isDemoWorkspace(w.id) })),
-      total,
-    };
+    return { items, total };
   }
 
   async getOne(userId: string, workspaceId: string) {
-    const access = await this.accessControl.requireWorkspaceReadAccess(
+    const member = await this.accessControl.requireWorkspaceMembership(
       userId,
       workspaceId,
     );
@@ -95,13 +96,8 @@ export class WorkspacesService {
     });
     if (!workspace) throw new NotFoundException("Workspace not found");
     // The UI uses the role to hide actions the user is not permitted to perform;
-    // authorization is still enforced on the server at every endpoint. isDemo lets it say
-    // that everyone can see this workspace, and that visitors can only look.
-    return {
-      ...workspace,
-      currentUserRole: access.role,
-      isDemo: this.accessControl.isDemoWorkspace(workspaceId),
-    };
+    // authorization is still enforced on the server at every endpoint.
+    return { ...workspace, currentUserRole: member.role };
   }
 
   async update(userId: string, workspaceId: string, dto: UpdateWorkspaceDto) {
@@ -115,12 +111,11 @@ export class WorkspacesService {
   }
 
   async listMembers(userId: string, workspaceId: string) {
-    const access = await this.accessControl.requireWorkspaceReadAccess(userId, workspaceId);
-    // Visitors of the demo workspace see who is in it, but not their email addresses.
+    await this.accessControl.requireWorkspaceMembership(userId, workspaceId);
     return this.prisma.workspaceMember.findMany({
       where: { workspaceId },
       include: {
-        user: { select: { id: true, email: !access.demoViewer, displayName: true } },
+        user: { select: { id: true, email: true, displayName: true } },
       },
       orderBy: { createdAt: "asc" },
     });

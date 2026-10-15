@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Prisma, WorkspaceRole } from "@prisma/client";
 import * as crypto from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
@@ -38,12 +39,26 @@ export class InvitationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
+    private readonly config: ConfigService,
   ) {}
 
   async create(userId: string, workspaceId: string, dto: CreateInvitationDto) {
     await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
       WorkspaceRole.ADMIN,
     ]);
+    // Everyone is the admin of their own demo workspace (DemoService). With sign-up closed, an
+    // invitation from it would let any user bring new accounts onto the server.
+    if (!(this.config.get<boolean>("auth.selfRegistration") ?? false)) {
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { isDemo: true },
+      });
+      if (workspace?.isDemo) {
+        throw new ForbiddenException(
+          "A demo workspace can't invite people while sign-up is closed. Invite them to a team workspace instead.",
+        );
+      }
+    }
     const email = dto.email.trim().toLowerCase();
     // Admins can list the members anyway, so saying someone already is one reveals nothing.
     const member = await this.prisma.workspaceMember.findFirst({

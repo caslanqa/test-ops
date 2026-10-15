@@ -91,7 +91,7 @@ The seed command prints the first admin credentials. Set `SEED_ADMIN_EMAIL` as a
 
 The installer creates an admin account with a starter workspace and demo project. Change the initial password from **Account** after signing in.
 
-By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account. While sign-up is disabled, only admins of an existing workspace can create another workspace, so other users can't bring new accounts in by inviting people into workspaces of their own. Invitations and role changes need a signed-in person; API tokens get 403 for them. This is an interim rule: a separate Installation Admin role (design-doc FR-090) is not implemented yet, so any admin of any workspace can still invite people.
+By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account. While sign-up is disabled, only admins of an existing workspace can create another workspace, so other users can't bring new accounts in by inviting people into workspaces of their own. Being the admin of one's own [demo workspace](#demo-workspace) doesn't count, and demo workspaces can't send invitations then. Invitations and role changes need a signed-in person; API tokens get 403 for them. This is an interim rule: a separate Installation Admin role (design-doc FR-090) is not implemented yet, so any admin of any workspace can still invite people.
 
 Workspace admins manage access on the workspace's **Permissions** tab: one table with each member's workspace role and their role in every project (Admin, Tester, Automation, Viewer or no access). Workspace admins are admins in every project of their workspace. The **Settings** tab renames or deletes the workspace. On the **Projects** tab, project admins edit, archive and restore their projects, and workspace admins can delete an archived project for good.
 
@@ -132,7 +132,7 @@ The installer creates `.env` with secure values. Keep it private and keep a back
 | `APP_PORT` | `8080` | Host port published for the web app and API. |
 | `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Container image; set a version tag to pin releases. |
 | `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up; invitation links still create accounts, and only workspace admins can create new workspaces. |
-| `DEMO_WORKSPACE` | `true` | Shows every signed-in user the built-in, read-only DEMO workspace. Set to `false` to hide it. See [Demo workspace](#demo-workspace). |
+| `DEMO_WORKSPACE` | `true` | Gives every user a DEMO workspace of their own with an example project. Set to `false` to make no new ones; existing ones stay. See [Demo workspace](#demo-workspace). |
 | `PUBLIC_URL` | unset | The app's public address, for links in CI webhook calls. Unset, the address requests come to is used. |
 | `WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Lets CI webhooks reach private and local network addresses, for CI on the internal network. See [CI webhook](#ci-webhook). |
 | `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
@@ -143,7 +143,7 @@ Result submissions are also capped: a result's `comment` may hold up to 10,000 c
 
 ### Demo workspace
 
-Every signed-in user, including someone who has just signed up, sees a **DEMO** workspace that shows what TestOps does. It holds the project of an example web shop with:
+Every user, including someone who has just signed up, gets a **DEMO** workspace of their own to try what TestOps does. It holds the project of an example web shop with:
 
 - suites, and cases with steps, both automated and manual;
 - requirements and their coverage, a milestone and a release plan;
@@ -152,11 +152,11 @@ Every signed-in user, including someone who has just signed up, sees a **DEMO** 
 
 The shop and its Playwright tests are in [`examples/demo-shop`](examples/demo-shop).
 
-- **Built by the server.** The server builds the workspace at startup; there is nothing to set up. On later starts it adds only what is missing.
-- **Read-only.** Visitors can open everything, but can't change anything.
-- **Owned by a system user.** A system user that nobody can sign in as owns the workspace. It is recognised by fixed ids, so no account can take it over.
-- **Not a membership.** Visitors are not added as members. The member lists show only the system user, and visitors don't see each other.
-- **Switching it off.** Set `DEMO_WORKSPACE=false` to hide the workspace.
+- **Made for each user.** The server makes the workspace the first time a user opens their workspace list; there is nothing to set up. Existing users get theirs the same way after an upgrade.
+- **Theirs to change.** The user is the workspace's admin: they can start runs from the plan, assign cases, record results, file defects, rename it or delete it, and invite people while sign-up is open. Nobody else sees it unless they invite them.
+- **Made once.** A deleted demo doesn't come back by itself. **Create a demo workspace** on the Workspaces page makes a fresh one (`POST /api/v1/demo-workspace`).
+- **Switching it off.** Set `DEMO_WORKSPACE=false` to make no new demos; existing ones stay.
+- **Earlier versions** had one shared, read-only DEMO workspace. The server deletes it at startup.
 
 ### CI webhook
 
@@ -213,7 +213,7 @@ An API token cannot create, list or revoke API tokens, change a password, create
 
 The **Help & support** page also links to the API reference and includes an example for submitting automation results from CI.
 
-For a complete example, see [`examples/demo-shop`](examples/demo-shop). It has a small web shop, its Playwright tests and a reporter that sends their results to TestOps and links failures to known defects. The built-in [DEMO workspace](#demo-workspace) shows its project.
+For a complete example, see [`examples/demo-shop`](examples/demo-shop). It has a small web shop, its Playwright tests and a reporter that sends their results to TestOps and links failures to known defects. Every user's [DEMO workspace](#demo-workspace) has its project.
 
 ## Development
 

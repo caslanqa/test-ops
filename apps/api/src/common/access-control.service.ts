@@ -4,10 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { DEMO_WORKSPACE_ID } from "../demo/demo.constants";
 
 export const ARCHIVED_PROJECT_MESSAGE =
   "This project is archived, so it is read-only. A project admin can restore it.";
@@ -20,51 +18,12 @@ export interface ProjectWriteOptions {
   allowArchived?: boolean;
 }
 
-/** How a user may read a workspace: as a member, or as a viewer of the demo workspace. */
-export interface WorkspaceReadAccess {
-  role: WorkspaceRole;
-  /** Not a member: read-only access because this is the demo workspace. */
-  demoViewer: boolean;
-}
-
 // FR-003: every query must be limited to the workspace/project the user is authorized for.
 // Membership is verified on every access to prevent data leaks through guessed object IDs.
-//
-// The built-in demo workspace (DEMO_WORKSPACE, see DemoService) is readable by every signed-in user without a membership
-// record, so its member lists don't fill up with everyone who signs up, and nobody sees the other
-// visitors. Only the read checks below (requireWorkspaceReadAccess,
-// requireProjectAccessOrWorkspaceAdmin) let them in, as a workspace MEMBER and project VIEWER;
-// every role check for a change still needs a real membership. Both report `demoViewer`, so
-// responses can leave out what visitors must not see, such as the members' email addresses.
+// Demo workspaces (DemoService) are ordinary workspaces of their user, with the same checks.
 @Injectable()
 export class AccessControlService {
-  private readonly demoWorkspaceId: string | null;
-
-  constructor(
-    private readonly prisma: PrismaService,
-    config: ConfigService,
-  ) {
-    this.demoWorkspaceId = config.get<boolean>("demo.enabled") ? DEMO_WORKSPACE_ID : null;
-  }
-
-  /** The id of the workspace every signed-in user may read, or null when there is none. */
-  get demoWorkspace(): string | null {
-    return this.demoWorkspaceId;
-  }
-
-  isDemoWorkspace(workspaceId: string): boolean {
-    return this.demoWorkspaceId !== null && workspaceId === this.demoWorkspaceId;
-  }
-
-  /** Read access to a workspace: its members, and everyone for the demo workspace. */
-  async requireWorkspaceReadAccess(userId: string, workspaceId: string): Promise<WorkspaceReadAccess> {
-    const member = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    });
-    if (member) return { role: member.role, demoViewer: false };
-    if (this.isDemoWorkspace(workspaceId)) return { role: WorkspaceRole.MEMBER, demoViewer: true };
-    throw new ForbiddenException("You don't have access to this workspace");
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   async requireWorkspaceMembership(userId: string, workspaceId: string) {
     const member = await this.prisma.workspaceMember.findUnique({
@@ -156,28 +115,22 @@ export class AccessControlService {
     if (project?.archivedAt) throw new ConflictException(ARCHIVED_PROJECT_MESSAGE);
   }
 
-  /**
-   * Verifies read access to the project: any role (at least VIEWER), a workspace admin, or, in
-   * the demo workspace, everyone as a VIEWER.
-   */
+  /** Verifies read access to the project: any role (at least VIEWER), or a workspace admin. */
   async requireProjectAccessOrWorkspaceAdmin(
     userId: string,
     projectId: string,
-  ): Promise<{ role: ProjectRole; viaWorkspaceAdmin: boolean; demoViewer: boolean }> {
+  ): Promise<{ role: ProjectRole; viaWorkspaceAdmin: boolean }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { workspaceId: true },
     });
     if (project && (await this.isWorkspaceAdmin(userId, project.workspaceId))) {
-      return { role: ProjectRole.ADMIN, viaWorkspaceAdmin: true, demoViewer: false };
+      return { role: ProjectRole.ADMIN, viaWorkspaceAdmin: true };
     }
     const member = await this.prisma.projectMember.findUnique({
       where: { projectId_userId: { projectId, userId } },
     });
-    if (member) return { role: member.role, viaWorkspaceAdmin: false, demoViewer: false };
-    if (project && this.isDemoWorkspace(project.workspaceId)) {
-      return { role: ProjectRole.VIEWER, viaWorkspaceAdmin: false, demoViewer: true };
-    }
+    if (member) return { role: member.role, viaWorkspaceAdmin: false };
     throw new ForbiddenException("You don't have access to this project");
   }
 
