@@ -52,6 +52,9 @@ COPY --from=build /app/apps/api/package.json /app/apps/api/package.json
 # SPA files are copied next to dist (ServeStaticModule rootPath = dist/../web)
 COPY --from=build /app/apps/web/dist /app/apps/api/web
 COPY --chmod=0755 apps/api/docker-entrypoint.sh /app/apps/api/docker-entrypoint.sh
+# The MIT License asks for its notice in every copy, and the image is one.
+COPY LICENSE NOTICE /app/
+LABEL org.opencontainers.image.licenses="MIT"
 # Attachment directory owned by the runtime user. A *new* named volume mounted here inherits
 # this ownership; volumes created by images before 0.7.0 are root-owned and need a one-time
 # `chown -R 1000:1000 /data/attachments` (install.sh does this on upgrade).

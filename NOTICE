@@ -1,0 +1,17 @@
+TestOps
+Copyright (c) 2026 Cihan Aslan and the TestOps contributors
+Licensed under the MIT License; see LICENSE.
+
+The application and its Docker image include third-party software under its
+own license. The npm packages it depends on keep their licenses in their
+package metadata (node_modules/<package>/package.json and LICENSE files).
+
+Bundled with the web interface:
+
+Atkinson Hyperlegible Next (font files, via @fontsource-variable/atkinson-hyperlegible-next)
+Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors
+(https://github.com/googlefonts/atkinson-hyperlegible-next)
+Licensed under the SIL Open Font License, Version 1.1: https://openfontlicense.org
+
+The Docker setup runs PostgreSQL from its official image, which is distributed
+under the PostgreSQL License and is not part of this repository.
