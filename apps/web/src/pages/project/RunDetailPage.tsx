@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Bot,
   Bug,
@@ -38,6 +38,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
 import { CaseExecution, DefectForResultDialog, EditResultDialog, type SavedResult } from './RunExecution';
 import { Select } from '../../components/Select';
+import { RunTeamStats } from './RunTeamStats';
 
 interface CaseSnapshot {
   title: string;
@@ -97,6 +98,7 @@ type SourceFilter = 'ALL' | 'MANUAL' | 'AUTOMATION';
  * The run page's filters and open case live in the URL (?status=failed&source=manual&assignee=me
  * &case=…), so a reload, a shared link or the way back from another page shows the same list.
  * ?only=<run case id> lists just that case, for links from elsewhere (e.g. a requirement's case).
+ * ?tab=team shows the team stats instead of the cases.
  * Unknown values are ignored. The URL is replaced rather than pushed, so Back leaves the run
  * instead of stepping through every filter and case.
  */
@@ -104,7 +106,7 @@ function useRunView() {
   const [params, setParams] = useSearchParams();
   const status = params.get('status')?.toUpperCase() ?? '';
   const source = params.get('source')?.toUpperCase();
-  function update(changes: Partial<Record<'status' | 'source' | 'assignee' | 'case' | 'only', string | null>>) {
+  function update(changes: Partial<Record<'status' | 'source' | 'assignee' | 'case' | 'only' | 'tab', string | null>>) {
     setParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -123,7 +125,17 @@ function useRunView() {
     onlyMine: params.get('assignee') === 'me',
     openCaseId: params.get('case'),
     onlyCaseId: params.get('only'),
-    setStatusFilter: (value: ResultStatus | null) => update({ status: value?.toLowerCase() ?? null }),
+    tab: params.get('tab') === 'team' ? ('team' as const) : ('cases' as const),
+    /** The address of a tab, keeping the filters and the open case. */
+    tabHref: (tab: 'cases' | 'team') => {
+      const next = new URLSearchParams(params);
+      if (tab === 'team') next.set('tab', 'team');
+      else next.delete('tab');
+      const search = next.toString();
+      return search ? `?${search}` : '?';
+    },
+    // Choosing a status on the ribbon lists its cases, so it also leaves the team stats.
+    setStatusFilter: (value: ResultStatus | null) => update({ status: value?.toLowerCase() ?? null, tab: null }),
     setSourceFilter: (value: SourceFilter) => update({ source: value === 'ALL' ? null : value.toLowerCase() }),
     setOnlyMine: (value: boolean) => update({ assignee: value ? 'me' : null }),
     setOpenCaseId: (value: string | null) => update({ case: value }),
@@ -608,6 +620,8 @@ export function RunDetailPage() {
     onlyMine,
     openCaseId,
     onlyCaseId,
+    tab,
+    tabHref,
     setStatusFilter,
     setSourceFilter,
     setOnlyMine,
@@ -959,6 +973,15 @@ export function RunDetailPage() {
         </p>
       </section>
 
+      <nav className="tabs" aria-label="Run sections">
+        <Link to={tabHref('cases')} replace aria-current={tab === 'cases' ? 'page' : undefined}>Test cases</Link>
+        <Link to={tabHref('team')} replace aria-current={tab === 'team' ? 'page' : undefined}>Team stats</Link>
+      </nav>
+
+      {tab === 'team' ? (
+        <RunTeamStats projectId={projectId} runId={runId} />
+      ) : (
+      <>
       <div className="segmented" role="group" aria-label="Filter cases by assignee">
         <button type="button" aria-pressed={!onlyMine} onClick={() => setOnlyMine(false)}>All cases</button>
         <button type="button" aria-pressed={onlyMine} onClick={() => setOnlyMine(true)}>Assigned to me</button>
@@ -1187,6 +1210,8 @@ export function RunDetailPage() {
           />
         )}
       </div>
+      </>
+      )}
       <ConfirmDialog
         open={confirmingComplete}
         title="Complete this run?"

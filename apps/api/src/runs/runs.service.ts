@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import * as crypto from "crypto";
-import { Prisma, ProjectRole, RunCaseStatus, RunStatus } from "@prisma/client";
+import { Prisma, ProjectRole, ResultSource, RunCaseStatus, RunStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRunDto } from "./dto/create-run.dto";
@@ -279,6 +279,87 @@ export class RunsService {
     });
     if (count === 0) throw new NotFoundException("Test case is not in this run");
     return this.prisma.runCase.findUniqueOrThrow({ where: { id: runCaseId } });
+  }
+
+  /**
+   * Team stats: who did what in the run. Every case counts once, for whoever its latest status
+   * belongs to:
+   *   - a case with a result counts for the person who recorded its latest result;
+   *   - a case waiting for one (Untested, Retest) counts for its assignee, or for "Unassigned";
+   *   - automated results count for "Automation", not for the owner of the CI token.
+   * Time spent adds up the durations of all of a person's attempts, so someone whose results were
+   * later replaced still shows the time they spent.
+   */
+  async teamStats(userId: string, projectId: string, runId: string) {
+    await this.accessControl.requireProjectAccessOrWorkspaceAdmin(userId, projectId);
+    const run = await this.prisma.testRun.findFirst({ where: { id: runId, projectId }, select: { id: true } });
+    if (!run) throw new NotFoundException("Run not found");
+
+    const runCases = await this.prisma.runCase.findMany({
+      where: { runId },
+      select: { id: true, status: true, assigneeId: true },
+    });
+    const latest = await this.prisma.result.findMany({
+      where: { isLatest: true, runCase: { runId } },
+      select: { runCaseId: true, source: true, authorUserId: true },
+    });
+    const effort = await this.prisma.result.groupBy({
+      by: ["authorUserId", "source"],
+      where: { runCase: { runId } },
+      _sum: { durationMs: true },
+      _count: { _all: true },
+    });
+
+    const AUTOMATION = "automation";
+    const UNASSIGNED = "unassigned";
+    const latestByCase = new Map(latest.map((r) => [r.runCaseId, r]));
+    const rows = new Map<string, { counts: Record<string, number>; caseCount: number; resultCount: number; durationMs: number }>();
+    const row = (key: string) => {
+      let found = rows.get(key);
+      if (!found) {
+        found = { counts: {}, caseCount: 0, resultCount: 0, durationMs: 0 };
+        rows.set(key, found);
+      }
+      return found;
+    };
+    for (const runCase of runCases) {
+      const result = latestByCase.get(runCase.id);
+      const waiting = runCase.status === RunCaseStatus.UNTESTED || runCase.status === RunCaseStatus.RETEST;
+      const key = waiting || !result
+        ? (runCase.assigneeId ?? UNASSIGNED)
+        : result.source === ResultSource.AUTOMATION
+          ? AUTOMATION
+          : (result.authorUserId ?? runCase.assigneeId ?? UNASSIGNED);
+      const target = row(key);
+      target.caseCount += 1;
+      target.counts[runCase.status] = (target.counts[runCase.status] ?? 0) + 1;
+    }
+    for (const group of effort) {
+      const key = group.source === ResultSource.AUTOMATION ? AUTOMATION : (group.authorUserId ?? UNASSIGNED);
+      const target = row(key);
+      target.resultCount += group._count._all;
+      target.durationMs += group._sum.durationMs ?? 0;
+    }
+
+    const userIds = [...rows.keys()].filter((key) => key !== AUTOMATION && key !== UNASSIGNED);
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, displayName: true },
+    });
+    const nameOf = new Map(users.map((u) => [u.id, u.displayName]));
+    const kindOrder = { PERSON: 0, AUTOMATION: 1, UNASSIGNED: 2 } as const;
+    return [...rows.entries()]
+      .map(([key, stats]) => {
+        const kind = key === AUTOMATION ? "AUTOMATION" : key === UNASSIGNED ? "UNASSIGNED" : "PERSON";
+        return {
+          kind,
+          userId: kind === "PERSON" ? key : null,
+          // Someone who has left the project keeps their row, without a name.
+          name: kind === "PERSON" ? (nameOf.get(key) ?? "Former member") : kind === "AUTOMATION" ? "Automation" : "Unassigned",
+          ...stats,
+        } as const;
+      })
+      .sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || b.caseCount - a.caseCount || a.name.localeCompare(b.name));
   }
 
   /** Sets or clears who tests several cases of the run at once: all of them, or none if one isn't in the run. */

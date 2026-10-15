@@ -60,6 +60,20 @@ export class RunsController {
   }
 
   /**
+   * Team stats: per person, the cases whose latest status is theirs, counted by status, and the
+   * time of all their attempts. Automated results count for "Automation"; cases waiting for a
+   * result count for their assignee or "Unassigned".
+   */
+  @Get(":runId/team-stats")
+  teamStats(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+  ) {
+    return this.runsService.teamStats(user.id, projectId, runId);
+  }
+
+  /**
    * Sets or clears who tests several cases of the run at once (project admins and testers); all
    * or none.
    */
