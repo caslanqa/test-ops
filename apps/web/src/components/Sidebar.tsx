@@ -78,7 +78,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
           <nav aria-label="Project sections">
             <ul className="side-nav">
-              {PROJECT_SECTIONS.map(({ path, label, icon: Icon }) => (
+              {PROJECT_SECTIONS.filter((s) => !('adminOnly' in s) || info?.project.currentUserRole === 'ADMIN').map(({ path, label, icon: Icon }) => (
                 <li key={path}>
                   <NavLink to={`/projects/${projectId}/${path}`} onClick={onNavigate}>
                     <Icon size={18} aria-hidden="true" />

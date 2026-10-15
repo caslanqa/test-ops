@@ -38,6 +38,10 @@ services:
       SELF_REGISTRATION: ${SELF_REGISTRATION:-true}
       # The built-in DEMO workspace every signed-in user can look around in, read-only; false hides it.
       DEMO_WORKSPACE: ${DEMO_WORKSPACE:-true}
+      # The app's public address, for links in CI webhook calls; empty = the address requests come to.
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      # Let CI webhooks reach private and local network addresses (e.g. an internal Jenkins).
+      WEBHOOK_ALLOW_PRIVATE_NETWORKS: ${WEBHOOK_ALLOW_PRIVATE_NETWORKS:-false}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-}
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}
       AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-}

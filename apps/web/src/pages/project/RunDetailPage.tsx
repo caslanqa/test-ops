@@ -38,6 +38,9 @@ import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
 import { CaseExecution, DefectForResultDialog, EditResultDialog, type SavedResult } from './RunExecution';
 import { Select } from '../../components/Select';
+import { describeDelivery, type WebhookDelivery } from '../../lib/webhooks';
+// The CI status links to the project's integrations.
+import { Link } from 'react-router-dom';
 
 interface CaseSnapshot {
   title: string;
@@ -590,6 +593,78 @@ function ResultActions({
   );
 }
 
+/**
+ * Whether CI was called for a run with cases for automation, under the run's header, with a way
+ * to call it again. A call still being retried is checked again every 15 seconds.
+ */
+function RunCiStatus({
+  projectId,
+  runId,
+  canTrigger,
+  isAdmin,
+}: {
+  projectId: string;
+  runId: string;
+  canTrigger: boolean;
+  isAdmin: boolean;
+}) {
+  const status = useResource(
+    () => api.get<{ configured: boolean; lastDelivery: WebhookDelivery | null }>(`/projects/${projectId}/runs/${runId}/ci`),
+    [projectId, runId],
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const pending = status.data?.lastDelivery?.status === 'PENDING';
+  const { reload } = status;
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setTimeout(reload, 15_000);
+    return () => window.clearTimeout(timer);
+  }, [pending, reload]);
+
+  async function trigger() {
+    setSending(true);
+    setError(null);
+    try {
+      await api.post(`/projects/${projectId}/runs/${runId}/ci`);
+      status.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't call CI");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (!status.data) return null;
+  const { configured, lastDelivery } = status.data;
+  return (
+    <div className="ci-status" role="status">
+      <Bot size={16} aria-hidden="true" />
+      {!configured ? (
+        <span className="muted">
+          Automated cases wait for results from CI.
+          {isAdmin && <> No CI webhook is set up: <Link to={`/projects/${projectId}/integrations`}>set one up</Link>.</>}
+        </span>
+      ) : !lastDelivery ? (
+        <span className="muted">CI hasn't been called for this run.</span>
+      ) : lastDelivery.status === 'SUCCEEDED' ? (
+        <span>CI was called {formatDateTime(lastDelivery.createdAt)} ({describeDelivery(lastDelivery)}).</span>
+      ) : lastDelivery.status === 'PENDING' ? (
+        <span>Calling CI… try {lastDelivery.attempts} failed ({describeDelivery(lastDelivery)}); trying again.</span>
+      ) : (
+        <span className="form-error">Calling CI failed: {describeDelivery(lastDelivery)}</span>
+      )}
+      {canTrigger && configured && (
+        <button type="button" className="btn btn-secondary btn-sm" disabled={sending} onClick={trigger}>
+          <RotateCcw size={14} aria-hidden="true" />
+          {lastDelivery ? 'Trigger CI again' : 'Trigger CI'}
+        </button>
+      )}
+      {error && <span className="form-error">{error}</span>}
+    </div>
+  );
+}
+
 export function RunDetailPage() {
   const { projectId = '', runId = '' } = useParams();
   const runRes = useResource(() => api.get<RunDetail>(`/projects/${projectId}/runs/${runId}`), [projectId, runId]);
@@ -871,6 +946,9 @@ export function RunDetailPage() {
       />
 
       {actionError && <p className="form-error" role="alert">{actionError}</p>}
+      {run.runCases.some((rc) => rc.executionMode === 'AUTOMATED') && (
+        <RunCiStatus projectId={projectId} runId={runId} canTrigger={canRecord} isAdmin={role === 'ADMIN'} />
+      )}
 
       <section className="run-summary surface" aria-labelledby="run-progress-heading">
         <div className="run-summary-head">

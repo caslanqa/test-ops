@@ -23,6 +23,7 @@ import { SystemFieldsModule } from "./system-fields/system-fields.module";
 import { ApiTokensModule } from "./api-tokens/api-tokens.module";
 import { SystemModule } from "./system/system.module";
 import { DemoModule } from "./demo/demo.module";
+import { WebhooksModule } from "./webhooks/webhooks.module";
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { DemoModule } from "./demo/demo.module";
     SystemFieldsModule,
     ApiTokensModule,
     SystemModule,
+    WebhooksModule,
     DemoModule,
   ],
 })

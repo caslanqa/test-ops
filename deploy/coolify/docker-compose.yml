@@ -40,6 +40,8 @@ services:
       - SELF_REGISTRATION=${SELF_REGISTRATION:-true}
       # The built-in DEMO workspace every visitor can look around in, read-only.
       - DEMO_WORKSPACE=${DEMO_WORKSPACE:-true}
+      # Public demo: CI webhooks may not reach the server's own network.
+      - WEBHOOK_ALLOW_PRIVATE_NETWORKS=${WEBHOOK_ALLOW_PRIVATE_NETWORKS:-false}
       - TRUST_PROXY=${TRUST_PROXY:-2}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-}
       - AUTH_RATE_LIMIT_PER_MINUTE=${AUTH_RATE_LIMIT_PER_MINUTE:-}

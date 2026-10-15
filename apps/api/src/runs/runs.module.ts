@@ -5,8 +5,10 @@ import { RunsController } from "./runs.controller";
 import { ResultsController } from "./results.controller";
 import { ProjectResultsController } from "./project-results.controller";
 import { PublicRunsController } from "./public-runs.controller";
+import { WebhooksModule } from "../webhooks/webhooks.module";
 
 @Module({
+  imports: [WebhooksModule],
   controllers: [
     RunsController,
     ResultsController,

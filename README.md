@@ -131,6 +131,8 @@ The installer creates `.env` with secure values. Keep it private and keep a back
 | `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Container image; set a version tag to pin releases. |
 | `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up; invitation links still create accounts, and only workspace admins can create new workspaces. |
 | `DEMO_WORKSPACE` | `true` | Shows every signed-in user the built-in, read-only DEMO workspace. Set to `false` to hide it. See [Demo workspace](#demo-workspace). |
+| `PUBLIC_URL` | unset | The app's public address, for links in CI webhook calls. Unset, the address requests come to is used. |
+| `WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Lets CI webhooks reach private and local network addresses, for CI on the internal network. See [CI webhook](#ci-webhook). |
 | `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
 
 Rate limits, the largest JSON request size of a bulk result upload (`JSON_MAX_REQUEST_SIZE_BYTES`, 10 MiB by default, enough for 500 results; all other JSON requests are limited to 100 KB) and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
@@ -153,6 +155,16 @@ The shop and its Playwright tests are in [`examples/demo-shop`](examples/demo-sh
 - **Owned by a system user.** A system user that nobody can sign in as owns the workspace. It is recognised by fixed ids, so no account can take it over.
 - **Not a membership.** Visitors are not added as members. The member lists show only the system user, and visitors don't see each other.
 - **Switching it off.** Set `DEMO_WORKSPACE=false` to hide the workspace.
+
+### CI webhook
+
+A project admin can connect CI under **Integrations**. When a run starts with cases set to **Automation** (chosen in the start-run dialog, or by the cases' automation status), TestOps POSTs the run to the webhook URL so CI can run those cases.
+
+- **Body.** It has the shape of a GitHub `repository_dispatch` (`event_type: "testops.run.started"`, `client_payload` with the run, the API address and the automated cases), so `https://api.github.com/repos/OWNER/REPO/dispatches` can be the webhook itself.
+- **Headers and signature.** Extra headers, such as `Authorization`, are stored encrypted and never shown again. Every call is signed in `X-TestOps-Signature-256` (HMAC-SHA256 of the body with the webhook's secret).
+- **Retries.** Failed calls (network errors, 5xx, 429) are tried twice more. The run page shows how the last call went and can trigger CI again.
+- **No loops.** Runs that CI starts itself never call the webhook.
+- **Private addresses.** Webhooks can't reach private or local network addresses, which is checked again when the call is made, unless `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
 
 ### HTTPS and reverse proxies
 

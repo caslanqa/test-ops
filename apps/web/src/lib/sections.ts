@@ -1,4 +1,4 @@
-import { Bug, ClipboardList, FolderTree, ListChecks, PlayCircle, Users } from 'lucide-react';
+import { Bug, ClipboardList, FolderTree, ListChecks, PlayCircle, Plug, Users } from 'lucide-react';
 
 /** In-project sections; the order follows the usual test workflow: design → plan → run → track. */
 export const PROJECT_SECTIONS = [
@@ -8,4 +8,6 @@ export const PROJECT_SECTIONS = [
   { path: 'runs', label: 'Runs', icon: PlayCircle },
   { path: 'defects', label: 'Defects', icon: Bug },
   { path: 'members', label: 'Members', icon: Users },
+  // Webhook settings hold credentials, so only project admins see the section.
+  { path: 'integrations', label: 'Integrations', icon: Plug, adminOnly: true },
 ] as const;
