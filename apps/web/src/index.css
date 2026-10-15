@@ -1266,6 +1266,15 @@ input[type='checkbox'] {
   }
 }
 
+/* Assigning every case of a plan at once, above its list. */
+.plan-cases-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.25rem 0 0.5rem 1.25rem;
+}
+
 /* The cases of a plan, under its row: order, title, priority, automation, assignee. */
 .plan-cases {
   display: grid;
@@ -1280,6 +1289,11 @@ input[type='checkbox'] {
 
 .plan-cases > li {
   display: contents;
+}
+
+/* The assignee lists line up, whatever the name in them. */
+.plan-cases .select-trigger {
+  min-width: 11rem;
 }
 
 @media (max-width: 40rem) {

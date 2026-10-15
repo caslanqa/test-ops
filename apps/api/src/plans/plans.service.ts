@@ -183,6 +183,29 @@ export class PlansService {
   }
 
   /** Sets or clears who tests a case of the plan; runs started from the plan take it over. */
+  /**
+   * Sets or clears who tests several cases of the plan at once: all of them, or none if one isn't in
+   * the plan. Runs started from the plan take the assignees over.
+   */
+  async assignCases(
+    userId: string,
+    projectId: string,
+    planId: string,
+    testCaseIds: string[],
+    assigneeId: string | null,
+  ) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
+    await this.getOne(userId, projectId, planId);
+    await this.accessControl.assertAssignableUser(projectId, assigneeId);
+    const ids = [...new Set(testCaseIds)];
+    return this.prisma.$transaction(async (tx) => {
+      const found = await tx.planCase.count({ where: { planId, testCaseId: { in: ids } } });
+      if (found !== ids.length) throw new NotFoundException("Some of the test cases are not in this plan");
+      const { count } = await tx.planCase.updateMany({ where: { planId, testCaseId: { in: ids } }, data: { assigneeId } });
+      return { count };
+    });
+  }
+
   async assignCase(
     userId: string,
     projectId: string,

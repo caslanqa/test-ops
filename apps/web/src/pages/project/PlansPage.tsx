@@ -15,7 +15,7 @@ import { formatDate, formatDateTime } from '../../lib/format';
 import { AUTOMATION_LABEL, labelOf } from '../../lib/labels';
 import { removeLink } from '../../lib/links';
 import { useProjectPermissions } from '../../lib/permissions';
-import { useProjectMembers } from '../../lib/members';
+import { useProjectMembers, type ProjectMember } from '../../lib/members';
 import { useProjectInfo } from '../../lib/projectInfo';
 import type { Suite } from '../../lib/suites';
 import { usePageTitle, useResource } from '../../lib/useResource';
@@ -46,47 +46,125 @@ interface PlanDetail {
   }[];
 }
 
+/** The value of "Unassigned" in the assign-all list; its empty value is the prompt. */
+const UNASSIGN = '__unassign__';
+
 /**
  * The cases of a plan, in plan order, under its row: priority, whether each is automated, and
- * who it is assigned to. Loaded when the row opens, and again after the plan is edited.
+ * who it is assigned to. Admins and testers assign them here, one by one or all at once, while
+ * planning; runs started from the plan take the assignees over. Loaded when the row opens, and
+ * again after the plan is edited.
  */
 function PlanCases({
   id,
   projectId,
   plan,
   version,
-  memberName,
+  members,
+  canAssign,
+  onAssigned,
 }: {
   id: string;
   projectId: string;
   plan: PlanRow;
   version: number;
-  memberName: Map<string, string>;
+  members: ProjectMember[];
+  canAssign: boolean;
+  onAssigned: (message: string) => void;
 }) {
   const detail = useResource(
     () => api.get<PlanDetail>(`/projects/${projectId}/plans/${plan.id}`),
     [projectId, plan.id, version],
   );
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const memberName = new Map(members.map((m) => [m.user.id, m.user.displayName]));
+  // An archived plan can't start runs, so its assignees are shown but not changed.
+  const editable = canAssign && !plan.archivedAt;
+
+  async function assign(testCaseIds: string[], assigneeId: string | null, message?: string) {
+    setSaving(true);
+    setError(null);
+    try {
+      if (testCaseIds.length === 1) {
+        await api.patch(`/projects/${projectId}/plans/${plan.id}/cases/${testCaseIds[0]}`, { assigneeId });
+      } else {
+        await api.patch(`/projects/${projectId}/plans/${plan.id}/cases`, { testCaseIds, assigneeId });
+      }
+      detail.reload();
+      if (message) onAssigned(message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't change the assignee");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (detail.error) return <p id={id} className="form-error" role="alert">{detail.error}</p>;
   if (!detail.data) return <div id={id}><Loading label="Loading the plan's cases…" /></div>;
-  if (detail.data.items.length === 0) return <p id={id} className="muted">This plan has no cases yet.</p>;
+  const items = detail.data.items;
+  if (items.length === 0) return <p id={id} className="muted">This plan has no cases yet.</p>;
+  const memberOptions = members.map((m) => (
+    <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
+  ));
   return (
-    <ol id={id} className="plan-cases" aria-label={`Cases in ${plan.title}`}>
-      {detail.data.items.map((item, index) => (
-        <li key={item.id}>
-          <span className="muted num">{index + 1}</span>
-          <span className="plan-case-title">
-            {item.testCase.title}
-            {item.testCase.archivedAt && <span className="muted"> (archived, left out of new runs)</span>}
-          </span>
-          <PriorityMark priority={item.testCase.priority} />
-          <span className="muted">{labelOf(AUTOMATION_LABEL, item.testCase.automationStatus)}</span>
-          <span className="muted">
-            {item.assigneeId ? memberName.get(item.assigneeId) ?? 'Assigned' : 'Unassigned'}
-          </span>
-        </li>
-      ))}
-    </ol>
+    <div id={id} className="plan-cases-wrap">
+      {editable && (
+        <div className="plan-cases-tools">
+          <Select
+            className="inline-select"
+            aria-label={`Assign every case of ${plan.title}`}
+            value=""
+            disabled={saving}
+            onChange={(e) => {
+              const assigneeId = e.target.value === UNASSIGN ? null : e.target.value;
+              const who = assigneeId ? memberName.get(assigneeId) ?? 'the chosen person' : null;
+              assign(
+                items.map((item) => item.testCase.id),
+                assigneeId,
+                who ? `Every case of "${plan.title}" assigned to ${who}.` : `Every case of "${plan.title}" unassigned.`,
+              );
+            }}
+          >
+            <option value="">Assign every case to…</option>
+            <option value={UNASSIGN}>Unassigned</option>
+            {memberOptions}
+          </Select>
+          <span className="field-hint">Runs started from this plan take the assignees over.</span>
+        </div>
+      )}
+      <FormError message={error} />
+      <ol className="plan-cases" aria-label={`Cases in ${plan.title}`}>
+        {items.map((item, index) => (
+          <li key={item.id}>
+            <span className="muted num">{index + 1}</span>
+            <span className="plan-case-title">
+              {item.testCase.title}
+              {item.testCase.archivedAt && <span className="muted"> (archived, left out of new runs)</span>}
+            </span>
+            <PriorityMark priority={item.testCase.priority} />
+            <span className="muted">{labelOf(AUTOMATION_LABEL, item.testCase.automationStatus)}</span>
+            {editable ? (
+              <Select
+                className="inline-select"
+                aria-label={`Assignee for ${item.testCase.title}`}
+                value={item.assigneeId ?? ''}
+                disabled={saving}
+                onChange={(e) => assign([item.testCase.id], e.target.value || null)}
+              >
+                <option value="">Unassigned</option>
+                {item.assigneeId && !memberName.has(item.assigneeId) && <option value={item.assigneeId}>Assigned</option>}
+                {memberOptions}
+              </Select>
+            ) : (
+              <span className="muted">
+                {item.assigneeId ? memberName.get(item.assigneeId) ?? 'Assigned' : 'Unassigned'}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -324,7 +402,6 @@ export function PlansPage() {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [casesVersion, setCasesVersion] = useState(0);
   const members = useProjectMembers(projectId);
-  const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
   const { notify } = useNotice();
   const { data: plans, error, loading, reload } = useResource(
     () => api.get<PlanRow[]>(`/projects/${projectId}/plans${showArchived ? '?includeArchived=true' : ''}`),
@@ -473,7 +550,15 @@ export function PlansPage() {
                 {isOpen && (
                   <tr className="expanded-row">
                     <td colSpan={execute || editRepository ? 5 : 4}>
-                      <PlanCases id={casesId} projectId={projectId} plan={plan} version={casesVersion} memberName={memberName} />
+                      <PlanCases
+                        id={casesId}
+                        projectId={projectId}
+                        plan={plan}
+                        version={casesVersion}
+                        members={members.data ?? []}
+                        canAssign={editRepository}
+                        onAssigned={(message) => notify(message)}
+                      />
                     </td>
                   </tr>
                 )}

@@ -5,6 +5,7 @@ import { CreatePlanDto } from "./dto/create-plan.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
 import { AddPlanCasesDto } from "./dto/add-plan-cases.dto";
 import { AssignCaseDto } from "../common/dto/assign-case.dto";
+import { AssignPlanCasesDto } from "./dto/assign-plan-cases.dto";
 import {
   CurrentUser,
   AuthenticatedUser,
@@ -94,6 +95,20 @@ export class PlansController {
     @Body() dto: AddPlanCasesDto,
   ) {
     return this.plansService.addCases(user.id, projectId, planId, dto);
+  }
+
+  /**
+   * Sets or clears who tests several cases of the plan at once (all or none); runs started from the
+   * plan take the assignees over.
+   */
+  @Patch(":planId/cases")
+  assignCases(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("planId") planId: string,
+    @Body() dto: AssignPlanCasesDto,
+  ) {
+    return this.plansService.assignCases(user.id, projectId, planId, dto.testCaseIds, dto.assigneeId);
   }
 
   /** Sets or clears who tests a case of the plan; runs started from the plan take it over. */
