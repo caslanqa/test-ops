@@ -131,14 +131,15 @@ export class ProjectsService {
   }
 
   async listMembers(userId: string, projectId: string) {
-    await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
+    const access = await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
       projectId,
     );
+    // Visitors of the demo workspace see who is in the project, but not their email addresses.
     return this.prisma.projectMember.findMany({
       where: { projectId },
       include: {
-        user: { select: { id: true, email: true, displayName: true } },
+        user: { select: { id: true, email: !access.demoViewer, displayName: true } },
       },
       orderBy: { createdAt: "asc" },
     });

@@ -33,7 +33,8 @@ export interface WorkspaceReadAccess {
 // record, so its member lists don't fill up with everyone who signs up, and nobody sees the other
 // visitors. Only the read checks below (requireWorkspaceReadAccess,
 // requireProjectAccessOrWorkspaceAdmin) let them in, as a workspace MEMBER and project VIEWER;
-// every role check for a change still needs a real membership.
+// every role check for a change still needs a real membership. Both report `demoViewer`, so
+// responses can leave out what visitors must not see, such as the members' email addresses.
 @Injectable()
 export class AccessControlService {
   private readonly demoWorkspaceId: string | null;
@@ -161,20 +162,20 @@ export class AccessControlService {
   async requireProjectAccessOrWorkspaceAdmin(
     userId: string,
     projectId: string,
-  ): Promise<{ role: ProjectRole; viaWorkspaceAdmin: boolean }> {
+  ): Promise<{ role: ProjectRole; viaWorkspaceAdmin: boolean; demoViewer: boolean }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { workspaceId: true },
     });
     if (project && (await this.isWorkspaceAdmin(userId, project.workspaceId))) {
-      return { role: ProjectRole.ADMIN, viaWorkspaceAdmin: true };
+      return { role: ProjectRole.ADMIN, viaWorkspaceAdmin: true, demoViewer: false };
     }
     const member = await this.prisma.projectMember.findUnique({
       where: { projectId_userId: { projectId, userId } },
     });
-    if (member) return { role: member.role, viaWorkspaceAdmin: false };
+    if (member) return { role: member.role, viaWorkspaceAdmin: false, demoViewer: false };
     if (project && this.isDemoWorkspace(project.workspaceId)) {
-      return { role: ProjectRole.VIEWER, viaWorkspaceAdmin: false };
+      return { role: ProjectRole.VIEWER, viaWorkspaceAdmin: false, demoViewer: true };
     }
     throw new ForbiddenException("You don't have access to this project");
   }

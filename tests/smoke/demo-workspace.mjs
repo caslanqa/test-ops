@@ -89,8 +89,11 @@ check('its runs and results can be read', (await ok(visitor, 'GET', `${P}/runs/$
 console.log('--- Visitors stay out of the member lists ---');
 const members = await ok(visitor, 'GET', `/workspaces/${demo.id}/members`);
 check('the demo workspace members list has only its real members', members.length === membersBefore && !members.some((m) => m.userId === visitorId), `${members.length} vs ${membersBefore}`);
+check("...and shows the members' names but not their email addresses", members.every((m) => m.user.displayName && !('email' in m.user)), JSON.stringify(members));
 const projectMembers = await ok(visitor, 'GET', `${P}/members`);
 check('...and so has the project members list', !projectMembers.some((m) => m.userId === visitorId));
+check('...also without email addresses', projectMembers.length > 0 && projectMembers.every((m) => !('email' in m.user)), JSON.stringify(projectMembers));
+check('real members still see the email addresses', (await ok(admin, 'GET', `${P}/members`)).every((m) => typeof m.user.email === 'string'));
 await register('two');
 check('another sign-up adds nobody to the demo members', (await ok(admin, 'GET', `/workspaces/${demo.id}/members`)).length === membersBefore);
 

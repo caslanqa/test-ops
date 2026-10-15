@@ -7,7 +7,8 @@ import { Select } from './Select';
 export interface MemberRow {
   id: string;
   role: string;
-  user: { id: string; email: string; displayName: string };
+  /** Visitors of the demo workspace get members without their email address. */
+  user: { id: string; email?: string; displayName: string };
 }
 
 export interface RoleOption {
@@ -119,7 +120,7 @@ export function MemberTable({
                           {member.user.displayName}
                           {isSelf && <span className="muted"> (you)</span>}
                         </span>
-                        <span className="cell-sub">{member.user.email}</span>
+                        {member.user.email && <span className="cell-sub">{member.user.email}</span>}
                       </span>
                     </span>
                   </td>

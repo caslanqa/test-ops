@@ -115,11 +115,12 @@ export class WorkspacesService {
   }
 
   async listMembers(userId: string, workspaceId: string) {
-    await this.accessControl.requireWorkspaceReadAccess(userId, workspaceId);
+    const access = await this.accessControl.requireWorkspaceReadAccess(userId, workspaceId);
+    // Visitors of the demo workspace see who is in it, but not their email addresses.
     return this.prisma.workspaceMember.findMany({
       where: { workspaceId },
       include: {
-        user: { select: { id: true, email: true, displayName: true } },
+        user: { select: { id: true, email: !access.demoViewer, displayName: true } },
       },
       orderBy: { createdAt: "asc" },
     });
