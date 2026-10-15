@@ -53,22 +53,6 @@ function trustProxyFromEnv(): boolean | number | string {
   return raw;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * The workspace every signed-in user may read (DEMO_WORKSPACE_ID); null when not set. An id
- * rather than a slug: the operator creates the workspace first, so nobody else can claim a slug
- * that would then be shown to every user. A malformed id fails at startup.
- */
-function demoWorkspaceIdFromEnv(): string | null {
-  const raw = process.env.DEMO_WORKSPACE_ID?.trim();
-  if (!raw) return null;
-  if (!UUID.test(raw)) {
-    throw new Error(`DEMO_WORKSPACE_ID must be a workspace id (a UUID), got "${raw}"`);
-  }
-  return raw.toLowerCase();
-}
-
 export default () => ({
   port: parseInt(process.env.PORT ?? "3000", 10),
   // Set at image build time from the release version (Dockerfile ARG APP_VERSION); "dev" for local builds.
@@ -77,9 +61,10 @@ export default () => ({
     // Self-registration; on closed installs people join through workspace invitation links.
     selfRegistration: process.env.SELF_REGISTRATION?.trim().toLowerCase() !== "false",
   },
-  // A read-only demo workspace for every signed-in user (see AccessControlService).
+  // The built-in DEMO workspace every signed-in user can look around in, read-only (DemoService,
+  // AccessControlService). On unless DEMO_WORKSPACE=false.
   demo: {
-    workspaceId: demoWorkspaceIdFromEnv(),
+    enabled: process.env.DEMO_WORKSPACE?.trim().toLowerCase() !== "false",
   },
   // Per-minute request limits; 0 disables that limit (see common/rate-limit.ts).
   rateLimit: {

@@ -65,7 +65,7 @@ export class WorkspacesService {
     });
   }
 
-  /** The user's workspaces, plus the demo workspace (DEMO_WORKSPACE_ID) that everyone can read. */
+  /** The user's workspaces, plus the demo workspace that everyone can read. */
   async listForUser(userId: string, query: PageQueryDto) {
     const demoId = this.accessControl.demoWorkspace;
     const where: Prisma.WorkspaceWhereInput = demoId

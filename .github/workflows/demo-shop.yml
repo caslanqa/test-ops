@@ -1,13 +1,8 @@
 name: Demo shop
 
-# Runs the example Playwright tests (examples/demo-shop) against the example shop. On master, on a
-# schedule and when started by hand, the TestOps reporter sends the results to the DEMO workspace,
-# where every signed-in user sees them as an automated run. Pull requests run the same tests
-# without sending anything.
-#
-# Settings: the repository variables TESTOPS_DEMO_URL (API base, e.g. https://testops.example.com/api/v1)
-# and TESTOPS_DEMO_PROJECT_ID, and the secret TESTOPS_DEMO_TOKEN (an API token of the demo account).
-# Without them the tests still run and the results stay in the job.
+# Keeps the example in examples/demo-shop working: typechecks it and runs its Playwright tests
+# against the example shop. The TestOps reporter has no settings here, so the results stay in the
+# job; the DEMO workspace that every TestOps server shows is built by the server itself.
 on:
   push:
     branches: [master]
@@ -18,9 +13,6 @@ on:
     paths:
       - "examples/demo-shop/**"
       - ".github/workflows/demo-shop.yml"
-  # Every morning, so the demo always has a recent automated run.
-  schedule:
-    - cron: "17 5 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -58,11 +50,6 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run the tests
-        env:
-          # Only master, the schedule and manual runs report; pull requests keep the demo clean.
-          TESTOPS_URL: ${{ github.event_name != 'pull_request' && vars.TESTOPS_DEMO_URL || '' }}
-          TESTOPS_PROJECT_ID: ${{ github.event_name != 'pull_request' && vars.TESTOPS_DEMO_PROJECT_ID || '' }}
-          TESTOPS_TOKEN: ${{ github.event_name != 'pull_request' && secrets.TESTOPS_DEMO_TOKEN || '' }}
         run: npx playwright test
 
       - name: Keep the Playwright report
