@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
+import { AppVersion } from './AppVersion';
 import { BrandMark } from './BrandMark';
 import { ThemeSwitcher } from './ThemeSwitcher';
 
@@ -34,6 +35,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           <ThemeSwitcher />
         </div>
         {children}
+        <AppVersion className="login-version" />
       </main>
     </div>
   );

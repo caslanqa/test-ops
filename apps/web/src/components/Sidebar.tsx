@@ -12,6 +12,7 @@ import { useResource } from '../lib/useResource';
 import { PROJECT_ROLE_LABEL, labelOf } from '../lib/labels';
 import { useProjectInfo, type Workspace } from '../lib/projectInfo';
 import { PROJECT_SECTIONS } from '../lib/sections';
+import { AppVersion } from './AppVersion';
 import { BrandMark } from './BrandMark';
 
 function initials(name: string): string {
@@ -142,6 +143,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </button>
         </div>
       )}
+      <AppVersion className="sidebar-version" />
     </aside>
   );
 }

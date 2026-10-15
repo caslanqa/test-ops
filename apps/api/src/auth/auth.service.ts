@@ -37,9 +37,14 @@ export class AuthService {
   }
 
   /** Whether the login screen should show the sign-up link. */
+  /**
+   * What the sign-in screen needs before anyone signs in: whether sign-up is open, and the running
+   * version, which the sign-in screen and the side menu show (the image tags are public anyway).
+   */
   publicConfig() {
     return {
       selfRegistration: this.config.get<boolean>("auth.selfRegistration") ?? false,
+      version: this.config.get<string>("version") ?? "dev",
     };
   }
 
