@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -13,12 +14,14 @@ import { UpdateProjectDto } from "./dto/update-project.dto";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { ListProjectsQueryDto } from "./dto/list-projects-query.dto";
 import { ListWorkspaceProjectsQueryDto } from "./dto/list-workspace-projects-query.dto";
+import { AttachmentFilesService } from "../attachments/attachment-files.service";
 
 @Injectable()
 export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
+    private readonly attachmentFiles: AttachmentFilesService,
   ) {}
 
   async create(userId: string, workspaceId: string, dto: CreateProjectDto) {
@@ -67,12 +70,22 @@ export class ProjectsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.project.findMany({
         where,
+        include: { members: { where: { userId }, select: { role: true } } },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         ...pageArgs(query),
       }),
       this.prisma.project.count({ where }),
     ]);
-    return { items, total };
+    // Each project carries the caller's role in it, as in GET /projects/:id, so the list can
+    // offer editing and archiving to the people who may do it.
+    const isAdmin = access.role === WorkspaceRole.ADMIN && !access.demoViewer;
+    return {
+      items: items.map(({ members, ...project }) => ({
+        ...project,
+        currentUserRole: isAdmin ? ProjectRole.ADMIN : (members[0]?.role ?? ProjectRole.VIEWER),
+      })),
+      total,
+    };
   }
 
   async getOne(userId: string, projectId: string) {
@@ -128,6 +141,44 @@ export class ProjectsService {
       where: { id: projectId },
       data: { archivedAt: null },
     });
+  }
+
+  /**
+   * Deletes an archived project for good, with its cases, plans, runs, results, defects and
+   * attachments. Only workspace admins may do this; the project has to be archived first and its
+   * key repeated, so a project in use can't be erased with one click.
+   */
+  async removePermanently(userId: string, projectId: string, confirmKey: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { workspaceId: true, key: true, archivedAt: true },
+    });
+    // An unknown id gets the same answer as a project the caller can't reach.
+    if (!project) throw new ForbiddenException("You don't have access to this project");
+    await this.accessControl.requireWorkspaceRole(userId, project.workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+    if (!project.archivedAt) {
+      throw new ConflictException("Archive the project before deleting it permanently.");
+    }
+    if (project.key !== confirmKey) {
+      throw new BadRequestException("confirmKey must match the project key exactly");
+    }
+    const inProject = { projectId };
+    const keys = await this.attachmentFiles.keysFor({
+      OR: [
+        { result: { runCase: { run: inProject } } },
+        { stepResult: { result: { runCase: { run: inProject } } } },
+        { defect: inProject },
+      ],
+    });
+    // As with deleting a workspace: run_cases point at test cases without a cascade, so the runs
+    // (and with them their cases and results) go first.
+    await this.prisma.$transaction([
+      this.prisma.testRun.deleteMany({ where: inProject }),
+      this.prisma.project.delete({ where: { id: projectId } }),
+    ]);
+    await this.attachmentFiles.removeFiles(keys);
   }
 
   async listMembers(userId: string, projectId: string) {

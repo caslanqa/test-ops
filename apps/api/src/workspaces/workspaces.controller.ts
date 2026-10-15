@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { WorkspacesService } from "./workspaces.service";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
@@ -12,6 +12,7 @@ import type { Response } from "express";
 import { PageQueryDto, PagedResponse, sendPage } from "../common/pagination";
 import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
 import { DeleteWorkspaceDto } from "./dto/delete-workspace.dto";
+import { SetProjectRoleDto } from "./dto/set-project-role.dto";
 
 @ApiTags("workspaces")
 @Controller("workspaces")
@@ -85,6 +86,34 @@ export class WorkspacesController {
     @Param("memberId") memberId: string,
   ) {
     return this.workspacesService.removeMember(user.id, workspaceId, memberId);
+  }
+
+  /**
+   * Who can do what in the workspace (workspace admins): members with their workspace role, the
+   * active projects, and each member's role in each project.
+   */
+  @Get(":workspaceId/permissions")
+  permissions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("workspaceId") workspaceId: string,
+  ) {
+    return this.workspacesService.permissions(user.id, workspaceId);
+  }
+
+  /**
+   * Sets a member's role in a project of the workspace, or removes them from it with role null
+   * (workspace admins). Web session only: a leaked token must not grant roles.
+   */
+  @WebSessionOnly()
+  @Put(":workspaceId/permissions/projects/:projectId/users/:userId")
+  setProjectRole(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("userId") userId: string,
+    @Body() dto: SetProjectRoleDto,
+  ) {
+    return this.workspacesService.setProjectRole(user.id, workspaceId, projectId, userId, dto.role);
   }
 
   /** Deletes the workspace with all its projects and data; send the workspace name to confirm. */

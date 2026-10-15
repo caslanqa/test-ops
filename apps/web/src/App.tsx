@@ -8,6 +8,8 @@ import { InvitePage } from './pages/InvitePage';
 import { AccountPage } from './pages/AccountPage';
 import { SupportPage } from './pages/SupportPage';
 import { WorkspaceMembersPage } from './pages/WorkspaceMembersPage';
+import { WorkspacePermissionsPage } from './pages/WorkspacePermissionsPage';
+import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
 import { ProjectMembersPage } from './pages/project/ProjectMembersPage';
 import { IntegrationsPage } from './pages/project/IntegrationsPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
@@ -33,6 +35,8 @@ export default function App() {
             <Route path="/workspaces" element={<WorkspacesPage />} />
             <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
             <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembersPage />} />
+            <Route path="/workspaces/:workspaceId/permissions" element={<WorkspacePermissionsPage />} />
+            <Route path="/workspaces/:workspaceId/settings" element={<WorkspaceSettingsPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/support" element={<SupportPage />} />
             <Route path="/projects/:projectId">

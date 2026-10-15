@@ -30,12 +30,17 @@ const ROLE_OPTIONS = (Object.keys(WORKSPACE_ROLE_LABEL) as WorkspaceRole[]).map(
   description: WORKSPACE_ROLE_DESCRIPTION[role],
 }));
 
-/** Sections of the workspace page: projects and members. */
+/** Sections of the workspace page: projects and members, and for admins permissions and settings. */
 export function WorkspaceTabs({ workspaceId }: { workspaceId: string }) {
+  const { data: workspace } = useWorkspace(workspaceId);
+  // The server allows the last two to workspace admins only.
+  const isAdmin = workspace?.currentUserRole === 'ADMIN';
   return (
     <nav className="tabs" aria-label="Workspace sections">
       <NavLink to={`/workspaces/${workspaceId}`} end>Projects</NavLink>
       <NavLink to={`/workspaces/${workspaceId}/members`}>Members</NavLink>
+      {isAdmin && <NavLink to={`/workspaces/${workspaceId}/permissions`}>Permissions</NavLink>}
+      {isAdmin && <NavLink to={`/workspaces/${workspaceId}/settings`}>Settings</NavLink>}
     </nav>
   );
 }

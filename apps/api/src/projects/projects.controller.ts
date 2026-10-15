@@ -14,6 +14,7 @@ import { PagedResponse, sendPage } from "../common/pagination";
 import { ListProjectsQueryDto } from "./dto/list-projects-query.dto";
 import { ListWorkspaceProjectsQueryDto } from "./dto/list-workspace-projects-query.dto";
 import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
+import { DeleteProjectDto } from "./dto/delete-project.dto";
 
 @ApiTags("projects")
 @Controller()
@@ -67,6 +68,20 @@ export class ProjectsController {
     @Param("projectId") projectId: string,
   ) {
     return this.projectsService.archive(user.id, projectId);
+  }
+
+  /**
+   * Deletes an archived project and everything in it for good (workspace admins); send the project
+   * key to confirm.
+   */
+  @Delete("projects/:projectId/permanently")
+  @HttpCode(204)
+  async removePermanently(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() dto: DeleteProjectDto,
+  ) {
+    await this.projectsService.removePermanently(user.id, projectId, dto.confirmKey);
   }
 
   /** Restores an archived project (project or workspace admins). */

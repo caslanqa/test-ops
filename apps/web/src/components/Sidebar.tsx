@@ -10,7 +10,7 @@ import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useResource } from '../lib/useResource';
 import { PROJECT_ROLE_LABEL, labelOf } from '../lib/labels';
-import { useProjectInfo, type Workspace } from '../lib/projectInfo';
+import { useProjectInfo, useRecordsVersion, type Workspace } from '../lib/projectInfo';
 import { PROJECT_SECTIONS } from '../lib/sections';
 import { BrandMark } from './BrandMark';
 
@@ -33,10 +33,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { pathname } = useLocation();
   const projectId = useMatch('/projects/:projectId/*')?.params.projectId;
   const { data: info } = useProjectInfo(projectId);
-  // Creating a workspace redirects to it, so refreshing on route change is enough.
+  // Creating a workspace redirects to it, so refreshing on route change covers that; a rename
+  // stays on the page, so recordsChanged() reloads the list too.
+  const recordsVersion = useRecordsVersion();
   const { data: workspaces } = useResource(
     () => (projectId ? Promise.resolve([]) : api.get<Workspace[]>('/workspaces')),
-    [projectId, pathname],
+    [projectId, pathname, recordsVersion],
   );
 
   // All sidebar content (brand, project context, user) sits inside a single landmark.

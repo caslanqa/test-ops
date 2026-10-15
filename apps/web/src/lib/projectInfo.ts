@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { api } from '../api/client';
 import { useResource } from './useResource';
 
@@ -16,7 +17,7 @@ export interface Project {
   key: string;
   name: string;
   workspaceId: string;
-  /** Only present in the single-project response; workspace admins appear as ADMIN. */
+  /** The caller's role in the project (in the single-project and workspace-list responses); workspace admins appear as ADMIN. */
   currentUserRole?: 'ADMIN' | 'TESTER' | 'AUTOMATION' | 'VIEWER';
   /** Set while the project is archived; it is read-only until an admin restores it. */
   archivedAt?: string | null;
@@ -38,6 +39,31 @@ const workspaceCache = new Map<string, Promise<Workspace>>();
 export function clearProjectInfoCache() {
   cache.clear();
   workspaceCache.clear();
+}
+
+// Bumped by recordsChanged(), so the hooks below and lists of names (the side menu) load again.
+let recordsVersion = 0;
+const versionListeners = new Set<() => void>();
+
+/**
+ * Call after renaming, archiving or deleting a workspace or project, or after changing someone's
+ * role: the cached copies are dropped, and everything showing them loads again.
+ */
+export function recordsChanged() {
+  clearProjectInfoCache();
+  recordsVersion += 1;
+  for (const listener of versionListeners) listener();
+}
+
+/** Changes whenever recordsChanged() runs; put it in a useResource's dependencies to reload then. */
+export function useRecordsVersion(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      versionListeners.add(listener);
+      return () => versionListeners.delete(listener);
+    },
+    () => recordsVersion,
+  );
 }
 
 /** Fetches a workspace; failed requests are not cached. */
@@ -67,15 +93,17 @@ export function fetchProjectInfo(projectId: string): Promise<ProjectInfo> {
 }
 
 export function useProjectInfo(projectId: string | undefined) {
+  const version = useRecordsVersion();
   return useResource<ProjectInfo | null>(
     () => (projectId ? fetchProjectInfo(projectId) : Promise.resolve(null)),
-    [projectId],
+    [projectId, version],
   );
 }
 
 export function useWorkspace(workspaceId: string | undefined) {
+  const version = useRecordsVersion();
   return useResource<Workspace | null>(
     () => (workspaceId ? fetchWorkspace(workspaceId) : Promise.resolve(null)),
-    [workspaceId],
+    [workspaceId, version],
   );
 }

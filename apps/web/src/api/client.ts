@@ -92,7 +92,12 @@ export const api = {
       method: "PUT",
       body: body ? JSON.stringify(body) : undefined,
     }),
-  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  /** `body` carries a confirmation where one is required, e.g. the name of a workspace being deleted. */
+  delete: <T>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: "DELETE",
+      body: body ? JSON.stringify(body) : undefined,
+    }),
   /** Multipart upload, e.g. attachment files under the field name the endpoint expects. */
   upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
 };
