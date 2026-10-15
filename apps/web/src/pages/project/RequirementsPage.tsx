@@ -1,6 +1,6 @@
-import { useId, useState, type FormEvent } from 'react';
-import { useParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, Link2, ListChecks, Pencil, Plus } from 'lucide-react';
+import { Fragment, useId, useState, type FormEvent } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { Archive, ArchiveRestore, ChevronRight, Link2, ListChecks, Pencil, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
@@ -9,7 +9,7 @@ import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ResultRibbon } from '../../components/ResultRibbon';
-import { Tag } from '../../components/StatusChip';
+import { StatusChip, Tag } from '../../components/StatusChip';
 import { changedFields, hasChanges } from '../../lib/changes';
 import { useFocusFallback } from '../../lib/focus';
 import { removeLink } from '../../lib/links';
@@ -17,7 +17,8 @@ import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectInfo } from '../../lib/projectInfo';
 import { normalizeCounts } from '../../lib/status';
 import type { Suite } from '../../lib/suites';
-import { plural } from '../../lib/format';
+import { formatDate, plural } from '../../lib/format';
+import { AUTOMATION_LABEL, labelOf } from '../../lib/labels';
 import { usePageTitle, useResource } from '../../lib/useResource';
 
 interface Requirement {
@@ -26,7 +27,16 @@ interface Requirement {
   description: string | null;
   externalRef: string | null;
   archivedAt: string | null;
-  cases: { testCase: { id: string; title: string; archivedAt: string | null } }[];
+  cases: { testCase: { id: string; title: string; automationStatus: string; archivedAt: string | null } }[];
+}
+
+/** A linked case's most recent result in the project, and the run it is in. */
+interface LatestResult {
+  status: string;
+  createdAt: string;
+  runId: string;
+  runTitle: string;
+  runCaseId: string;
 }
 
 interface CoverageRow {
@@ -34,6 +44,7 @@ interface CoverageRow {
   caseCount: number;
   hasCoverage: boolean;
   lastResultStatusBreakdown: Record<string, number>;
+  cases: { testCaseId: string; latestResult: LatestResult | null }[];
 }
 
 /** Linked cases that were never run count as "untested"; the ribbon shows the full coverage. */
@@ -42,6 +53,62 @@ function coverageCounts(row: CoverageRow | undefined) {
   const executed = Object.values(counts).reduce((a, b) => a + b, 0);
   counts.UNTESTED += Math.max(0, (row?.caseCount ?? 0) - executed);
   return counts;
+}
+
+/**
+ * The cases linked to a requirement, under its row: each case's latest result, whether it is
+ * automated, and the run of that result. A case's title opens that run showing only this case.
+ */
+function RequirementCases({
+  id,
+  projectId,
+  requirement,
+  coverage,
+}: {
+  id: string;
+  projectId: string;
+  requirement: Requirement;
+  coverage: CoverageRow | undefined;
+}) {
+  const latest = new Map((coverage?.cases ?? []).map((c) => [c.testCaseId, c.latestResult]));
+  if (requirement.cases.length === 0) {
+    return <p id={id} className="muted">No linked cases.</p>;
+  }
+  return (
+    <ul id={id} className="requirement-cases" aria-label={`Cases linked to ${requirement.title}`}>
+      {requirement.cases.map(({ testCase }) => {
+        const result = latest.get(testCase.id);
+        return (
+          <li key={testCase.id}>
+            <StatusChip status={result?.status ?? 'UNTESTED'} />
+            <span className="requirement-case-title">
+              {result ? (
+                // The run page lists only this case (?only=) with its panel open (?case=), where this
+                // result is in the history.
+                <Link to={`/projects/${projectId}/runs/${result.runId}?only=${result.runCaseId}&case=${result.runCaseId}`}>
+                  {testCase.title}
+                </Link>
+              ) : (
+                testCase.title
+              )}
+              {testCase.archivedAt && <span className="muted"> (archived)</span>}
+            </span>
+            <span className="requirement-case-meta muted">
+              {labelOf(AUTOMATION_LABEL, testCase.automationStatus)} ·{' '}
+              {result ? (
+                <>
+                  {result.runTitle}
+                  <span className="num nowrap"> · {formatDate(result.createdAt)}</span>
+                </>
+              ) : (
+                'Not run yet'
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 // The form mounts only while the dialog is open: state starts clean on every open, and
@@ -233,6 +300,8 @@ export function RequirementsPage() {
   const [editing, setEditing] = useState<Requirement | null>(null);
   const [archiving, setArchiving] = useState<Requirement | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  // Requirements whose linked cases are listed under their row.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [actionError, setActionError] = useState<string | null>(null);
   const { notify } = useNotice();
   const reqRes = useResource(
@@ -255,6 +324,15 @@ export function RequirementsPage() {
 
   // A requirement's row can disappear with the change; focus then moves to the page heading.
   const requestFocus = useFocusFallback(requirements);
+
+  function toggle(requirementId: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(requirementId)) next.delete(requirementId);
+      else next.add(requirementId);
+      return next;
+    });
+  }
 
   /** Opens a dialog; a message from an earlier action no longer applies. */
   function open(action: () => void) {
@@ -323,13 +401,26 @@ export function RequirementsPage() {
               {requirements.map((r) => {
                 const coverage = coverageById.get(r.id);
                 const shown = r.cases.slice(0, 3);
+                const isOpen = expanded.has(r.id);
+                const casesId = `requirement-${r.id}-cases`;
                 return (
-                  <tr key={r.id}>
+                  <Fragment key={r.id}>
+                  <tr className={isOpen ? 'is-expanded' : undefined}>
                     <td>
-                      <span className="cell-title">{r.title}</span>
+                      {/* The title opens the list of linked cases under the row. */}
+                      <button
+                        type="button"
+                        className="row-button disclosure-button"
+                        aria-expanded={isOpen}
+                        aria-controls={isOpen ? casesId : undefined}
+                        onClick={() => toggle(r.id)}
+                      >
+                        <ChevronRight size={16} aria-hidden="true" className="disclosure-icon" />
+                        {r.title}
+                      </button>
                       {r.externalRef && <span className="ref"> {r.externalRef}</span>}
                       {r.archivedAt && <> <Tag tone="outline">Archived</Tag></>}
-                      {r.cases.length > 0 ? (
+                      {isOpen ? null : r.cases.length > 0 ? (
                         <p className="cell-sub">
                           {shown.map((c) => (c.testCase.archivedAt ? `${c.testCase.title} (archived)` : c.testCase.title)).join(', ')}
                           {r.cases.length > shown.length && ` and ${r.cases.length - shown.length} more`}
@@ -377,6 +468,14 @@ export function RequirementsPage() {
                     </td>
                     )}
                   </tr>
+                  {isOpen && (
+                    <tr className="requirement-cases-row">
+                      <td colSpan={editRepository ? 3 : 2}>
+                        <RequirementCases id={casesId} projectId={projectId} requirement={r} coverage={coverage} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

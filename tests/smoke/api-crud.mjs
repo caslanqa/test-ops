@@ -127,6 +127,16 @@ check('a failing case stays visible next to a frequently run one', breakdown.FAI
 check('each case counts with its latest attempt in its latest run', breakdown.PASSED === 3, JSON.stringify(breakdown));
 check('a case that never ran is not counted as executed', Object.values(breakdown).reduce((a, b) => a + b, 0) === 4
   && coverage.find((r) => r.requirementId === covered.id)?.caseCount === 5, JSON.stringify(breakdown));
+// Each linked case with its latest result and the run it is in, for the list under a requirement.
+const perCase = new Map((coverage.find((r) => r.requirementId === covered.id)?.cases ?? []).map((c) => [c.testCaseId, c.latestResult]));
+check('coverage lists every linked case', perCase.size === 5, JSON.stringify([...perCase.keys()]));
+const fixedLatest = perCase.get(fixedLater.id);
+const newerRun = await ok(admin, 'GET', `${P}/runs/${newer.id}`);
+check("...with each case's latest result and its run",
+  fixedLatest?.status === 'PASSED' && fixedLatest.runId === newer.id && fixedLatest.runTitle === 'Coverage nightly'
+    && fixedLatest.runCaseId === newerRun.runCases.find((rc) => rc.testCaseId === fixedLater.id)?.id
+    && perCase.get(failing.id)?.status === 'FAILED' && perCase.get(retried.id)?.status === 'PASSED', JSON.stringify(fixedLatest));
+check('...and none for a case that never ran', perCase.get(neverRun.id) === null);
 const empty = coverage.find((r) => r.requirementId === uncovered.id);
 check('a requirement without cases has no coverage', empty?.hasCoverage === false && empty.caseCount === 0
   && Object.keys(empty.lastResultStatusBreakdown).length === 0, JSON.stringify(empty));

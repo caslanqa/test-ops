@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, ProjectRole, ResultStatus } from "@prisma/client";
+import { Prisma, ProjectRole, ResultSource, ResultStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRequirementDto } from "./dto/create-requirement.dto";
@@ -9,6 +9,17 @@ import { pageArgs } from "../common/pagination";
 import { ListRequirementCasesQueryDto } from "./dto/list-requirement-cases-query.dto";
 
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
+
+/** A case's most recent result in the project, and where it is (coverage report). */
+interface LatestCaseResult {
+  resultId: string;
+  status: ResultStatus;
+  source: ResultSource;
+  createdAt: Date;
+  runId: string;
+  runTitle: string;
+  runCaseId: string;
+}
 
 @Injectable()
 export class RequirementsService {
@@ -150,6 +161,8 @@ export class RequirementsService {
 
   // FR-022: coverage report showing untested requirements and the latest status of their cases.
   // Linked cases without any result are left out of the breakdown; clients count them as untested.
+  // `cases` gives each linked case's latest result with the run it is in, so a client can list
+  // them under the requirement and link to the result.
   async coverage(userId: string, projectId: string) {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(
       userId,
@@ -159,14 +172,14 @@ export class RequirementsService {
       where: { projectId, archivedAt: null },
       select: { id: true, title: true, cases: { select: { testCaseId: true } } },
     });
-    const latestStatus = await this.latestStatusByCase(projectId, [
+    const latest = await this.latestResultByCase(projectId, [
       ...new Set(requirements.flatMap((r) => r.cases.map((rc) => rc.testCaseId))),
     ]);
 
     return requirements.map((requirement) => {
       const lastResultStatusBreakdown: Record<string, number> = {};
       for (const { testCaseId } of requirement.cases) {
-        const status = latestStatus.get(testCaseId);
+        const status = latest.get(testCaseId)?.status;
         if (status) {
           lastResultStatusBreakdown[status] = (lastResultStatusBreakdown[status] ?? 0) + 1;
         }
@@ -177,6 +190,10 @@ export class RequirementsService {
         caseCount: requirement.cases.length,
         hasCoverage: requirement.cases.length > 0,
         lastResultStatusBreakdown,
+        cases: requirement.cases.map(({ testCaseId }) => ({
+          testCaseId,
+          latestResult: latest.get(testCaseId) ?? null,
+        })),
       };
     });
   }
@@ -186,10 +203,11 @@ export class RequirementsService {
    * case is ranked on its own, so a case that runs often can't push the others out of the report.
    * Only the latest attempt in each run is a candidate, so a retry wins over the attempts it replaced.
    */
-  private async latestStatusByCase(projectId: string, testCaseIds: string[]) {
-    if (testCaseIds.length === 0) return new Map<string, ResultStatus>();
-    const rows = await this.prisma.$queryRaw<{ testCaseId: string; status: ResultStatus }[]>`
-      SELECT DISTINCT ON (rc."testCaseId") rc."testCaseId", r."status"
+  private async latestResultByCase(projectId: string, testCaseIds: string[]) {
+    if (testCaseIds.length === 0) return new Map<string, LatestCaseResult>();
+    const rows = await this.prisma.$queryRaw<(LatestCaseResult & { testCaseId: string })[]>`
+      SELECT DISTINCT ON (rc."testCaseId") rc."testCaseId", r."id" AS "resultId", r."status",
+        r."source", r."createdAt", rc."id" AS "runCaseId", tr."id" AS "runId", tr."title" AS "runTitle"
       FROM "results" r
       JOIN "run_cases" rc ON rc."id" = r."runCaseId"
       JOIN "test_runs" tr ON tr."id" = rc."runId"
@@ -197,7 +215,7 @@ export class RequirementsService {
         AND rc."testCaseId" = ANY(${testCaseIds})
         AND r."isLatest"
       ORDER BY rc."testCaseId", r."createdAt" DESC, r."attemptNumber" DESC, r."id" DESC`;
-    return new Map(rows.map((row) => [row.testCaseId, row.status]));
+    return new Map(rows.map(({ testCaseId, ...result }) => [testCaseId, result]));
   }
 
   /** The test cases linked to a requirement, as a paged list of cases. */
