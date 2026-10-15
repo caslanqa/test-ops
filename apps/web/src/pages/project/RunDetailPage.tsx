@@ -74,6 +74,9 @@ interface RunDetail {
   environment: string | null;
   build: string | null;
   configuration: string | null;
+  /** A link the run carries, e.g. the CI job that ran its automated cases ("GitHub Actions"). */
+  externalLinkType: string | null;
+  externalLinkRef: string | null;
   createdAt: string;
   completedAt: string | null;
   runCases: RunCase[];
@@ -984,6 +987,21 @@ export function RunDetailPage() {
               <div>
                 <dt>Configuration</dt>
                 <dd>{run.configuration}</dd>
+              </div>
+            )}
+            {run.externalLinkRef && (
+              <div>
+                <dt>{run.externalLinkType ?? 'Link'}</dt>
+                <dd>
+                  {/* Only web addresses become links, so a stored javascript: URL can't run. */}
+                  {/^https?:\/\//i.test(run.externalLinkRef) ? (
+                    <a href={run.externalLinkRef} target="_blank" rel="noopener noreferrer">
+                      View the job<span className="visually-hidden"> (opens in a new tab)</span>
+                    </a>
+                  ) : (
+                    run.externalLinkRef
+                  )}
+                </dd>
               </div>
             )}
             <div>
