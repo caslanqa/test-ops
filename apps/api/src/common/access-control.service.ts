@@ -202,6 +202,16 @@ export class AccessControlService {
     throwIfMissing(ids, found, "Test cases not found in this project");
   }
 
+  async assertRequirementsInProject(projectId: string, requirementIds: string[]) {
+    const ids = [...new Set(requirementIds)];
+    if (ids.length === 0) return;
+    const found = await this.prisma.requirement.findMany({
+      where: { id: { in: ids }, projectId },
+      select: { id: true },
+    });
+    throwIfMissing(ids, found, "Requirements not found in this project");
+  }
+
   async assertResultsInProject(projectId: string, resultIds: string[]) {
     const ids = [...new Set(resultIds)];
     if (ids.length === 0) return;

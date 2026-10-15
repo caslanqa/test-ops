@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsNotEmpty,
@@ -16,6 +17,9 @@ import {
   CaseType,
 } from "@prisma/client";
 import { TestCaseStepDto } from "./test-case-step.dto";
+
+/** Most requirements one case can be linked to in a single request. */
+export const REQUIREMENT_LINKS_MAX = 200;
 
 export class CreateTestCaseDto {
   @IsOptional()
@@ -68,4 +72,13 @@ export class CreateTestCaseDto {
   @ValidateNested({ each: true })
   @Type(() => TestCaseStepDto)
   steps?: TestCaseStepDto[];
+  /**
+   * Requirements of the same project this case covers. On update the list replaces the case's
+   * links; leave it out to keep them, or send [] to remove them all.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(REQUIREMENT_LINKS_MAX)
+  @IsString({ each: true })
+  requirementIds?: string[];
 }
