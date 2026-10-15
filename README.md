@@ -164,6 +164,7 @@ A project admin can connect CI under **Integrations**. When a run starts with ca
 - **Headers and signature.** Extra headers, such as `Authorization`, are stored encrypted and never shown again. Every call is signed in `X-TestOps-Signature-256` (HMAC-SHA256 of the body with the webhook's secret).
 - **Retries.** Failed calls (network errors, 5xx, 429) are tried twice more. The run page shows how the last call went and can trigger CI again.
 - **No loops.** Runs that CI starts itself never call the webhook.
+- **TestOps address.** The calls carry the TestOps address (`api_url`, run links) from `PUBLIC_URL`, or else from the address the admin saved the webhook from. It is never taken from the request that starts a run, so whoever starts one can't send CI, and the token CI reports with, to another server.
 - **Private addresses.** Webhooks can't reach private or local network addresses, which is checked again when the call is made, unless `WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
 
 ### HTTPS and reverse proxies

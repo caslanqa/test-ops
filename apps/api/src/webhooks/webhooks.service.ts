@@ -89,7 +89,7 @@ export class WebhooksService {
    * Creates or changes the webhook. A new webhook gets a signing secret, returned this once; the
    * header values are encrypted and never returned.
    */
-  async save(userId: string, projectId: string, dto: SaveWebhookDto) {
+  async save(userId: string, projectId: string, dto: SaveWebhookDto, origin: string) {
     await this.requireAdmin(userId, projectId);
     try {
       assertWebhookUrl(dto.url, this.allowPrivate);
@@ -112,11 +112,13 @@ export class WebhooksService {
                 : null,
             headerNames: dto.headers.map((h) => h.name),
           };
+    // Fixed here, by an admin, rather than taken from whoever starts a run later.
+    const baseUrl = this.publicUrl ?? origin;
     const existing = await this.prisma.projectWebhook.findUnique({ where: { projectId } });
     if (existing) {
       const webhook = await this.prisma.projectWebhook.update({
         where: { projectId },
-        data: { url: dto.url, enabled: dto.enabled ?? existing.enabled, ...headers },
+        data: { url: dto.url, baseUrl, enabled: dto.enabled ?? existing.enabled, ...headers },
       });
       return { webhook: await this.view(webhook), secret: null };
     }
@@ -125,6 +127,7 @@ export class WebhooksService {
       data: {
         projectId,
         url: dto.url,
+        baseUrl,
         enabled: dto.enabled ?? true,
         secretEncrypted: this.box.seal(secret),
         ...headers,
@@ -151,12 +154,12 @@ export class WebhooksService {
   }
 
   /** Sends a test event and returns how it went, so the settings can be checked right away. */
-  async ping(userId: string, projectId: string, origin: string) {
+  async ping(userId: string, projectId: string) {
     await this.requireAdmin(userId, projectId);
     const webhook = await this.prisma.projectWebhook.findUnique({ where: { projectId } });
     if (!webhook) throw new NotFoundException("This project has no webhook");
     const project = await this.prisma.project.findUniqueOrThrow({ where: { id: projectId } });
-    const base = this.baseUrl(origin);
+    const base = this.baseUrl(webhook);
     const delivery = await this.deliver({
       webhook,
       event: "ping",
@@ -174,12 +177,12 @@ export class WebhooksService {
    * Called after a run starts: tells CI about it when the run has cases for automation. It never
    * throws, so a webhook problem can't fail the run; the outcome is recorded as a delivery.
    */
-  async runStarted(run: { id: string; projectId: string; source: RunSource }, origin: string) {
+  async runStarted(run: { id: string; projectId: string; source: RunSource }) {
     if (run.source === RunSource.CI) return;
     try {
       const webhook = await this.prisma.projectWebhook.findUnique({ where: { projectId: run.projectId } });
       if (!webhook?.enabled) return;
-      const target = await this.runTarget(webhook, run.id, origin);
+      const target = await this.runTarget(webhook, run.id);
       if (target) await this.deliver(target);
     } catch (error) {
       this.logger.error(`The webhook for run ${run.id} failed: ${error instanceof Error ? error.message : error}`);
@@ -187,14 +190,14 @@ export class WebhooksService {
   }
 
   /** "Trigger CI again" on the run page: for people who can run tests, on open runs. */
-  async retrigger(userId: string, projectId: string, runId: string, origin: string) {
+  async retrigger(userId: string, projectId: string, runId: string) {
     await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, EXECUTE_ROLES);
     const run = await this.prisma.testRun.findFirst({ where: { id: runId, projectId } });
     if (!run) throw new NotFoundException("Run not found");
     if (run.status !== RunStatus.OPEN) throw new BadRequestException("This run is completed; reopen it to trigger CI again");
     const webhook = await this.prisma.projectWebhook.findUnique({ where: { projectId } });
     if (!webhook?.enabled) throw new BadRequestException("This project has no CI webhook, or it is switched off");
-    const target = await this.runTarget(webhook, runId, origin);
+    const target = await this.runTarget(webhook, runId);
     if (!target) throw new BadRequestException("No case of this run is set to run by automation");
     return this.deliveryView(await this.deliver(target));
   }
@@ -214,12 +217,13 @@ export class WebhooksService {
 
   // ---------------------------------------------------------------------------
 
-  private baseUrl(origin: string) {
-    return this.publicUrl ?? origin;
+  /** The TestOps address for a webhook's calls: PUBLIC_URL, or the one fixed when it was saved. */
+  private baseUrl(webhook: ProjectWebhook) {
+    return this.publicUrl ?? webhook.baseUrl;
   }
 
   /** The run.started call for a run, or null when none of its cases is for automation. */
-  private async runTarget(webhook: ProjectWebhook, runId: string, origin: string): Promise<DeliveryTarget | null> {
+  private async runTarget(webhook: ProjectWebhook, runId: string): Promise<DeliveryTarget | null> {
     const run = await this.prisma.testRun.findUniqueOrThrow({
       where: { id: runId },
       include: {
@@ -232,7 +236,7 @@ export class WebhooksService {
       },
     });
     if (run.runCases.length === 0) return null;
-    const base = this.baseUrl(origin);
+    const base = this.baseUrl(webhook);
     // The keys of the cases' e2e:<key> tags, for running just these tests (e.g. a grep).
     const keys = [
       ...new Set(run.runCases.flatMap((rc) => rc.testCase.tags.filter((t) => t.startsWith("e2e:")).map((t) => t.slice(4)))),

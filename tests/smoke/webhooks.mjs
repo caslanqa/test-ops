@@ -9,6 +9,7 @@
 // Needs the seeded admin (prisma/seed.js); BASE, ADMIN_EMAIL and ADMIN_PASSWORD change the target.
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
@@ -69,6 +70,8 @@ if (!deliverMode) {
   await expectStatus('a private IP address is refused', 400, admin, 'PUT', `${P}/webhook`, { url: 'http://127.0.0.1:8099/hook' });
   await expectStatus('...and so is localhost', 400, admin, 'PUT', `${P}/webhook`, { url: 'https://localhost/hook' });
   await expectStatus('...and the cloud metadata address', 400, admin, 'PUT', `${P}/webhook`, { url: 'http://169.254.169.254/latest/meta-data' });
+  await expectStatus('...and loopback written as IPv4-mapped IPv6 in hex', 400, admin, 'PUT', `${P}/webhook`, { url: 'http://[::ffff:7f00:1]:8099/hook' });
+  await expectStatus('...and a NAT64 address', 400, admin, 'PUT', `${P}/webhook`, { url: 'http://[64:ff9b::a00:1]/hook' });
   await expectStatus('only http(s) URLs are accepted', 400, admin, 'PUT', `${P}/webhook`, { url: 'ftp://ci.example.com/hook' });
   await expectStatus('credentials in the URL are refused', 400, admin, 'PUT', `${P}/webhook`, { url: 'https://user:pass@ci.example.com/hook' });
   await expectStatus('headers TestOps sets itself are refused', 400, admin, 'PUT', `${P}/webhook`, { url: 'https://ci.example.com/hook', headers: [{ name: 'Content-Type', value: 'text/plain' }] });
@@ -109,8 +112,9 @@ if (!deliverMode) {
   check('...and the project has none', (await ok(admin, 'GET', `${P}/webhook`)).webhook === null);
 } else {
   console.log('--- Calls to a receiver in the app container ---');
-  // Prints every request as a JSON line; /fail answers 500 and /forbidden 401, the rest 204.
-  const receiverCode = `const http=require('http');http.createServer((q,s)=>{let b='';q.on('data',c=>b+=c);q.on('end',()=>{const code=q.url.startsWith('/fail')?500:q.url.startsWith('/forbidden')?401:204;console.log(JSON.stringify({path:q.url,headers:q.headers,body:b}));s.writeHead(code);s.end(code===204?'':'nope');});}).listen(8099,'127.0.0.1',()=>console.log('READY'));`;
+  // Prints every request as a JSON line; /fail answers 500, /forbidden 401, /slow sends a byte every
+  // half second and never ends, the rest 204.
+  const receiverCode = `const http=require('http');http.createServer((q,s)=>{let b='';q.on('data',c=>b+=c);q.on('end',()=>{console.log(JSON.stringify({path:q.url,headers:q.headers,body:b}));if(q.url.startsWith('/slow')){s.writeHead(200);setInterval(()=>s.write('.'),500);return;}const code=q.url.startsWith('/fail')?500:q.url.startsWith('/forbidden')?401:204;s.writeHead(code);s.end(code===204?'':'nope');});}).listen(8099,'127.0.0.1',()=>console.log('READY'));`;
   const receiver = spawn('docker', ['compose', 'exec', '-T', 'app', 'node', '-e', receiverCode], { stdio: ['ignore', 'pipe', 'inherit'] });
   const received = [];
   let ready = false;
@@ -157,6 +161,31 @@ if (!deliverMode) {
         && payload.automation_keys?.join() === 'checkout-card', JSON.stringify(payload));
     check('...and the run shows it was delivered', (await ciStatus(admin, P, run.id)).lastDelivery?.status === 'SUCCEEDED');
 
+    // Whoever starts a run can't choose the TestOps address CI is sent to (and reports its token to).
+    const forged = await new Promise((resolve, reject) => {
+      const body = JSON.stringify({ title: 'Forged host', testCaseIds: [automated.id] });
+      const target = new URL(`${BASE}${P}/runs`);
+      const req = httpRequest(target, {
+        method: 'POST',
+        headers: {
+          host: 'evil.example.com',
+          'x-forwarded-host': 'evil.example.com',
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+          authorization: `Bearer ${admin}`,
+        },
+      }, (res) => { let t = ''; res.on('data', (c) => t += c); res.on('end', () => resolve(JSON.parse(t))); });
+      req.on('error', reject);
+      req.end(body);
+    });
+    const forgedCall = await waitFor((r) => r.headers['x-testops-event'] === 'run.started' && JSON.parse(r.body).client_payload.run.id === forged.id);
+    const forgedPayload = JSON.parse(forgedCall?.body ?? '{}').client_payload ?? {};
+    check("a run started with a forged Host keeps the webhook's TestOps address",
+      forgedPayload.api_url === payload.api_url && !(forgedCall?.body ?? '').includes('evil.example.com'), forgedPayload.api_url);
+
+    await ok(admin, 'PUT', `${P}/webhook`, { url: 'http://127.0.0.1:8099/slow' });
+    const slow = await ok(admin, 'POST', `${P}/webhook/ping`);
+    check('a server that keeps a call open is cut off after 10 s', /No answer within 10 s/.test(slow.error ?? ''), JSON.stringify(slow));
     await ok(admin, 'PUT', `${P}/webhook`, { url: 'http://127.0.0.1:8099/forbidden' });
     const refused = await ok(admin, 'POST', `${P}/runs/${run.id}/ci`);
     check('a 4xx answer fails at once, without retries', refused.status === 'FAILED' && refused.attempts === 1 && refused.responseCode === 401, JSON.stringify(refused));

@@ -8,6 +8,7 @@ CREATE TABLE "project_webhooks" (
     "id" TEXT NOT NULL,
     "projectId" TEXT NOT NULL,
     "url" TEXT NOT NULL,
+    "baseUrl" TEXT NOT NULL,
     "headersEncrypted" TEXT,
     "headerNames" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "secretEncrypted" TEXT NOT NULL,

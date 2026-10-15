@@ -25,8 +25,13 @@ export class WebhooksController {
    */
   @Put("webhook")
   @WebSessionOnly()
-  save(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string, @Body() dto: SaveWebhookDto) {
-    return this.webhooksService.save(user.id, projectId, dto);
+  save(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() dto: SaveWebhookDto,
+    @Req() request: Request,
+  ) {
+    return this.webhooksService.save(user.id, projectId, dto, requestOrigin(request));
   }
 
   @Delete("webhook")
@@ -46,8 +51,8 @@ export class WebhooksController {
   /** Sends a test event ("ping") and returns how the call went. */
   @Post("webhook/ping")
   @WebSessionOnly()
-  ping(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string, @Req() request: Request) {
-    return this.webhooksService.ping(user.id, projectId, requestOrigin(request));
+  ping(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
+    return this.webhooksService.ping(user.id, projectId);
   }
 
   /** Whether CI was told about the run: the project has a webhook, and how its last call went. */
@@ -66,8 +71,7 @@ export class WebhooksController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Param("runId") runId: string,
-    @Req() request: Request,
   ) {
-    return this.webhooksService.retrigger(user.id, projectId, runId, requestOrigin(request));
+    return this.webhooksService.retrigger(user.id, projectId, runId);
   }
 }

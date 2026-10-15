@@ -136,6 +136,10 @@ model ProjectWebhook {
   id               String   @id @default(uuid())
   projectId        String   @unique
   url              String
+  /// The TestOps address put in the calls (api_url, run links): PUBLIC_URL, or else the address the
+  /// admin saved the webhook from. Never taken from the request that starts a run, so whoever starts
+  /// one can't point CI, and the token CI reports with, at another server.
+  baseUrl          String
   /// Extra request headers, e.g. Authorization for GitHub: encrypted JSON of { name: value }.
   headersEncrypted String?
   /// The names of those headers, so they can be listed without decrypting them.

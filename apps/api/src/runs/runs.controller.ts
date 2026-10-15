@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { RunStatus } from "@prisma/client";
 import { RunsService } from "./runs.service";
@@ -10,9 +10,8 @@ import {
   CurrentUser,
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
-import type { Request, Response } from "express";
+import type { Response } from "express";
 import { WebhooksService } from "../webhooks/webhooks.service";
-import { requestOrigin } from "../webhooks/request-origin";
 import { PagedResponse, sendPage } from "../common/pagination";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
 
@@ -53,10 +52,9 @@ export class RunsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Body() dto: CreateRunDto,
-    @Req() request: Request,
   ) {
     const run = await this.runsService.create(user.id, projectId, dto);
-    void this.webhooksService.runStarted(run, requestOrigin(request));
+    void this.webhooksService.runStarted(run);
     return run;
   }
 

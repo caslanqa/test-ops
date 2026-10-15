@@ -25,17 +25,29 @@ for (const [network, prefix] of [
   ["172.16.0.0", 12], // private
   ["192.0.0.0", 24], // IETF protocol assignments
   ["192.168.0.0", 16], // private
+  ["192.0.2.0", 24], // documentation
   ["198.18.0.0", 15], // benchmarking
+  ["198.51.100.0", 24], // documentation
+  ["203.0.113.0", 24], // documentation
   ["224.0.0.0", 4], // multicast
   ["240.0.0.0", 4], // reserved and broadcast
 ] as const) {
   blocked.addSubnet(network, prefix, "ipv4");
 }
+// IPv6 forms that carry an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo) are refused
+// whole: written in hex (::ffff:7f00:1) they would otherwise slip past the IPv4 list.
 for (const [network, prefix] of [
-  ["::", 128], // unspecified
-  ["::1", 128], // loopback
+  ["::", 96], // unspecified, loopback and IPv4-compatible
+  ["::ffff:0:0", 96], // IPv4-mapped
+  ["64:ff9b::", 96], // NAT64
+  ["64:ff9b:1::", 48], // local-use NAT64
+  ["100::", 64], // discard
+  ["2001::", 32], // Teredo
+  ["2001:db8::", 32], // documentation
+  ["2002::", 16], // 6to4
   ["fc00::", 7], // unique local
   ["fe80::", 10], // link-local
+  ["fec0::", 10], // site-local (deprecated)
   ["ff00::", 8], // multicast
 ] as const) {
   blocked.addSubnet(network, prefix, "ipv6");
@@ -46,9 +58,6 @@ export function isPrivateAddress(address: string): boolean {
   const version = isIP(address);
   if (version === 4) return blocked.check(address, "ipv4");
   if (version !== 6) return true;
-  // IPv4-mapped IPv6 (::ffff:10.0.0.1) is checked as the IPv4 address it carries.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
-  if (mapped) return blocked.check(mapped[1], "ipv4");
   return blocked.check(address, "ipv6");
 }
 
@@ -81,7 +90,11 @@ export interface PostResult {
   body: string;
 }
 
-/** POSTs `body` to `url`; rejects on network errors, timeouts and refused addresses. */
+/**
+ * POSTs `body` to `url`; rejects on network errors, refused addresses, and when the whole call
+ * (connecting, sending, and the answer) takes longer than `timeoutMs`. Only the start of the answer
+ * is read; the rest is dropped, so a server that keeps sending can't hold the call open.
+ */
 export function safePost(
   url: URL,
   body: string,
@@ -107,25 +120,43 @@ export function safePost(
       reject(new WebhookAddressError("The webhook URL points to a private or local network address"));
       return;
     }
+    let settled = false;
+    const finish = (result: PostResult | Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    };
     const request = (url.protocol === "https:" ? https : http).request(
       url,
       {
         method: "POST",
         headers: { ...headers, "content-length": Buffer.byteLength(body) },
         lookup,
-        timeout: timeoutMs,
       },
       (response) => {
         let text = "";
+        const done = () => {
+          finish({ status: response.statusCode ?? 0, body: text.slice(0, 1000) });
+          response.destroy();
+        };
         response.setEncoding("utf8");
         response.on("data", (chunk: string) => {
-          if (text.length < 1000) text += chunk;
+          text += chunk;
+          if (text.length >= 1000) done();
         });
-        response.on("end", () => resolve({ status: response.statusCode ?? 0, body: text.slice(0, 1000) }));
+        response.on("end", done);
+        response.on("error", (error) => finish(error));
       },
     );
-    request.on("timeout", () => request.destroy(new Error(`No answer within ${timeoutMs / 1000} s`)));
-    request.on("error", reject);
+    // One deadline for the whole call: a socket timeout alone would let a server that sends a byte
+    // now and then keep it open for ever.
+    const deadline = setTimeout(() => {
+      request.destroy();
+      finish(new Error(`No answer within ${timeoutMs / 1000} s`));
+    }, timeoutMs);
+    request.on("error", (error) => finish(error));
     request.end(body);
   });
 }
