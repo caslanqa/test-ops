@@ -31,15 +31,16 @@ export class WorkspacesService {
    * member could create a workspace and invite arbitrary email addresses, which creates accounts
    * on a closed installation. A server without any workspace is still open so the first one can
    * be created. This is an interim rule until the Installation Admin role (FR-090) exists.
+   * Demo workspaces don't count: everyone is the admin of their own demo (DemoService).
    */
   private async assertMayCreateWorkspace(userId: string) {
     if (this.config.get<boolean>("auth.selfRegistration") ?? false) return;
     const [isAdmin, anyWorkspace] = await Promise.all([
       this.prisma.workspaceMember.findFirst({
-        where: { userId, role: WorkspaceRole.ADMIN },
+        where: { userId, role: WorkspaceRole.ADMIN, workspace: { isDemo: false } },
         select: { id: true },
       }),
-      this.prisma.workspace.findFirst({ select: { id: true } }),
+      this.prisma.workspace.findFirst({ where: { isDemo: false }, select: { id: true } }),
     ]);
     if (anyWorkspace && !isAdmin) {
       throw new ForbiddenException(

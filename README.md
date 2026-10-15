@@ -91,7 +91,7 @@ The seed command prints the first admin credentials. Set `SEED_ADMIN_EMAIL` as a
 
 The installer creates an admin account with a starter workspace and demo project. Change the initial password from **Account** after signing in.
 
-By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account. While sign-up is disabled, only admins of an existing workspace can create another workspace, so other users can't bring new accounts in by inviting people into workspaces of their own. Invitations and role changes need a signed-in person; API tokens get 403 for them. This is an interim rule: a separate Installation Admin role (design-doc FR-090) is not implemented yet, so any admin of any workspace can still invite people.
+By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account. While sign-up is disabled, only admins of an existing workspace can create another workspace, so other users can't bring new accounts in by inviting people into workspaces of their own. Being the admin of one's own [demo workspace](#demo-workspace) doesn't count, and demo workspaces can't send invitations then. Invitations and role changes need a signed-in person; API tokens get 403 for them. This is an interim rule: a separate Installation Admin role (design-doc FR-090) is not implemented yet, so any admin of any workspace can still invite people.
 
 Workspace admins manage access on the workspace's **Permissions** tab: one table with each member's workspace role and their role in every project (Admin, Tester, Automation, Viewer or no access). Workspace admins are admins in every project of their workspace. The **Settings** tab renames or deletes the workspace. On the **Projects** tab, project admins edit, archive and restore their projects, and workspace admins can delete an archived project for good.
 
@@ -153,7 +153,7 @@ Every user, including someone who has just signed up, gets a **DEMO** workspace 
 The shop and its Playwright tests are in [`examples/demo-shop`](examples/demo-shop).
 
 - **Made for each user.** The server makes the workspace the first time a user opens their workspace list; there is nothing to set up. Existing users get theirs the same way after an upgrade.
-- **Theirs to change.** The user is the workspace's admin: they can start runs from the plan, assign cases, record results, file defects, invite people, rename it or delete it. Nobody else sees it unless they invite them.
+- **Theirs to change.** The user is the workspace's admin: they can start runs from the plan, assign cases, record results, file defects, rename it or delete it, and invite people while sign-up is open. Nobody else sees it unless they invite them.
 - **Made once.** A deleted demo doesn't come back by itself. **Create a demo workspace** on the Workspaces page makes a fresh one (`POST /api/v1/demo-workspace`).
 - **Switching it off.** Set `DEMO_WORKSPACE=false` to make no new demos; existing ones stay.
 - **Earlier versions** had one shared, read-only DEMO workspace. The server deletes it at startup.
