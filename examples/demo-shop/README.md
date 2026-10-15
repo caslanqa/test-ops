@@ -96,7 +96,7 @@ A run started from a plan can send its automated cases to CI and get their resul
 3. **Start on the dispatch.** Use a workflow that starts on `repository_dispatch` with type `testops.run.started`, like [demo-shop.yml](../../.github/workflows/demo-shop.yml). It:
    - runs only the run's cases (`--grep` built from `client_payload.automation_keys`; each test is tagged `@<key>`);
    - sets `TESTOPS_URL`, `TESTOPS_PROJECT_ID` and `TESTOPS_RUN_ID` from the payload.
-4. **Start a run.** Start a run from a plan and choose which cases are Automation. TestOps calls the webhook, CI runs those tests, and their results appear in the run. The run also gets a link to the CI job.
+4. **Start a run.** In the plan's case list, set the cases CI should run to **Automation**, then start a run from the plan. TestOps calls the webhook, CI runs those tests, and their results appear in the run. The run also gets a link to the CI job.
 
 ### Linking tests to cases
 

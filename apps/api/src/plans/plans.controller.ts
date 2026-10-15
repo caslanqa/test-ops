@@ -4,8 +4,7 @@ import { PlansService } from "./plans.service";
 import { CreatePlanDto } from "./dto/create-plan.dto";
 import { UpdatePlanDto } from "./dto/update-plan.dto";
 import { AddPlanCasesDto } from "./dto/add-plan-cases.dto";
-import { AssignCaseDto } from "../common/dto/assign-case.dto";
-import { AssignPlanCasesDto } from "./dto/assign-plan-cases.dto";
+import { UpdatePlanCaseDto, UpdatePlanCasesDto } from "./dto/update-plan-cases.dto";
 import {
   CurrentUser,
   AuthenticatedUser,
@@ -98,29 +97,29 @@ export class PlansController {
   }
 
   /**
-   * Sets or clears who tests several cases of the plan at once (all or none); runs started from the
-   * plan take the assignees over.
+   * Sets who tests several cases of the plan and/or how they run, all at once (all or none); runs
+   * started from the plan take both over.
    */
   @Patch(":planId/cases")
-  assignCases(
+  updateCases(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Param("planId") planId: string,
-    @Body() dto: AssignPlanCasesDto,
+    @Body() { testCaseIds, ...changes }: UpdatePlanCasesDto,
   ) {
-    return this.plansService.assignCases(user.id, projectId, planId, dto.testCaseIds, dto.assigneeId);
+    return this.plansService.updateCases(user.id, projectId, planId, testCaseIds, changes);
   }
 
-  /** Sets or clears who tests a case of the plan; runs started from the plan take it over. */
+  /** Sets who tests a case of the plan and/or how it runs; runs started from the plan take both over. */
   @Patch(":planId/cases/:caseId")
-  assignCase(
+  updateCase(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Param("planId") planId: string,
     @Param("caseId") caseId: string,
-    @Body() dto: AssignCaseDto,
+    @Body() dto: UpdatePlanCaseDto,
   ) {
-    return this.plansService.assignCase(user.id, projectId, planId, caseId, dto.assigneeId);
+    return this.plansService.updateCase(user.id, projectId, planId, caseId, dto);
   }
 
   @Delete(":planId/cases/:caseId")

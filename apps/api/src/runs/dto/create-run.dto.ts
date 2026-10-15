@@ -51,7 +51,8 @@ export class CreateRunDto {
 
   /**
    * The cases of this run that automation runs (from CI); the others are for testers. It only
-   * affects this run, not the cases. Leave it out to follow each case's automation status.
+   * affects this run, not the cases or the plan. Leave it out to follow the plan's choice for each
+   * case (set in its case list), or, without a plan, each case's automation status.
    */
   @IsOptional()
   @IsArray()
