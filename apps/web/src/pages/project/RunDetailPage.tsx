@@ -19,6 +19,8 @@ import { FormError, LoadError, Loading, PageHeader } from '../../components/Page
 import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
 import { ResultRibbon, StatusLegend } from '../../components/ResultRibbon';
+import { describeDelivery, type WebhookDelivery } from '../../lib/webhooks';
+import { Link as RouterLink } from 'react-router-dom';
 import { StatusChip, Tag } from '../../components/StatusChip';
 import { changedFields, hasChanges } from '../../lib/changes';
 import { formatBytes, formatDate, formatDateTime, formatDuration, plural } from '../../lib/format';
@@ -38,9 +40,6 @@ import { useAuth } from '../../auth/AuthContext';
 import { usePageTitle, useResource } from '../../lib/useResource';
 import { CaseExecution, DefectForResultDialog, EditResultDialog, type SavedResult } from './RunExecution';
 import { Select } from '../../components/Select';
-import { describeDelivery, type WebhookDelivery } from '../../lib/webhooks';
-// The CI status links to the project's integrations.
-import { Link } from 'react-router-dom';
 
 interface CaseSnapshot {
   title: string;
@@ -643,7 +642,7 @@ function RunCiStatus({
       {!configured ? (
         <span className="muted">
           Automated cases wait for results from CI.
-          {isAdmin && <> No CI webhook is set up: <Link to={`/projects/${projectId}/integrations`}>set one up</Link>.</>}
+          {isAdmin && <> No CI webhook is set up: <RouterLink to={`/projects/${projectId}/integrations`}>set one up</RouterLink>.</>}
         </span>
       ) : !lastDelivery ? (
         <span className="muted">CI hasn't been called for this run.</span>
