@@ -190,6 +190,8 @@ An API token cannot create, list or revoke API tokens, change a password, create
 
 The **Help & support** page also links to the API reference and includes an example for submitting automation results from CI.
 
+For a complete example, see [`examples/demo-shop`](examples/demo-shop). It has a small web shop, its Playwright tests, a reporter that sends their results to TestOps and links failures to known defects, and the script that builds the matching DEMO workspace. A GitHub Actions workflow runs the tests every day and reports them to the public demo.
+
 ## Development
 
 Requirements: Node.js 20 or later, pnpm 12.8.1, and Docker.
