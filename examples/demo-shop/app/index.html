@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bean &amp; Leaf – Demo shop</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="#/">Bean &amp; Leaf</a>
+      <nav aria-label="Shop">
+        <a href="#/">Products</a>
+        <a href="#/cart" id="cart-link">Cart <span class="badge" id="cart-count">0</span></a>
+      </nav>
+    </header>
+    <main id="main" tabindex="-1"></main>
+    <!-- Cart changes and payment outcomes are announced here (WCAG 4.1.3). -->
+    <p class="visually-hidden" role="status" id="announcer"></p>
+    <footer class="site-footer">
+      An example shop for the <a href="https://github.com/caslanqa/test-ops/tree/master/examples/demo-shop">TestOps demo</a>.
+      Nothing is sold and no card is charged.
+    </footer>
+    <script src="/app.js"></script>
+  </body>
+</html>

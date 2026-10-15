@@ -87,6 +87,12 @@ jobs:
           bash tests/smoke/attachments.sh
           node tests/smoke/ratelimit.mjs
 
+      # Recreates only the app container with the seeded "default" workspace as the demo workspace.
+      - name: Demo workspace smoke test
+        run: |
+          DEMO_WORKSPACE_ID="$(node tests/smoke/demo-workspace.mjs --print-id)" docker compose up -d --wait --wait-timeout 120 app
+          node tests/smoke/demo-workspace.mjs
+
       # Recreates only the app container with sign-up disabled; the database and seed data stay.
       - name: Closed installation smoke test
         run: |

@@ -1,0 +1,18 @@
+{
+  "name": "testops-demo-shop",
+  "private": true,
+  "description": "An example web shop with Playwright tests that report their results to TestOps",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "seed": "node testops/seed.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.18.8",
+    "typescript": "5.9.3"
+  }
+}

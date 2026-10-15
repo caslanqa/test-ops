@@ -4,7 +4,8 @@ import { useResource } from './useResource';
 export interface ProjectMember {
   id: string;
   role: 'ADMIN' | 'TESTER' | 'AUTOMATION' | 'VIEWER';
-  user: { id: string; email: string; displayName: string };
+  /** Visitors of the demo workspace get members without their email address. */
+  user: { id: string; email?: string; displayName: string };
 }
 
 /** Members of a project; the people cases can be assigned to. */

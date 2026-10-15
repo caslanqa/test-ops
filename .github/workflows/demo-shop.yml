@@ -1,0 +1,74 @@
+name: Demo shop
+
+# Runs the example Playwright tests (examples/demo-shop) against the example shop. On master, on a
+# schedule and when started by hand, the TestOps reporter sends the results to the DEMO workspace,
+# where every signed-in user sees them as an automated run. Pull requests run the same tests
+# without sending anything.
+#
+# Settings: the repository variables TESTOPS_DEMO_URL (API base, e.g. https://testops.example.com/api/v1)
+# and TESTOPS_DEMO_PROJECT_ID, and the secret TESTOPS_DEMO_TOKEN (an API token of the demo account).
+# Without them the tests still run and the results stay in the job.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "examples/demo-shop/**"
+      - ".github/workflows/demo-shop.yml"
+  pull_request:
+    paths:
+      - "examples/demo-shop/**"
+      - ".github/workflows/demo-shop.yml"
+  # Every morning, so the demo always has a recent automated run.
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: demo-shop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Playwright
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/demo-shop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/demo-shop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the tests
+        env:
+          # Only master, the schedule and manual runs report; pull requests keep the demo clean.
+          TESTOPS_URL: ${{ github.event_name != 'pull_request' && vars.TESTOPS_DEMO_URL || '' }}
+          TESTOPS_PROJECT_ID: ${{ github.event_name != 'pull_request' && vars.TESTOPS_DEMO_PROJECT_ID || '' }}
+          TESTOPS_TOKEN: ${{ github.event_name != 'pull_request' && secrets.TESTOPS_DEMO_TOKEN || '' }}
+        run: npx playwright test
+
+      - name: Keep the Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: examples/demo-shop/playwright-report
+          retention-days: 14

@@ -1,9 +1,10 @@
 import { useId, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Boxes, Plus } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Boxes, Info, Plus } from 'lucide-react';
 import { api } from '../api/client';
 import { Dialog } from '../components/Dialog';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../components/Page';
+import { Tag } from '../components/StatusChip';
 import { slugify } from '../lib/format';
 import type { Workspace } from '../lib/projectInfo';
 import { usePageTitle, useResource } from '../lib/useResource';
@@ -96,7 +97,13 @@ function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
 
 export function WorkspacesPage() {
   usePageTitle('Workspaces');
-  const [creating, setCreating] = useState(false);
+  // ?create opens the new-workspace dialog, e.g. from the demo workspace's page.
+  const [params, setParams] = useSearchParams();
+  const [creating, setCreating] = useState(() => params.has('create'));
+  const closeCreate = () => {
+    setCreating(false);
+    if (params.has('create')) setParams({}, { replace: true });
+  };
   const { data: workspaces, error, loading, reload } = useResource(
     () => api.get<Workspace[]>('/workspaces'),
     [],
@@ -113,7 +120,11 @@ export function WorkspacesPage() {
     <>
       <PageHeader
         title="Workspaces"
-        description="Workspaces you're a member of. Projects and roles are managed inside a workspace."
+        description={
+          workspaces?.some((w) => w.isDemo)
+            ? "Workspaces you're a member of, and the demo workspace everyone can look around in."
+            : "Workspaces you're a member of. Projects and roles are managed inside a workspace."
+        }
         actions={createButton}
       />
       {error && <LoadError message={error} onRetry={reload} />}
@@ -124,6 +135,12 @@ export function WorkspacesPage() {
             Create a workspace, then add your first project.
           </EmptyState>
         </div>
+      )}
+      {workspaces && workspaces.length > 0 && workspaces.every((w) => w.isDemo) && (
+        <p className="info-note">
+          <Info size={16} aria-hidden="true" />
+          The demo workspace is read-only. Create a workspace of your own to add cases and run tests.
+        </p>
       )}
       {workspaces && workspaces.length > 0 && (
         <div className="surface table-wrap">
@@ -140,6 +157,7 @@ export function WorkspacesPage() {
                 <tr key={w.id}>
                   <td>
                     <Link to={`/workspaces/${w.id}`} className="row-link">{w.name}</Link>
+                    {w.isDemo && <> <Tag tone="outline">Demo</Tag></>}
                   </td>
                   <td className="muted">{w.slug}</td>
                 </tr>
@@ -148,7 +166,7 @@ export function WorkspacesPage() {
           </table>
         </div>
       )}
-      <CreateWorkspaceDialog open={creating} onClose={() => setCreating(false)} />
+      <CreateWorkspaceDialog open={creating} onClose={closeCreate} />
     </>
   );
 }
