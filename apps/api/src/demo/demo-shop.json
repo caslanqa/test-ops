@@ -1,0 +1,265 @@
+{
+  "workspace": { "name": "DEMO", "slug": "demo" },
+  "project": {
+    "key": "SHOP",
+    "name": "Bean & Leaf shop",
+    "description": "An example web shop with manual checks and Playwright tests, to show what TestOps can do. Source: github.com/caslanqa/test-ops/tree/master/examples/demo-shop"
+  },
+  "suites": [
+    {
+      "name": "Catalog",
+      "description": "Browsing and searching the products.",
+      "cases": [
+        {
+          "key": "catalog-list",
+          "title": "The catalog lists every product with its price",
+          "priority": "HIGH",
+          "type": "SMOKE",
+          "steps": [
+            { "action": "Open the shop", "expectedResult": "Espresso beans, Filter coffee, Green tea and Ceramic mug are listed" },
+            { "action": "Look at the espresso beans", "expectedResult": "They cost €9.90" }
+          ]
+        },
+        {
+          "key": "catalog-search",
+          "title": "Searching narrows the catalog",
+          "steps": [
+            { "action": "Search for \"tea\"", "expectedResult": "Only Green tea, 100 g is listed" },
+            { "action": "Search for \"chocolate\"", "expectedResult": "\"No products match your search.\" is shown" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cart",
+      "description": "Adding, changing and removing products; totals and shipping.",
+      "cases": [
+        {
+          "key": "cart-add",
+          "title": "Adding products updates the cart badge and the totals",
+          "priority": "HIGH",
+          "steps": [
+            { "action": "Add Espresso beans twice and a Ceramic mug", "expectedResult": "The cart badge shows 3" },
+            { "action": "Open the cart", "expectedResult": "Subtotal €31.80, shipping €4.90, total €36.70" }
+          ]
+        },
+        {
+          "key": "cart-quantity",
+          "title": "Changing the quantity updates the totals",
+          "preconditions": "Filter coffee, 500 g is in the cart.",
+          "steps": [{ "action": "Set the quantity to 2 and leave the field", "expectedResult": "Subtotal €29.00, total €33.90" }]
+        },
+        {
+          "key": "cart-remove",
+          "title": "Removing the last product empties the cart",
+          "preconditions": "Only a Ceramic mug is in the cart.",
+          "steps": [{ "action": "Remove the Ceramic mug", "expectedResult": "\"Your cart is empty.\" is shown and the badge shows 0" }]
+        },
+        {
+          "key": "cart-free-shipping",
+          "title": "Orders from €40 ship for free",
+          "steps": [{ "action": "Put three Filter coffee packs in the cart (€43.50)", "expectedResult": "Shipping is Free and the total is €43.50" }]
+        }
+      ]
+    },
+    {
+      "name": "Discounts",
+      "description": "Discount codes in the cart.",
+      "cases": [
+        {
+          "key": "discount-valid",
+          "title": "A valid code takes 10% off",
+          "preconditions": "Filter coffee, 500 g is in the cart.",
+          "steps": [{ "action": "Apply WELCOME10", "expectedResult": "\"Code WELCOME10 applied: 10% off.\" Discount −€1.45, total €17.95" }]
+        },
+        {
+          "key": "discount-invalid",
+          "title": "An unknown code is rejected",
+          "steps": [{ "action": "Apply SAVE50", "expectedResult": "\"This discount code isn't valid.\" No discount is taken" }]
+        },
+        {
+          "key": "discount-once",
+          "title": "A discount code applies only once",
+          "priority": "HIGH",
+          "preconditions": "Filter coffee, 500 g is in the cart.",
+          "steps": [
+            { "action": "Apply WELCOME10", "expectedResult": "The discount is −€1.45" },
+            { "action": "Apply WELCOME10 again", "expectedResult": "The discount stays −€1.45" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Checkout",
+      "description": "Paying by card with the test cards.",
+      "cases": [
+        {
+          "key": "checkout-card",
+          "title": "Pays by card and shows the order number",
+          "priority": "CRITICAL",
+          "type": "SMOKE",
+          "preconditions": "Espresso beans, 250 g is in the cart.",
+          "steps": [
+            { "action": "Fill in the form with card 4242 4242 4242 4242, expiry 12/30, CVC 123", "expectedResult": "The button says \"Pay €14.80\"" },
+            { "action": "Pay", "expectedResult": "\"Thank you, <name>!\" and \"Order #<number> is confirmed. You paid €14.80.\"" },
+            { "action": "Look at the cart badge", "expectedResult": "It shows 0" }
+          ]
+        },
+        {
+          "key": "checkout-declined",
+          "title": "A declined card shows an error and keeps the cart",
+          "priority": "HIGH",
+          "steps": [{ "action": "Pay with card 4000 0000 0000 0002", "expectedResult": "\"Your card was declined. Try another card.\" The cart keeps its product" }]
+        },
+        {
+          "key": "checkout-validation",
+          "title": "The form asks for a valid email and card number",
+          "steps": [{ "action": "Pay with email \"ada@\" and card \"4242 4242\"", "expectedResult": "Both fields explain what is wrong and focus moves to the email field" }]
+        },
+        {
+          "key": "checkout-paypal",
+          "title": "Pays with PayPal",
+          "priority": "LOW",
+          "automationStatus": "TO_BE_AUTOMATED",
+          "description": "PayPal is planned; the automated test is skipped until it exists.",
+          "steps": [{ "action": "Choose PayPal at checkout", "expectedResult": "The PayPal window opens" }]
+        }
+      ]
+    },
+    {
+      "name": "Manual checks",
+      "description": "Accessibility and layout, checked by people before each release.",
+      "cases": [
+        {
+          "title": "The shop works with the keyboard alone",
+          "priority": "HIGH",
+          "automationStatus": "MANUAL",
+          "steps": [
+            { "action": "Tab through the header, the products, the cart and checkout", "expectedResult": "Every control can be reached and shows a focus ring" },
+            { "action": "Place an order without the mouse", "expectedResult": "The order is confirmed" }
+          ]
+        },
+        {
+          "title": "A screen reader announces cart changes",
+          "automationStatus": "MANUAL",
+          "steps": [
+            { "action": "With VoiceOver or NVDA running, add a product", "expectedResult": "\"<product> added to the cart\" is announced" },
+            { "action": "Remove it in the cart", "expectedResult": "The removal is announced" }
+          ]
+        },
+        {
+          "title": "The shop fits a 320 px wide screen",
+          "automationStatus": "MANUAL",
+          "steps": [
+            { "action": "Open the products on a 320 px wide window", "expectedResult": "Nothing scrolls sideways" },
+            { "action": "Open the cart with two products", "expectedResult": "The cart table fits the width" }
+          ]
+        },
+        {
+          "title": "Prices are shown in euros with two decimals",
+          "priority": "LOW",
+          "automationStatus": "MANUAL",
+          "steps": [{ "action": "Look at the prices in the catalog, the cart and checkout", "expectedResult": "Every price looks like €9.90" }]
+        }
+      ]
+    }
+  ],
+  "requirements": [
+    { "title": "Customers can pay by card", "externalRef": "SHOP-1", "cases": ["checkout-card", "checkout-declined", "checkout-validation"] },
+    { "title": "Discount codes", "externalRef": "SHOP-2", "cases": ["discount-valid", "discount-invalid", "discount-once"] },
+    { "title": "Free shipping from €40", "externalRef": "SHOP-3", "cases": ["cart-free-shipping"] },
+    {
+      "title": "Keyboard and screen reader users can shop",
+      "externalRef": "SHOP-4",
+      "cases": ["The shop works with the keyboard alone", "A screen reader announces cart changes", "The shop fits a 320 px wide screen"]
+    }
+  ],
+  "milestone": { "name": "1.0 launch", "dueInDays": 30 },
+  "plan": {
+    "title": "Release regression",
+    "description": "Every case before a release: the automated ones from CI, the manual checks by a tester."
+  },
+  "manualRun": {
+    "title": "1.0 release – manual checks",
+    "description": "Manual part of the release regression.",
+    "environment": "Staging",
+    "build": "1.0.0-rc.1",
+    "cases": [
+      "The shop works with the keyboard alone",
+      "A screen reader announces cart changes",
+      "The shop fits a 320 px wide screen",
+      "Prices are shown in euros with two decimals"
+    ],
+    "results": [
+      {
+        "case": "The shop works with the keyboard alone",
+        "status": "PASSED",
+        "durationMs": 360000,
+        "stepResults": [
+          { "stepPosition": 0, "status": "PASSED" },
+          { "stepPosition": 1, "status": "PASSED" }
+        ]
+      },
+      {
+        "case": "A screen reader announces cart changes",
+        "status": "BLOCKED",
+        "comment": "VoiceOver passed. No Windows machine with NVDA was free today.",
+        "durationMs": 540000,
+        "stepResults": [{ "stepPosition": 0, "status": "BLOCKED", "comment": "NVDA not available" }]
+      },
+      {
+        "case": "The shop fits a 320 px wide screen",
+        "status": "FAILED",
+        "comment": "The cart table is wider than the screen.",
+        "durationMs": 240000,
+        "stepResults": [
+          { "stepPosition": 0, "status": "PASSED" },
+          { "stepPosition": 1, "status": "FAILED", "comment": "The table is about 380 px wide, so the whole page scrolls sideways." }
+        ]
+      }
+    ]
+  },
+  "automatedRun": {
+    "title": "Playwright – master",
+    "description": "Results of the Playwright tests in examples/demo-shop, as the TestOps reporter sends them from CI.",
+    "environment": "CI",
+    "build": "9afa9db",
+    "results": [
+      { "key": "cart-add", "test": "cart.spec.ts › adding products updates the cart badge and the totals", "status": "PASSED", "durationMs": 519 },
+      { "key": "cart-quantity", "test": "cart.spec.ts › changing the quantity updates the totals", "status": "PASSED", "durationMs": 304 },
+      { "key": "cart-remove", "test": "cart.spec.ts › removing the last product empties the cart", "status": "PASSED", "durationMs": 397 },
+      { "key": "cart-free-shipping", "test": "cart.spec.ts › orders from €40 ship for free", "status": "PASSED", "durationMs": 425 },
+      { "key": "catalog-list", "test": "catalog.spec.ts › the catalog lists every product with its price", "status": "PASSED", "durationMs": 252 },
+      { "key": "catalog-search", "test": "catalog.spec.ts › searching narrows the catalog", "status": "PASSED", "durationMs": 282 },
+      { "key": "checkout-card", "test": "checkout.spec.ts › pays by card and shows the order number", "status": "PASSED", "durationMs": 360 },
+      { "key": "checkout-declined", "test": "checkout.spec.ts › a declined card shows an error and keeps the cart", "status": "PASSED", "durationMs": 287 },
+      { "key": "checkout-validation", "test": "checkout.spec.ts › the form asks for a valid email and card number", "status": "PASSED", "durationMs": 301 },
+      { "key": "checkout-paypal", "test": "checkout.spec.ts › pays with PayPal", "status": "SKIPPED", "durationMs": 218, "comment": "PayPal isn't available in the demo shop yet" },
+      { "key": "discount-valid", "test": "discounts.spec.ts › a valid code takes 10% off", "status": "PASSED", "durationMs": 259 },
+      { "key": "discount-invalid", "test": "discounts.spec.ts › an unknown code is rejected", "status": "PASSED", "durationMs": 224 },
+      {
+        "key": "discount-once",
+        "test": "discounts.spec.ts › a discount code applies only once",
+        "status": "FAILED",
+        "durationMs": 1281,
+        "comment": "Known issue: the same code can be applied twice.\n\nError: expect(locator).toHaveText(expected) failed\n\nLocator:  getByTestId('discount')\nExpected: \"−€1.45\"\nReceived: \"−€2.90\"\nTimeout:  1000ms"
+      }
+    ]
+  },
+  "defects": [
+    {
+      "title": "A discount code can be applied more than once",
+      "description": "Applying WELCOME10 twice takes 20% off instead of 10%. The automated test \"A discount code applies only once\" fails because of it; each CI run links its failure here.",
+      "severity": "HIGH",
+      "tags": ["discounts"],
+      "results": [{ "run": "automated", "case": "discount-once" }]
+    },
+    {
+      "title": "The cart scrolls sideways on a 320 px wide screen",
+      "description": "On a 320 px wide screen the cart table needs about 380 px, so the page scrolls sideways (WCAG 1.4.10 Reflow).",
+      "severity": "MEDIUM",
+      "tags": ["accessibility"],
+      "results": [{ "run": "manual", "case": "The shop fits a 320 px wide screen" }]
+    }
+  ]
+}

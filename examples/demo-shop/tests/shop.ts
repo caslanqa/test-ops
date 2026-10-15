@@ -2,7 +2,7 @@ import type { Page, TestDetails } from '@playwright/test';
 
 /**
  * Links a test to its TestOps case. The reporter finds the case that has the tag `e2e:<key>`
- * (testops/seed.mjs creates them), so the link survives renaming either side.
+ * (the DEMO workspace and testops/seed.mjs have them), so the link survives renaming either side.
  * `defect` names an open TestOps defect that a failure of this test is linked to.
  */
 export function testops(key: string, defect?: string): TestDetails {

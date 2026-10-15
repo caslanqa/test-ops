@@ -62,7 +62,8 @@ await expectStatus('re-registering with the same email (different case) is rejec
 await expectStatus('short password is rejected', 400, null, 'POST', '/auth/register', { email: `short-${sfx}@test.local`, displayName: 'Short', password: '123' });
 await expectStatus('login with an uppercase email', 200, null, 'POST', '/auth/login', { email: email.toUpperCase(), password: 'FirstPass123' });
 const fresh = await ok(user, 'GET', '/workspaces');
-check('a new user has no workspace access', fresh.length === 0, JSON.stringify(fresh));
+// Only the built-in DEMO workspace, which everyone can look at, is listed.
+check('a new user is a member of no workspace', fresh.every((w) => w.isDemo), JSON.stringify(fresh));
 
 console.log('--- Profile and password ---');
 // The non-ASCII (Turkish) display name is deliberate: it checks that UTF-8 round-trips unchanged.

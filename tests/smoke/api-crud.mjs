@@ -216,9 +216,12 @@ check('its results are gone too', total(await call(admin, 'GET', `${P}/results?r
 
 // ---------- projects, system fields
 console.log('--- Projects and system fields ---');
+const demoIds = new Set((await ok(tester, 'GET', '/workspaces')).filter((w) => w.isDemo).map((w) => w.id));
 const mine = await call(tester, 'GET', '/projects');
+// The DEMO workspace's projects are listed for everyone; the rest are the tester's own.
+const own = (mine.json ?? []).filter((p) => !demoIds.has(p.workspace.id));
 check('a member lists only the projects they belong to, across workspaces',
-  mine.status === 200 && mine.json.length === 1 && mine.json[0].id === P.split('/')[2] && mine.json[0].workspace.id === ws.id, JSON.stringify(mine.json));
+  mine.status === 200 && own.length === 1 && own[0].id === P.split('/')[2] && own[0].workspace.id === ws.id, JSON.stringify(mine.json));
 const adminProjects = await call(admin, 'GET', `/projects?workspaceId=${ws.id}`);
 check('a workspace admin lists every project of the workspace', total(adminProjects) === 2);
 check('projects can be searched by key', total(await call(admin, 'GET', `/projects?workspaceId=${ws.id}&q=ot`)) === 1);

@@ -130,7 +130,7 @@ The installer creates `.env` with secure values. Keep it private and keep a back
 | `APP_PORT` | `8080` | Host port published for the web app and API. |
 | `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Container image; set a version tag to pin releases. |
 | `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up; invitation links still create accounts, and only workspace admins can create new workspaces. |
-| `DEMO_WORKSPACE_ID` | unset | Id of a workspace that every signed-in user can read, as a demo. See [Demo workspace](#demo-workspace). |
+| `DEMO_WORKSPACE` | `true` | Shows every signed-in user the built-in, read-only DEMO workspace. Set to `false` to hide it. See [Demo workspace](#demo-workspace). |
 | `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
 
 Rate limits, the largest JSON request size of a bulk result upload (`JSON_MAX_REQUEST_SIZE_BYTES`, 10 MiB by default, enough for 500 results; all other JSON requests are limited to 100 KB) and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
@@ -139,12 +139,20 @@ Result submissions are also capped: a result's `comment` may hold up to 10,000 c
 
 ### Demo workspace
 
-Set `DEMO_WORKSPACE_ID` to a workspace's id to make it a read-only demo. Every signed-in user then sees that workspace and all its projects as a viewer. They can open cases, plans, runs, results, files and defects, but can't change anything.
+Every signed-in user, including someone who has just signed up, sees a **DEMO** workspace that shows what TestOps does. It holds the project of an example web shop with:
 
-- **Membership:** Visitors are not added as members. The workspace's member lists show only its real members, and visitors don't see each other.
-- **Who can change it:** Only its members can change the demo. Use a dedicated account to own it, because its name and email appear in the member lists.
-- **Setup order:** Create the workspace before setting the id. An id, unlike a slug, can't be claimed by someone else first.
-- **Example:** [`examples/demo-shop`](examples/demo-shop) builds such a workspace, with cases, a plan, runs and automated results.
+- suites, and cases with steps, both automated and manual;
+- requirements and their coverage, a milestone and a release plan;
+- a manual run with step results, and an automated Playwright run;
+- defects linked to the failures.
+
+The shop and its Playwright tests are in [`examples/demo-shop`](examples/demo-shop).
+
+- **Built by the server.** The server builds the workspace at startup; there is nothing to set up. On later starts it adds only what is missing.
+- **Read-only.** Visitors can open everything, but can't change anything.
+- **Owned by a system user.** A system user that nobody can sign in as owns the workspace. It is recognised by fixed ids, so no account can take it over.
+- **Not a membership.** Visitors are not added as members. The member lists show only the system user, and visitors don't see each other.
+- **Switching it off.** Set `DEMO_WORKSPACE=false` to hide the workspace.
 
 ### HTTPS and reverse proxies
 
@@ -190,7 +198,7 @@ An API token cannot create, list or revoke API tokens, change a password, create
 
 The **Help & support** page also links to the API reference and includes an example for submitting automation results from CI.
 
-For a complete example, see [`examples/demo-shop`](examples/demo-shop). It has a small web shop, its Playwright tests, a reporter that sends their results to TestOps and links failures to known defects, and the script that builds the matching DEMO workspace. A GitHub Actions workflow runs the tests every day and reports them to the public demo.
+For a complete example, see [`examples/demo-shop`](examples/demo-shop). It has a small web shop, its Playwright tests and a reporter that sends their results to TestOps and links failures to known defects. The built-in [DEMO workspace](#demo-workspace) shows its project.
 
 ## Development
 

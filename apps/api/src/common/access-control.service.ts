@@ -7,6 +7,7 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { DEMO_WORKSPACE_ID } from "../demo/demo.constants";
 
 export const ARCHIVED_PROJECT_MESSAGE =
   "This project is archived, so it is read-only. A project admin can restore it.";
@@ -22,14 +23,14 @@ export interface ProjectWriteOptions {
 /** How a user may read a workspace: as a member, or as a viewer of the demo workspace. */
 export interface WorkspaceReadAccess {
   role: WorkspaceRole;
-  /** Not a member: read-only access because this is the demo workspace (DEMO_WORKSPACE_ID). */
+  /** Not a member: read-only access because this is the demo workspace. */
   demoViewer: boolean;
 }
 
 // FR-003: every query must be limited to the workspace/project the user is authorized for.
 // Membership is verified on every access to prevent data leaks through guessed object IDs.
 //
-// The demo workspace (DEMO_WORKSPACE_ID) is readable by every signed-in user without a membership
+// The built-in demo workspace (DEMO_WORKSPACE, see DemoService) is readable by every signed-in user without a membership
 // record, so its member lists don't fill up with everyone who signs up, and nobody sees the other
 // visitors. Only the read checks below (requireWorkspaceReadAccess,
 // requireProjectAccessOrWorkspaceAdmin) let them in, as a workspace MEMBER and project VIEWER;
@@ -43,7 +44,7 @@ export class AccessControlService {
     private readonly prisma: PrismaService,
     config: ConfigService,
   ) {
-    this.demoWorkspaceId = config.get<string | null>("demo.workspaceId") ?? null;
+    this.demoWorkspaceId = config.get<boolean>("demo.enabled") ? DEMO_WORKSPACE_ID : null;
   }
 
   /** The id of the workspace every signed-in user may read, or null when there is none. */

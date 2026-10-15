@@ -4,7 +4,7 @@
 //
 // Known bug, on purpose: a discount code can be applied more than once, and each time it takes
 // another 10% off. The test "a discount code applies only once" fails because of it, and the
-// TestOps demo tracks it as a defect (see testops/seed.mjs).
+// TestOps DEMO workspace tracks it as a defect.
 
 const PRODUCTS = [
   { id: 'espresso', name: 'Espresso beans, 250 g', price: 990 },
