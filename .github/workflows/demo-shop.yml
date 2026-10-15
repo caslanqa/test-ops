@@ -1,9 +1,16 @@
 name: Demo shop
 
 # Keeps the example in examples/demo-shop working: typechecks it and runs its Playwright tests
-# against the example shop. The TestOps reporter has no settings here, so the results stay in the
-# job; the DEMO workspace that every TestOps server shows is built by the server itself.
+# against the example shop. On pushes and pull requests the reporter has no settings, so the
+# results stay in the job.
+#
+# It is also an example of CI started by TestOps: a project's CI webhook (Integrations) pointed at
+# this repository's dispatches endpoint sends "testops.run.started". The job then runs only the
+# run's automated cases (their e2e keys) and reports into that run. That needs the TESTOPS_TOKEN
+# secret, an API token of someone who can record results in the project.
 on:
+  repository_dispatch:
+    types: [testops.run.started]
   push:
     branches: [master]
     paths:
@@ -49,8 +56,29 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      # Only the cases the run wants: @<key> tags from the payload's automation_keys. Keys are
+      # limited to safe characters, since case tags are free text.
+      - name: Choose the tests TestOps asked for
+        id: pick
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          keys=$(jq -r '[.client_payload.automation_keys // [] | .[] | select(test("^[A-Za-z0-9._-]+$"))] | join("|")' "$GITHUB_EVENT_PATH")
+          if [ -n "$keys" ]; then echo "grep=@($keys)(\\s|\$)" >> "$GITHUB_OUTPUT"; fi
+
       - name: Run the tests
-        run: npx playwright test
+        env:
+          GREP: ${{ steps.pick.outputs.grep }}
+          # Set only when TestOps started the job; the reporter then writes into that run.
+          TESTOPS_URL: ${{ github.event.client_payload.api_url }}
+          TESTOPS_PROJECT_ID: ${{ github.event.client_payload.project.id }}
+          TESTOPS_RUN_ID: ${{ github.event.client_payload.run.id }}
+          TESTOPS_TOKEN: ${{ github.event_name == 'repository_dispatch' && secrets.TESTOPS_TOKEN || '' }}
+        run: |
+          if [ -n "$GREP" ]; then
+            npx playwright test --grep "$GREP"
+          else
+            npx playwright test
+          fi
 
       - name: Keep the Playwright report
         if: ${{ !cancelled() }}

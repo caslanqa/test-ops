@@ -79,8 +79,22 @@ The DEMO workspace is read-only, so results go to a copy of the project in your 
 | `TESTOPS_URL` | API base, e.g. `https://testops.example.com/api/v1` |
 | `TESTOPS_TOKEN` | API token of someone who can record results in the project (Admin, Tester or Automation) |
 | `TESTOPS_PROJECT_ID` | The project the results go to |
+| `TESTOPS_RUN_ID` | Optional: report into this run, which TestOps started, instead of making a new one. Only its cases set to Automation get results, and the run stays open for the manual ones. |
 | `TESTOPS_RUN_TITLE` | Optional. Default: `Playwright – <branch> @ <commit>` on GitHub Actions, `Playwright – local` elsewhere |
 | `TESTOPS_ENVIRONMENT` | Optional. Default: `CI` on CI, `local` elsewhere |
+
+### Let TestOps start CI
+
+A run started from a plan can send its automated cases to CI and get their results back in the same run, next to the manual ones.
+
+1. **Point the project's webhook at GitHub.** In TestOps, under **Integrations**:
+   - set the webhook URL to `https://api.github.com/repos/OWNER/REPO/dispatches`;
+   - add the headers `Authorization: Bearer <GitHub token>` and `Accept: application/vnd.github+json`. The token is a fine-grained token for that repository, with Contents set to read and write.
+2. **Give CI a TestOps token.** In the repository, add the secret `TESTOPS_TOKEN`, an API token of someone who can record results in the project.
+3. **Start on the dispatch.** Use a workflow that starts on `repository_dispatch` with type `testops.run.started`, like [demo-shop.yml](../../.github/workflows/demo-shop.yml). It:
+   - runs only the run's cases (`--grep` built from `client_payload.automation_keys`; each test is tagged `@<key>`);
+   - sets `TESTOPS_URL`, `TESTOPS_PROJECT_ID` and `TESTOPS_RUN_ID` from the payload.
+4. **Start a run.** Start a run from a plan and choose which cases are Automation. TestOps calls the webhook, CI runs those tests, and their results appear in the run. The run also gets a link to the CI job.
 
 ### Linking tests to cases
 
