@@ -14,6 +14,7 @@ import { Prisma, ProjectRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import {
+  ATTACHMENT_METADATA_SELECT,
   attachmentExtension,
   attachmentMimeType,
   normalizeUploadedFileName,
@@ -104,6 +105,7 @@ export class AttachmentsService {
                 checksumSha256: checksum,
                 storageKey,
               },
+              select: ATTACHMENT_METADATA_SELECT,
             }),
           );
         } catch (error) {
@@ -262,19 +264,7 @@ export class AttachmentsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.attachment.findMany({
         where,
-        // The storage key is an internal path and is never exposed.
-        select: {
-          id: true,
-          fileName: true,
-          mimeType: true,
-          sizeBytes: true,
-          checksumSha256: true,
-          resultId: true,
-          stepResultId: true,
-          defectId: true,
-          uploaderUserId: true,
-          createdAt: true,
-        },
+        select: ATTACHMENT_METADATA_SELECT,
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
         ...pageArgs(query),
       }),

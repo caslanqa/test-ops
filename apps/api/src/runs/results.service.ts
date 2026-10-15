@@ -8,6 +8,7 @@ import { UpdateResultDto } from "./dto/update-result.dto";
 import { ListResultsQueryDto } from "./dto/list-results-query.dto";
 import { pageArgs } from "../common/pagination";
 import { AttachmentFilesService } from "../attachments/attachment-files.service";
+import { ATTACHMENT_METADATA_SELECT } from "../attachments/attachments.constants";
 
 const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.ADMIN,
@@ -22,6 +23,12 @@ const WRITE_ROLES: ProjectRole[] = [
 const WRITE_TRANSACTION = { maxWait: 10_000, timeout: 60_000 };
 
 type ResultWithSteps = Prisma.ResultGetPayload<{ include: { stepResults: true } }>;
+
+/** A result's files and each step's files, oldest first, without their storage paths. */
+const ATTACHMENTS = {
+  select: ATTACHMENT_METADATA_SELECT,
+  orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+} satisfies Prisma.Result$attachmentsArgs;
 
 /** What writing a result needs to know about its run case; kept current during an upload. */
 interface AttemptState {
@@ -123,7 +130,11 @@ export class ResultsService {
     await this.ensureRunInProject(projectId, runId);
     const result = await this.prisma.result.findUnique({
       where: { id: resultId },
-      include: { stepResults: true, attachments: true, runCase: true },
+      include: {
+        stepResults: { orderBy: { stepPosition: "asc" }, include: { attachments: ATTACHMENTS } },
+        attachments: ATTACHMENTS,
+        runCase: true,
+      },
     });
     if (!result || result.runCase.runId !== runId) {
       throw new NotFoundException("Result not found");
@@ -389,8 +400,9 @@ export class ResultsService {
         where,
         include: {
           runCase: { select: { runId: true, testCaseId: true } },
-          // The run case panel shows each attempt's failed steps with their actual results.
-          stepResults: { orderBy: { stepPosition: "asc" } },
+          // The run case panel shows each attempt's steps with their actual results and files.
+          stepResults: { orderBy: { stepPosition: "asc" }, include: { attachments: ATTACHMENTS } },
+          attachments: ATTACHMENTS,
         },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
         ...pageArgs(query),

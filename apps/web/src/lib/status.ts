@@ -67,7 +67,7 @@ export const STATUS_META: Record<
 };
 
 export function isResultStatus(value: string): value is ResultStatus {
-  return value in STATUS_META;
+  return Object.hasOwn(STATUS_META, value);
 }
 
 /** Normalizes a status → count map, dropping unknown keys. */

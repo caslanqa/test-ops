@@ -241,6 +241,32 @@ check(
   listed?.stepResults?.map((s) => s.stepPosition).join(',') === '0,1' && listed.stepResults[1].comment === 'The total shows 0.00',
   JSON.stringify(listed?.stepResults),
 );
+// A step's own files, as the run case panel uploads them after saving the result.
+const stepForm = new FormData();
+stepForm.append('files', new Blob(['total: 0.00\n'], { type: 'text/plain' }), 'step-2.log');
+const failedStep = stepped.stepResults.find((s) => s.stepPosition === 1);
+const stepUpload = await fetch(`${BASE}${P}/step-results/${failedStep.id}/attachments`, {
+  method: 'POST',
+  headers: { authorization: `Bearer ${ci}` },
+  body: stepForm,
+});
+const stepFiles = await stepUpload.json();
+check(`[${stepUpload.status}] a step result takes files`, stepUpload.status === 201 && stepFiles.length === 1, JSON.stringify(stepFiles));
+check('the upload answer hides the storage path', stepFiles.every((f) => !('storageKey' in f)), JSON.stringify(stepFiles));
+const withFiles = (await runResults(manual.id)).find((r) => r.id === stepped.id);
+check(
+  'the results list includes the files of the result and of each step',
+  Array.isArray(withFiles?.attachments) && withFiles.stepResults[1].attachments?.map((f) => f.fileName).join() === 'step-2.log'
+    && withFiles.stepResults[0].attachments?.length === 0,
+  JSON.stringify(withFiles?.stepResults),
+);
+check('...without storage paths', !JSON.stringify(withFiles).includes('storageKey'));
+const single = await ok(ci, 'GET', `${P}/runs/${manual.id}/results/${stepped.id}`);
+check(
+  'a single result includes its step files, without storage paths',
+  single.stepResults.find((s) => s.stepPosition === 1)?.attachments?.length === 1 && !JSON.stringify(single).includes('storageKey'),
+  JSON.stringify(single.stepResults),
+);
 const invalid = await call(ci, 'POST', `${P}/runs/${manual.id}/results`, { testCaseId: cases[48].id, status: 'INVALID', source: 'MANUAL', durationMs: 1500 });
 check(`[${invalid.status}] Invalid is a result status`, invalid.status === 201 && invalid.json.status === 'INVALID', JSON.stringify(invalid.json));
 check('an Invalid result sets the case status', (await caseStatus(manual.id, cases[48].id)) === 'INVALID');
@@ -253,6 +279,16 @@ check('the run sums the time of its cases', manualRun.durationMs === 5500, `${ma
 check('the run progress counts Invalid', manualRun.progress.INVALID === 1, JSON.stringify(manualRun.progress));
 const invalidFilter = await call(ci, 'GET', `${P}/results?runId=${manual.id}&status=INVALID`);
 check('results filter by Invalid', invalidFilter.status === 200 && total(invalidFilter) === 1, `${invalidFilter.status} ${total(invalidFilter)}`);
+
+// Correcting the latest result from the run case panel: the form sends null for an emptied field.
+await ok(ci, 'PATCH', `${P}/runs/${manual.id}/results/${invalid.json.id}`, { comment: 'Wrong test data' });
+const cleared = await call(ci, 'PATCH', `${P}/runs/${manual.id}/results/${invalid.json.id}`, { status: 'BLOCKED', comment: null, durationMs: null });
+check(
+  `[${cleared.status}] null clears a result's comment and time`,
+  cleared.status === 200 && cleared.json.status === 'BLOCKED' && cleared.json.comment === null && cleared.json.durationMs === null,
+  JSON.stringify(cleared.json),
+);
+check("...and the latest attempt's new status sets the case status", (await caseStatus(manual.id, cases[48].id)) === 'BLOCKED');
 
 // Run again: the case waits for another attempt, its history stays, the next result replaces Retest.
 const manualCase = (await ok(ci, 'GET', `${P}/runs/${manual.id}`)).runCases;
