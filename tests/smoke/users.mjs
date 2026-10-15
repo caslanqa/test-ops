@@ -180,6 +180,46 @@ await expectStatus('an API token cannot change a member role', 403, adminToken, 
 await ok(admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'ADMIN' });
 await expectStatus('an admin can be demoted while there is a second admin', 200, admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'MEMBER' });
 
+console.log('--- Permissions matrix ---');
+const matrix = await expectStatus('admins read the permissions matrix', 200, admin, 'GET', `/workspaces/${ws.id}/permissions`);
+check('the matrix lists the members, the projects and the project roles',
+  matrix.json?.members?.some((m) => m.user.email === email.toLowerCase())
+    && matrix.json?.projects?.some((p) => p.id === pB.id)
+    && matrix.json?.projectMembers?.some((m) => m.projectId === pA.id && m.userId === userMember.user.id && m.role === 'TESTER'),
+  JSON.stringify(matrix.json));
+await expectStatus('members cannot read the matrix', 403, user, 'GET', `/workspaces/${ws.id}/permissions`);
+const cell = `/workspaces/${ws.id}/permissions/projects/${pB.id}/users/${userMember.user.id}`;
+await expectStatus('an API token cannot set a project role', 403, adminToken, 'PUT', cell, { role: 'VIEWER' });
+await expectStatus('members cannot set project roles', 403, user, 'PUT', cell, { role: 'ADMIN' });
+await expectStatus('an unknown role is rejected', 400, admin, 'PUT', cell, { role: 'OWNER' });
+await expectStatus('a missing role is rejected', 400, admin, 'PUT', cell, {});
+const granted = await expectStatus('an admin gives a member a role in another project', 200, admin, 'PUT', cell, { role: 'VIEWER' });
+check('...answering with the saved role', granted.json?.role === 'VIEWER', JSON.stringify(granted.json));
+check('...and the member can open that project now', (await call(user, 'GET', `/projects/${pB.id}`)).status === 200);
+await ok(admin, 'PUT', cell, { role: 'ADMIN' });
+check("the workspace's project list carries the caller's role in each project",
+  (await ok(user, 'GET', `/workspaces/${ws.id}/projects`)).find((p) => p.id === pB.id)?.currentUserRole === 'ADMIN');
+const taken = await expectStatus('role null takes the member out of the project', 200, admin, 'PUT', cell, { role: null });
+check('...answering role null', taken.json?.role === null, JSON.stringify(taken.json));
+await expectStatus('...and the project is closed to them again', 403, user, 'GET', `/projects/${pB.id}`);
+const otherWs = await ok(admin, 'POST', '/workspaces', { name: 'Other permissions', slug: `other-perms-${sfx}` });
+const otherProject = await ok(admin, 'POST', `/workspaces/${otherWs.id}/projects`, { key: 'OTH', name: 'Other' });
+await expectStatus("another workspace's project is not found", 404, admin, 'PUT', `/workspaces/${ws.id}/permissions/projects/${otherProject.id}/users/${userMember.user.id}`, { role: 'VIEWER' });
+await expectStatus('someone outside the workspace is not found', 404, admin, 'PUT', `/workspaces/${otherWs.id}/permissions/projects/${otherProject.id}/users/${userMember.user.id}`, { role: 'VIEWER' });
+
+console.log('--- Deleting a project for good ---');
+const doomed = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'DOOM', name: 'Doomed' });
+const doomedCase = await ok(admin, 'POST', `/projects/${doomed.id}/cases`, { title: 'Goes with the project' });
+await ok(admin, 'POST', `/projects/${doomed.id}/runs`, { title: 'Run in a doomed project', testCaseIds: [doomedCase.id] });
+await expectStatus('a project must be archived before it is deleted for good', 409, admin, 'DELETE', `/projects/${doomed.id}/permanently`, { confirmKey: 'DOOM' });
+await ok(admin, 'DELETE', `/projects/${doomed.id}`);
+await expectStatus('the key must be repeated exactly', 400, admin, 'DELETE', `/projects/${doomed.id}/permanently`, { confirmKey: 'doom' });
+await ok(admin, 'PUT', `/workspaces/${ws.id}/permissions/projects/${doomed.id}/users/${userMember.user.id}`, { role: 'ADMIN' });
+await expectStatus('a project admin cannot delete it for good', 403, user, 'DELETE', `/projects/${doomed.id}/permanently`, { confirmKey: 'DOOM' });
+await expectStatus('a workspace admin deletes an archived project for good', 204, admin, 'DELETE', `/projects/${doomed.id}/permanently`, { confirmKey: 'DOOM' });
+await expectStatus('...and it is gone', 403, admin, 'GET', `/projects/${doomed.id}`);
+await expectStatus('an unknown project gets the same answer', 403, admin, 'DELETE', `/projects/${doomed.id}/permanently`, { confirmKey: 'DOOM' });
+
 console.log('--- Removal from the workspace also removes project access ---');
 await expectStatus('remove the member from the workspace', 200, admin, 'DELETE', `/workspaces/${ws.id}/members/${userMember.id}`);
 await expectStatus('a removed member cannot access the project', 403, user, 'GET', `/projects/${pA.id}`);

@@ -93,6 +93,8 @@ The installer creates an admin account with a starter workspace and demo project
 
 By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account. While sign-up is disabled, only admins of an existing workspace can create another workspace, so other users can't bring new accounts in by inviting people into workspaces of their own. Invitations and role changes need a signed-in person; API tokens get 403 for them. This is an interim rule: a separate Installation Admin role (design-doc FR-090) is not implemented yet, so any admin of any workspace can still invite people.
 
+Workspace admins manage access on the workspace's **Permissions** tab: one table with each member's workspace role and their role in every project (Admin, Tester, Automation, Viewer or no access). Workspace admins are admins in every project of their workspace. The **Settings** tab renames or deletes the workspace. On the **Projects** tab, project admins edit, archive and restore their projects, and workspace admins can delete an archived project for good.
+
 ## Operations and backups
 
 Run commands from the installation directory, usually `~/testops`.

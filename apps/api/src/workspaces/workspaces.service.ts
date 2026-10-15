@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Prisma, WorkspaceRole } from "@prisma/client";
+import { Prisma, ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { PageQueryDto, pageArgs } from "../common/pagination";
@@ -163,6 +163,74 @@ export class WorkspacesService {
       }),
       this.prisma.workspaceMember.delete({ where: { id: memberId } }),
     ]);
+  }
+
+  /**
+   * Everything the permissions screen needs in one answer: the members with their workspace role,
+   * the active projects, and every membership in those projects. Workspace admins only, since it
+   * shows who can reach projects the caller may not be a member of.
+   */
+  async permissions(userId: string, workspaceId: string) {
+    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+    const [members, projects, projectMembers] = await this.prisma.$transaction([
+      this.prisma.workspaceMember.findMany({
+        where: { workspaceId },
+        include: { user: { select: { id: true, email: true, displayName: true } } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      }),
+      this.prisma.project.findMany({
+        where: { workspaceId, archivedAt: null },
+        select: { id: true, key: true, name: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      }),
+      this.prisma.projectMember.findMany({
+        where: { project: { workspaceId, archivedAt: null } },
+        select: { id: true, projectId: true, userId: true, role: true },
+      }),
+    ]);
+    return { members, projects, projectMembers };
+  }
+
+  /**
+   * Gives a workspace member a role in one of the workspace's projects, changes it, or takes
+   * them out of the project (role null). Workspace admins only. Like ProjectsService.addMember,
+   * only workspace members can be given a project role, so removal from the workspace still
+   * revokes every project at once.
+   */
+  async setProjectRole(
+    userId: string,
+    workspaceId: string,
+    projectId: string,
+    targetUserId: string,
+    role: ProjectRole | null,
+  ) {
+    await this.accessControl.requireWorkspaceRole(userId, workspaceId, [
+      WorkspaceRole.ADMIN,
+    ]);
+    // A project or person of another workspace is "not found", like any id from outside the scope.
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, workspaceId },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundException("Project not found");
+    const member = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: targetUserId } },
+      select: { id: true },
+    });
+    if (!member) throw new NotFoundException("Workspace member not found");
+
+    if (role === null) {
+      await this.prisma.projectMember.deleteMany({ where: { projectId, userId: targetUserId } });
+      return { projectId, userId: targetUserId, role: null };
+    }
+    const saved = await this.prisma.projectMember.upsert({
+      where: { projectId_userId: { projectId, userId: targetUserId } },
+      create: { projectId, userId: targetUserId, role },
+      update: { role },
+    });
+    return { projectId, userId: targetUserId, role: saved.role };
   }
 
   /** Keep the workspace manageable: the last admin cannot be removed or demoted. */
