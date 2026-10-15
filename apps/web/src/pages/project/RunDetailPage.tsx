@@ -93,6 +93,7 @@ type SourceFilter = 'ALL' | 'MANUAL' | 'AUTOMATION';
 /**
  * The run page's filters and open case live in the URL (?status=failed&source=manual&assignee=me
  * &case=…), so a reload, a shared link or the way back from another page shows the same list.
+ * ?only=<run case id> lists just that case, for links from elsewhere (e.g. a requirement's case).
  * Unknown values are ignored. The URL is replaced rather than pushed, so Back leaves the run
  * instead of stepping through every filter and case.
  */
@@ -100,7 +101,7 @@ function useRunView() {
   const [params, setParams] = useSearchParams();
   const status = params.get('status')?.toUpperCase() ?? '';
   const source = params.get('source')?.toUpperCase();
-  function update(changes: Partial<Record<'status' | 'source' | 'assignee' | 'case', string | null>>) {
+  function update(changes: Partial<Record<'status' | 'source' | 'assignee' | 'case' | 'only', string | null>>) {
     setParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -118,10 +119,12 @@ function useRunView() {
     sourceFilter: (source === 'MANUAL' || source === 'AUTOMATION' ? source : 'ALL') as SourceFilter,
     onlyMine: params.get('assignee') === 'me',
     openCaseId: params.get('case'),
+    onlyCaseId: params.get('only'),
     setStatusFilter: (value: ResultStatus | null) => update({ status: value?.toLowerCase() ?? null }),
     setSourceFilter: (value: SourceFilter) => update({ source: value === 'ALL' ? null : value.toLowerCase() }),
     setOnlyMine: (value: boolean) => update({ assignee: value ? 'me' : null }),
     setOpenCaseId: (value: string | null) => update({ case: value }),
+    showAllCases: () => update({ only: null }),
   };
 }
 
@@ -601,10 +604,12 @@ export function RunDetailPage() {
     sourceFilter,
     onlyMine,
     openCaseId,
+    onlyCaseId,
     setStatusFilter,
     setSourceFilter,
     setOnlyMine,
     setOpenCaseId,
+    showAllCases,
   } = useRunView();
   const [pending, setPending] = useState<string | null>(null);
   const { notify, dismiss } = useNotice();
@@ -723,11 +728,13 @@ export function RunDetailPage() {
   const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
   // Cases without a result have no source, so a source filter leaves them out.
   const matchesFilters = (rc: RunCase) =>
+    (!onlyCaseId || rc.id === onlyCaseId) &&
     (!onlyMine || rc.assigneeId === user?.id) &&
     (!statusFilter || rc.status === statusFilter) &&
     (sourceFilter === 'ALL' || latestResultByCase.get(rc.testCaseId)?.source === sourceFilter);
   const shownCases = runCases.filter(matchesFilters);
-  const filtered = onlyMine || statusFilter !== null || sourceFilter !== 'ALL';
+  const filtered = onlyCaseId !== null || onlyMine || statusFilter !== null || sourceFilter !== 'ALL';
+  const onlyCase = onlyCaseId ? runCases.find((rc) => rc.id === onlyCaseId) : undefined;
   // Choosing the selected status again shows every case.
   const toggleStatus = (status: ResultStatus) => setStatusFilter(statusFilter === status ? null : status);
   const filterName = statusFilter ? STATUS_META[statusFilter].label.toLowerCase() : null;
@@ -898,6 +905,21 @@ export function RunDetailPage() {
           <Bot size={14} aria-hidden="true" /> Automation
         </button>
       </div>
+      {onlyCaseId && (
+        <p className="filter-note">
+          {/* One text node for the sentence, so the note's flex gap only separates it from the button. */}
+          <span>
+            {onlyCase ? (
+              <>Showing only <strong>{onlyCase.caseSnapshot?.title ?? onlyCase.testCase.title}</strong>.</>
+            ) : (
+              "The case you followed isn't in this run."
+            )}
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={showAllCases}>
+            Show all cases
+          </button>
+        </p>
+      )}
       {statusFilter && (
         <p className="filter-note">
           Showing only <StatusChip status={statusFilter} /> cases.{' '}
