@@ -130,11 +130,21 @@ The installer creates `.env` with secure values. Keep it private and keep a back
 | `APP_PORT` | `8080` | Host port published for the web app and API. |
 | `APP_IMAGE` | `ghcr.io/caslanqa/testops:latest` | Container image; set a version tag to pin releases. |
 | `SELF_REGISTRATION` | `true` | Set to `false` to disable self sign-up; invitation links still create accounts, and only workspace admins can create new workspaces. |
+| `DEMO_WORKSPACE_ID` | unset | Id of a workspace that every signed-in user can read, as a demo. See [Demo workspace](#demo-workspace). |
 | `TRUST_PROXY` | unset | Set to `1` when one trusted reverse proxy is in front of the app. |
 
 Rate limits, the largest JSON request size of a bulk result upload (`JSON_MAX_REQUEST_SIZE_BYTES`, 10 MiB by default, enough for 500 results; all other JSON requests are limited to 100 KB) and attachment size/type limits can also be changed in `.env`. See [`.env.example`](.env.example) for the full list.
 
 Result submissions are also capped: a result's `comment` may hold up to 10,000 characters and a result up to 200 `stepResults` (each comment up to 2,000 characters); a bulk upload holds up to 500 results. Larger values return 400. Attach long logs as files.
+
+### Demo workspace
+
+Set `DEMO_WORKSPACE_ID` to a workspace's id to make it a read-only demo. Every signed-in user then sees that workspace and all its projects as a viewer. They can open cases, plans, runs, results, files and defects, but can't change anything.
+
+- **Membership:** Visitors are not added as members. The workspace's member lists show only its real members, and visitors don't see each other.
+- **Who can change it:** Only its members can change the demo. Use a dedicated account to own it, because its name and email appear in the member lists.
+- **Setup order:** Create the workspace before setting the id. An id, unlike a slug, can't be claimed by someone else first.
+- **Example:** [`examples/demo-shop`](examples/demo-shop) builds such a workspace, with cases, a plan, runs and automated results.
 
 ### HTTPS and reverse proxies
 

@@ -70,6 +70,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 {info.project.archivedAt && (
                   <p className="context-archived">Archived: read-only until an admin restores it.</p>
                 )}
+                {info.workspace.isDemo && info.project.currentUserRole === 'VIEWER' && (
+                  <p className="context-demo">Demo project: look around freely; nothing can be changed.</p>
+                )}
               </>
             )}
           </div>

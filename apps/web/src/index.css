@@ -815,6 +815,16 @@ input[type='checkbox'] {
   font-size: var(--text-xs);
 }
 
+/* Visitors of the demo workspace can read everything but change nothing. */
+.context-demo {
+  margin-top: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--sidebar-line);
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-muted);
+  font-size: var(--text-xs);
+}
+
 .project-key {
   flex: none;
   padding: 0.0625rem 0.375rem;

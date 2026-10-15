@@ -51,18 +51,18 @@ export class ProjectsService {
     workspaceId: string,
     query: ListWorkspaceProjectsQueryDto,
   ) {
-    const member = await this.accessControl.requireWorkspaceMembership(
+    const access = await this.accessControl.requireWorkspaceReadAccess(
       userId,
       workspaceId,
     );
-    // A workspace admin sees all projects; other members see only the projects they
-    // belong to (not even the names of projects they cannot access are listed).
+    // A workspace admin sees all projects, and so does every visitor of the demo workspace;
+    // other members see only the projects they belong to (not even the names of projects they
+    // cannot access are listed).
+    const seesAll = access.role === WorkspaceRole.ADMIN || this.accessControl.isDemoWorkspace(workspaceId);
     const where: Prisma.ProjectWhereInput = {
       workspaceId,
       archivedAt: query.archived ? { not: null } : null,
-      ...(member.role === WorkspaceRole.ADMIN
-        ? {}
-        : { members: { some: { userId } } }),
+      ...(seesAll ? {} : { members: { some: { userId } } }),
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.project.findMany({
@@ -215,15 +215,17 @@ export class ProjectsService {
 
   /**
    * Every project the user can open, across workspaces: all projects of workspaces they
-   * administer plus the ones they are a member of.
+   * administer, the ones they are a member of, and the demo workspace's projects.
    */
   async listAccessible(userId: string, query: ListProjectsQueryDto) {
+    const demoId = this.accessControl.demoWorkspace;
     const where: Prisma.ProjectWhereInput = {
       archivedAt: null,
       workspaceId: query.workspaceId,
       OR: [
         { members: { some: { userId } } },
         { workspace: { members: { some: { userId, role: WorkspaceRole.ADMIN } } } },
+        ...(demoId ? [{ workspaceId: demoId }] : []),
       ],
       ...(query.q
         ? {

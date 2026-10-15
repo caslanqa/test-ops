@@ -38,6 +38,9 @@ services:
       - JWT_SECRET=${SERVICE_HEX_64_JWTSECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-8h}
       - SELF_REGISTRATION=${SELF_REGISTRATION:-true}
+      # The DEMO workspace every visitor can read; set its id in Coolify after creating it
+      # (examples/demo-shop/testops/seed.mjs prints it).
+      - DEMO_WORKSPACE_ID=${DEMO_WORKSPACE_ID:-}
       - TRUST_PROXY=${TRUST_PROXY:-2}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-}
       - AUTH_RATE_LIMIT_PER_MINUTE=${AUTH_RATE_LIMIT_PER_MINUTE:-}

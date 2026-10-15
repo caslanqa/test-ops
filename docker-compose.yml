@@ -36,6 +36,8 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       # Self-registration ("Create one" link on the login screen); if false, people join through workspace invitation links.
       SELF_REGISTRATION: ${SELF_REGISTRATION:-true}
+      # Id of a workspace every signed-in user can read (a read-only demo); empty = none.
+      DEMO_WORKSPACE_ID: ${DEMO_WORKSPACE_ID:-}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-}
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-}
       AUTH_IP_RATE_LIMIT_PER_MINUTE: ${AUTH_IP_RATE_LIMIT_PER_MINUTE:-}

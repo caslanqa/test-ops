@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { WorkspaceRole } from "@prisma/client";
+import { Prisma, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { PageQueryDto, pageArgs } from "../common/pagination";
@@ -65,8 +65,12 @@ export class WorkspacesService {
     });
   }
 
+  /** The user's workspaces, plus the demo workspace (DEMO_WORKSPACE_ID) that everyone can read. */
   async listForUser(userId: string, query: PageQueryDto) {
-    const where = { members: { some: { userId } } };
+    const demoId = this.accessControl.demoWorkspace;
+    const where: Prisma.WorkspaceWhereInput = demoId
+      ? { OR: [{ members: { some: { userId } } }, { id: demoId }] }
+      : { members: { some: { userId } } };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.workspace.findMany({
         where,
@@ -75,11 +79,14 @@ export class WorkspacesService {
       }),
       this.prisma.workspace.count({ where }),
     ]);
-    return { items, total };
+    return {
+      items: items.map((w) => ({ ...w, isDemo: this.accessControl.isDemoWorkspace(w.id) })),
+      total,
+    };
   }
 
   async getOne(userId: string, workspaceId: string) {
-    const member = await this.accessControl.requireWorkspaceMembership(
+    const access = await this.accessControl.requireWorkspaceReadAccess(
       userId,
       workspaceId,
     );
@@ -88,8 +95,13 @@ export class WorkspacesService {
     });
     if (!workspace) throw new NotFoundException("Workspace not found");
     // The UI uses the role to hide actions the user is not permitted to perform;
-    // authorization is still enforced on the server at every endpoint.
-    return { ...workspace, currentUserRole: member.role };
+    // authorization is still enforced on the server at every endpoint. isDemo lets it say
+    // that everyone can see this workspace, and that visitors can only look.
+    return {
+      ...workspace,
+      currentUserRole: access.role,
+      isDemo: this.accessControl.isDemoWorkspace(workspaceId),
+    };
   }
 
   async update(userId: string, workspaceId: string, dto: UpdateWorkspaceDto) {
@@ -103,7 +115,7 @@ export class WorkspacesService {
   }
 
   async listMembers(userId: string, workspaceId: string) {
-    await this.accessControl.requireWorkspaceMembership(userId, workspaceId);
+    await this.accessControl.requireWorkspaceReadAccess(userId, workspaceId);
     return this.prisma.workspaceMember.findMany({
       where: { workspaceId },
       include: {
