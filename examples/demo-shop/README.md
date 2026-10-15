@@ -6,7 +6,7 @@ The example behind TestOps' built-in **DEMO workspace**. It contains:
 - Playwright tests for the shop;
 - a reporter that sends the test results to TestOps.
 
-Every TestOps server shows the shop's project, read-only, to every signed-in user. The server builds it at startup from [`apps/api/src/demo/demo-shop.json`](../../apps/api/src/demo/demo-shop.json), so there is nothing to set up (see [Demo workspace](../../README.md#demo-workspace)). The project shows:
+Every TestOps user gets the shop's project in a DEMO workspace of their own, as its admin. The server makes it from [`apps/api/src/demo/demo-shop.json`](../../apps/api/src/demo/demo-shop.json), so there is nothing to set up (see [Demo workspace](../../README.md#demo-workspace)). The project shows:
 
 - the cases and the requirements they cover;
 - a release plan;
@@ -49,11 +49,13 @@ The test "a discount code applies only once" fails because of the deliberate bug
 
 ## Send the results to your TestOps
 
-The DEMO workspace is read-only, so results go to a copy of the project in your own account.
+The results can go to the shop's project in your DEMO workspace.
 
 1. **Start TestOps.** From the repository root, run `pnpm start`. You can also use any TestOps server.
 2. **Create an API token.** Sign in, open **Account → API tokens**, and create one.
-3. **Build your copy:**
+3. **Find the project.** Open **DEMO → Bean & Leaf shop**; the project id is in the address (`/projects/<project id>/…`).
+
+   On a server with `DEMO_WORKSPACE=false`, build the project yourself instead:
 
    ```bash
    TESTOPS_URL=http://localhost:8080/api/v1 TESTOPS_TOKEN=<token> npm run seed
@@ -121,6 +123,6 @@ The run is completed after the upload. If the upload fails, the Playwright run f
 
 ## Changing the demo
 
-The DEMO workspace comes from [`demo-shop.json`](../../apps/api/src/demo/demo-shop.json):
-- To add a case, requirement or defect, add it there. Servers add what is missing at their next start.
+Every DEMO workspace is made from [`demo-shop.json`](../../apps/api/src/demo/demo-shop.json):
+- To add a case, requirement or defect, add it there. Demos made after the change have it; existing ones belong to their users and stay as they are.
 - To keep the automated run in step with a changed test, update the file's `automatedRun` from a real run.

@@ -22,6 +22,9 @@ model User {
   isActive     Boolean  @default(true)
   // Carried in every session token; a password change raises it, which ends older sessions.
   sessionVersion Int    @default(0)
+  // When this user's own demo workspace was made (DemoService). It is made once, so a demo the
+  // user deleted doesn't come back unasked.
+  demoCreatedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -50,6 +53,8 @@ model Workspace {
   id        String   @id @default(uuid())
   name      String
   slug      String   @unique
+  // Someone's demo workspace with the example shop project (DemoService).
+  isDemo    Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

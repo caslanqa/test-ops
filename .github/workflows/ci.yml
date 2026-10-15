@@ -88,10 +88,9 @@ jobs:
           bash tests/smoke/attachments.sh
           node tests/smoke/ratelimit.mjs
 
-      # The DEMO workspace was built when the stack started; a second start must add nothing (the
-      # test counts exactly), and DEMO_WORKSPACE=false must hide it. Recreating the app also resets
-      # the in-memory sign-up limit that the suites above have used up.
-      - name: Demo workspace after a restart, and switched off
+      # Every user's own DEMO workspace, then DEMO_WORKSPACE=false: no new ones, existing ones stay.
+      # Recreating the app resets the in-memory sign-up limit that the suites above have used up.
+      - name: Demo workspaces, and switched off
         run: |
           docker compose up -d --force-recreate --wait --wait-timeout 120 app
           node tests/smoke/demo-workspace.mjs

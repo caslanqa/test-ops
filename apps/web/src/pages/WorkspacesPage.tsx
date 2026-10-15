@@ -1,12 +1,12 @@
 import { useId, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Boxes, Info, Plus } from 'lucide-react';
+import { Boxes, Info, Plus, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import { Dialog } from '../components/Dialog';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../components/Page';
 import { Tag } from '../components/StatusChip';
 import { slugify } from '../lib/format';
-import type { Workspace } from '../lib/projectInfo';
+import { recordsChanged, type Workspace } from '../lib/projectInfo';
 import { usePageTitle, useResource } from '../lib/useResource';
 
 // The form mounts only while the dialog is open: state starts clean on every open, and
@@ -95,9 +95,51 @@ function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** GET /demo-workspace */
+interface DemoStatus {
+  enabled: boolean;
+  workspaceId: string | null;
+}
+
+/**
+ * Offered to someone who deleted their demo workspace: a fresh one with the example project.
+ * Making it takes a moment, since the whole project is written as a user would.
+ */
+function NewDemoNote() {
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function create() {
+    setBusy(true);
+    setError(null);
+    try {
+      const demo = await api.post<Workspace>('/demo-workspace');
+      recordsChanged();
+      navigate(`/workspaces/${demo.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't create the demo workspace");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="info-note">
+        <Sparkles size={16} aria-hidden="true" />
+        <span>Try TestOps on example data: a demo workspace has a sample shop's cases, plan, runs and defects.</span>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={create} disabled={busy}>
+          {busy ? 'Creating…' : 'Create a demo workspace'}
+        </button>
+      </div>
+      <FormError message={error} />
+    </>
+  );
+}
+
 export function WorkspacesPage() {
   usePageTitle('Workspaces');
-  // ?create opens the new-workspace dialog, e.g. from the demo workspace's page.
+  // ?create opens the new-workspace dialog.
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(() => params.has('create'));
   const closeCreate = () => {
@@ -107,6 +149,13 @@ export function WorkspacesPage() {
   const { data: workspaces, error, loading, reload } = useResource(
     () => api.get<Workspace[]>('/workspaces'),
     [],
+  );
+
+  const hasDemo = workspaces?.some((w) => w.isDemo) ?? false;
+  // Asked only when the list has no demo: whether this server makes them, to offer a new one.
+  const demoStatus = useResource(
+    () => (workspaces && !hasDemo ? api.get<DemoStatus>('/demo-workspace') : Promise.resolve(null)),
+    [workspaces, hasDemo],
   );
 
   const createButton = (
@@ -120,15 +169,12 @@ export function WorkspacesPage() {
     <>
       <PageHeader
         title="Workspaces"
-        description={
-          workspaces?.some((w) => w.isDemo)
-            ? "Workspaces you're a member of, and the demo workspace everyone can look around in."
-            : "Workspaces you're a member of. Projects and roles are managed inside a workspace."
-        }
+        description="Workspaces you're a member of. Projects and roles are managed inside a workspace."
         actions={createButton}
       />
       {error && <LoadError message={error} onRetry={reload} />}
       {loading && <Loading />}
+      {demoStatus.data?.enabled && <NewDemoNote />}
       {workspaces && workspaces.length === 0 && (
         <div className="surface">
           <EmptyState icon={Boxes} title="You don't have a workspace yet" action={createButton}>
@@ -136,10 +182,10 @@ export function WorkspacesPage() {
           </EmptyState>
         </div>
       )}
-      {workspaces && workspaces.length > 0 && workspaces.every((w) => w.isDemo) && (
+      {hasDemo && (
         <p className="info-note">
           <Info size={16} aria-hidden="true" />
-          The demo workspace is read-only. Create a workspace of your own to add cases and run tests.
+          DEMO is your own workspace with an example shop project: try anything there. Create a workspace of your own for your team's real projects.
         </p>
       )}
       {workspaces && workspaces.length > 0 && (

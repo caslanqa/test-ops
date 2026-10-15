@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { EmptyState, FormError, Loading, PageHeader } from '../components/Page';
 import { TypeToConfirmDialog } from '../components/TypeToConfirmDialog';
 import { useNotice } from '../lib/notice';
-import { recordsChanged, useWorkspace, type Workspace } from '../lib/projectInfo';
+import { clearProjectInfoCache, recordsChanged, useWorkspace, type Workspace } from '../lib/projectInfo';
 import { usePageTitle } from '../lib/useResource';
 import { WorkspaceTabs } from './WorkspaceMembersPage';
 
@@ -97,7 +97,9 @@ function DeleteSection({ workspace }: { workspace: Workspace }) {
         onClose={() => setConfirming(false)}
         onConfirm={async () => {
           await api.delete(`/workspaces/${workspace.id}`, { confirmName: workspace.name });
-          recordsChanged();
+          // Only the cache is dropped: telling the open pages to reload would make this one ask for
+          // the workspace that is gone. The side menu reloads on the way to /workspaces anyway.
+          clearProjectInfoCache();
           notify(`Workspace "${workspace.name}" deleted.`, undefined, true);
           navigate('/workspaces');
         }}

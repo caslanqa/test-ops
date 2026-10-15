@@ -197,25 +197,16 @@ export function WorkspaceDetailPage() {
         title={workspace?.name ?? 'Workspace'}
         description={
           workspace?.isDemo
-            ? isAdmin
-              ? 'The demo workspace: everyone who signs in can look around in these projects, read-only.'
-              : 'A read-only demo that everyone can look around in. To add cases and run tests, create a workspace of your own.'
+            ? 'Your own demo workspace with an example shop project. Try anything here: start a run from the plan, assign cases, record results. Delete it from Settings when you no longer need it.'
             : isAdmin
               ? 'Projects in this workspace. Each project has its own test cases, plans and runs.'
               : "Projects in this workspace that you're a member of."
         }
         actions={
-          workspace?.isDemo && !isAdmin ? (
-            <Link to="/workspaces?create" className="btn btn-secondary">
-              <Plus size={16} aria-hidden="true" />
-              New workspace
-            </Link>
-          ) : (
-            <>
-              <ArchivedToggle checked={showArchived} onChange={setShowArchived} />
-              {createButton}
-            </>
-          )
+          <>
+            <ArchivedToggle checked={showArchived} onChange={setShowArchived} />
+            {createButton}
+          </>
         }
       />
       <WorkspaceTabs workspaceId={workspaceId} />

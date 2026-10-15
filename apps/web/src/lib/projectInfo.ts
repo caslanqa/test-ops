@@ -8,7 +8,7 @@ export interface Workspace {
   slug: string;
   /** Only present in the single-workspace response. */
   currentUserRole?: 'ADMIN' | 'MEMBER';
-  /** The built-in DEMO workspace: every signed-in user can look around in it, read-only. */
+  /** The user's own demo workspace, with an example project to try everything on. */
   isDemo?: boolean;
 }
 
