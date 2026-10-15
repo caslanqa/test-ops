@@ -2281,6 +2281,23 @@ input[type='checkbox'] {
   border-radius: var(--radius-lg);
 }
 
+/* Team stats of a run. */
+.team-stats-note {
+  margin: -0.5rem 0 0.75rem;
+  font-size: var(--text-sm);
+}
+
+.team-stats-person {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.team-stats-person svg {
+  margin-inline-end: 0.375rem;
+  vertical-align: -0.2em;
+  color: var(--ink-muted);
+}
+
 /* Tick boxes for bulk actions in the run table. */
 .col-select {
   width: 2.75rem;

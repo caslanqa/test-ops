@@ -305,6 +305,20 @@ check('the run counts Retest and keeps the attempts', afterRetest.progress.RETES
 await ok(ci, 'POST', `${P}/runs/${manual.id}/results`, { testCaseId: cases[48].id, status: 'PASSED', source: 'MANUAL' });
 check('the next result replaces Retest', (await caseStatus(manual.id, cases[48].id)) === 'PASSED');
 
+// Team stats: each case once, for the author of its latest result or, while it waits, its assignee;
+// time adds up every attempt of the person.
+const team = await ok(ci, 'GET', `${P}/runs/${manual.id}/team-stats`);
+const person = team.find((r) => r.kind === 'PERSON');
+check('team stats: a case counts for whoever recorded its latest result',
+  person?.name === 'CI Bot' && person.caseCount === 1 && person.counts.PASSED === 1, JSON.stringify(team));
+check("...with every one of that person's attempts and their time", person?.resultCount === 3 && person.durationMs === 4000, JSON.stringify(person));
+const waiting = team.find((r) => r.kind === 'UNASSIGNED');
+check('...and a case without a result counts as unassigned', waiting?.caseCount === 1 && waiting.counts.UNTESTED === 1 && waiting.resultCount === 0, JSON.stringify(waiting));
+const ciTeam = await ok(ci, 'GET', `${P}/runs/${nightly.id}/team-stats`);
+check('automated results count for Automation, not for the token owner',
+  ciTeam.length === 1 && ciTeam[0].kind === 'AUTOMATION' && ciTeam[0].caseCount === cases.length && ciTeam[0].resultCount === 500, JSON.stringify(ciTeam.map((r) => [r.kind, r.caseCount, r.resultCount])));
+await expectStatus('team stats of a run of another project are not found', 404, ci, 'GET', `${other}/runs/${manual.id}/team-stats`);
+
 // Bulk actions on the run page: one request for several cases, all or none.
 const bulkRun = await newRun('Bulk actions', { source: 'MANUAL', testCaseIds: cases.slice(30, 34).map((c) => c.id) });
 const bulkCases = (await ok(ci, 'GET', `${P}/runs/${bulkRun.id}`)).runCases;
