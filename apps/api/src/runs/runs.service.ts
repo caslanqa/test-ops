@@ -6,7 +6,6 @@ import {
 } from "@nestjs/common";
 import * as crypto from "crypto";
 import { Prisma, ProjectRole, RunCaseStatus, RunStatus } from "@prisma/client";
-import { AutomationStatus, ExecutionMode } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRunDto } from "./dto/create-run.dto";
@@ -14,6 +13,8 @@ import { UpdateRunDto } from "./dto/update-run.dto";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
 import { pageArgs } from "../common/pagination";
 import { AttachmentFilesService } from "../attachments/attachment-files.service";
+// The run case fields this service sets when a run starts.
+import { AutomationStatus, ExecutionMode } from "@prisma/client";
 
 const WRITE_ROLES: ProjectRole[] = [
   ProjectRole.ADMIN,
