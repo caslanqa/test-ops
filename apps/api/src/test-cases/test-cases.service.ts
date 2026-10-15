@@ -10,6 +10,19 @@ import { BulkCreateTestCasesDto } from "./dto/bulk-create-test-cases.dto";
 
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
 
+/** The requirements a case covers, as cases are returned: enough to name and link them. */
+const REQUIREMENT_LINKS = {
+  select: { requirement: { select: { id: true, title: true, externalRef: true, archivedAt: true } } },
+  orderBy: { createdAt: "asc" },
+} satisfies Prisma.TestCase$requirementsArgs;
+
+/** Links for a new case; duplicates in the list count once. */
+function linkRequirements(requirementIds: string[] | undefined) {
+  return requirementIds?.length
+    ? { create: [...new Set(requirementIds)].map((requirementId) => ({ requirementId })) }
+    : undefined;
+}
+
 @Injectable()
 export class TestCasesService {
   constructor(
@@ -40,7 +53,7 @@ export class TestCasesService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.testCase.findMany({
         where,
-        include: { steps: { orderBy: { position: "asc" } } },
+        include: { steps: { orderBy: { position: "asc" } }, requirements: REQUIREMENT_LINKS },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
         ...pageArgs(query),
       }),
@@ -74,6 +87,7 @@ export class TestCasesService {
       WRITE_ROLES,
     );
     await this.accessControl.assertSuiteInProject(projectId, dto.suiteId);
+    await this.accessControl.assertRequirementsInProject(projectId, dto.requirementIds ?? []);
     return this.prisma.testCase.create({
       data: {
         projectId,
@@ -97,8 +111,9 @@ export class TestCasesService {
               })),
             }
           : undefined,
+        requirements: linkRequirements(dto.requirementIds),
       },
-      include: { steps: true },
+      include: { steps: true, requirements: REQUIREMENT_LINKS },
     });
   }
 
@@ -115,10 +130,21 @@ export class TestCasesService {
     );
     const before = await this.getOne(userId, projectId, caseId);
     await this.accessControl.assertSuiteInProject(projectId, dto.suiteId);
+    await this.accessControl.assertRequirementsInProject(projectId, dto.requirementIds ?? []);
 
     return this.prisma.$transaction(async (tx) => {
       if (dto.steps) {
         await tx.testCaseStep.deleteMany({ where: { testCaseId: caseId } });
+      }
+      // The given requirements replace the case's links; the ones it keeps keep their link date.
+      if (dto.requirementIds) {
+        await tx.requirementCase.deleteMany({
+          where: { testCaseId: caseId, requirementId: { notIn: dto.requirementIds } },
+        });
+        await tx.requirementCase.createMany({
+          data: [...new Set(dto.requirementIds)].map((requirementId) => ({ requirementId, testCaseId: caseId })),
+          skipDuplicates: true,
+        });
       }
       const updated = await tx.testCase.update({
         where: { id: caseId },
@@ -143,7 +169,7 @@ export class TestCasesService {
               }
             : undefined,
         },
-        include: { steps: { orderBy: { position: "asc" } } },
+        include: { steps: { orderBy: { position: "asc" } }, requirements: REQUIREMENT_LINKS },
       });
       await tx.testCaseHistory.create({
         data: {
@@ -209,6 +235,10 @@ export class TestCasesService {
     for (const suiteId of suiteIds) {
       await this.accessControl.assertSuiteInProject(projectId, suiteId);
     }
+    await this.accessControl.assertRequirementsInProject(
+      projectId,
+      dto.cases.flatMap((c) => c.requirementIds ?? []),
+    );
     const items = await this.prisma.$transaction(
       dto.cases.map((c) =>
         this.prisma.testCase.create({
@@ -234,8 +264,9 @@ export class TestCasesService {
                   })),
                 }
               : undefined,
+            requirements: linkRequirements(c.requirementIds),
           },
-          include: { steps: true },
+          include: { steps: true, requirements: REQUIREMENT_LINKS },
         }),
       ),
     );

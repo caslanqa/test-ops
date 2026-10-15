@@ -65,6 +65,15 @@ interface TestCase {
   tags: string[];
   steps: TestCaseStep[];
   archivedAt: string | null;
+  /** The requirements this case covers. */
+  requirements: { requirement: RequirementRef }[];
+}
+
+interface RequirementRef {
+  id: string;
+  title: string;
+  externalRef: string | null;
+  archivedAt: string | null;
 }
 
 /** Selected node in the tree: all cases, cases outside any suite, or a suite. */
@@ -233,6 +242,23 @@ function CaseDetail({
           ))}
         </ul>
       )}
+
+      <section className="detail-section">
+        <h3>Requirements</h3>
+        {testCase.requirements.length === 0 ? (
+          <p className="muted">Not linked to a requirement.</p>
+        ) : (
+          <ul className="requirement-refs">
+            {testCase.requirements.map(({ requirement: r }) => (
+              <li key={r.id}>
+                {r.title}
+                {r.externalRef && <span className="ref"> {r.externalRef}</span>}
+                {r.archivedAt && <span className="muted"> (archived)</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {testCase.description && (
         <section className="detail-section">
@@ -429,6 +455,14 @@ function CaseForm({
   const [automationStatus, setAutomationStatus] = useState(testCase?.automationStatus ?? 'MANUAL');
   const [description, setDescription] = useState(testCase?.description ?? '');
   const [preconditions, setPreconditions] = useState(testCase?.preconditions ?? '');
+  const linkedIds = (testCase?.requirements ?? []).map((link) => link.requirement.id);
+  const [requirementIds, setRequirementIds] = useState<string[]>(linkedIds);
+  // Archived requirements are loaded too, so that links to them stay visible and can be removed.
+  const requirements = useResource(
+    () => api.get<RequirementRef[]>(`/projects/${projectId}/requirements?includeArchived=true`),
+    [projectId],
+  );
+  const offeredRequirements = (requirements.data ?? []).filter((r) => !r.archivedAt || linkedIds.includes(r.id));
   // Keys 1..n for the existing steps; added steps continue from n.
   const nextKey = useRef(testCase?.steps.length ?? 0);
   const [steps, setSteps] = useState<StepDraft[]>(() =>
@@ -447,6 +481,7 @@ function CaseForm({
     automation: useId(),
     description: useId(),
     preconditions: useId(),
+    requirementsHint: useId(),
   };
 
   function addStep() {
@@ -492,12 +527,14 @@ function CaseForm({
               suiteId: testCase.suiteId,
               description: testCase.description,
               preconditions: testCase.preconditions,
+              requirementIds: [...linkedIds].sort(),
             },
             {
               ...fields,
               suiteId: suiteId || null,
               description: description.trim() || null,
               preconditions: preconditions.trim() || null,
+              requirementIds: [...requirementIds].sort(),
             },
           )
         : {};
@@ -510,6 +547,7 @@ function CaseForm({
             suiteId: suiteId || undefined,
             description: description.trim() || undefined,
             preconditions: preconditions.trim() || undefined,
+            requirementIds: requirementIds.length > 0 ? requirementIds : undefined,
           });
       onSaved(saved);
     } catch (err) {
@@ -563,6 +601,40 @@ function CaseForm({
         <label htmlFor={ids.preconditions} className="field-label">Preconditions</label>
         <textarea id={ids.preconditions} rows={2} value={preconditions} onChange={(e) => setPreconditions(e.target.value)} />
       </div>
+
+      <fieldset className="requirement-picker" aria-describedby={ids.requirementsHint}>
+        <legend className="field-label">Requirements</legend>
+        <p id={ids.requirementsHint} className="field-hint">The requirements this case covers; they show its results.</p>
+        {requirements.error ? (
+          <p className="form-error" role="alert">{requirements.error}</p>
+        ) : !requirements.data ? (
+          <Loading label="Loading requirements…" />
+        ) : offeredRequirements.length === 0 ? (
+          <p className="muted">This project has no requirements yet; add them on the Requirements page.</p>
+        ) : (
+          <ul>
+            {offeredRequirements.map((r) => (
+              <li key={r.id} className="checkbox-field">
+                <input
+                  id={`${ids.requirementsHint}-${r.id}`}
+                  type="checkbox"
+                  checked={requirementIds.includes(r.id)}
+                  onChange={(e) =>
+                    setRequirementIds((current) =>
+                      e.target.checked ? [...current, r.id] : current.filter((id) => id !== r.id),
+                    )
+                  }
+                />
+                <label htmlFor={`${ids.requirementsHint}-${r.id}`}>
+                  {r.title}
+                  {r.externalRef && <span className="ref"> {r.externalRef}</span>}
+                  {r.archivedAt && <span className="muted"> (archived)</span>}
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </fieldset>
 
       <fieldset className="steps-editor">
         <legend className="field-label">Steps</legend>

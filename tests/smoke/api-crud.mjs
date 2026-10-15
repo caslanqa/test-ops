@@ -131,6 +131,25 @@ const empty = coverage.find((r) => r.requirementId === uncovered.id);
 check('a requirement without cases has no coverage', empty?.hasCoverage === false && empty.caseCount === 0
   && Object.keys(empty.lastResultStatusBreakdown).length === 0, JSON.stringify(empty));
 
+// ---------- requirements chosen in the case form
+console.log('--- Cases linked to requirements when saved ---');
+const linkedCase = await ok(admin, 'POST', `${P}/cases`, { title: 'Pay with a saved card', requirementIds: [covered.id, uncovered.id] });
+const linksOf = async (r) => (await ok(admin, 'GET', `${P}/requirements/${r.id}`)).cases.map((c) => c.testCase.id);
+check('a new case can be linked to requirements',
+  linkedCase.requirements?.length === 2 && (await linksOf(covered)).includes(linkedCase.id) && (await linksOf(uncovered)).includes(linkedCase.id),
+  JSON.stringify(linkedCase.requirements));
+await ok(admin, 'PATCH', `${P}/cases/${linkedCase.id}`, { requirementIds: [uncovered.id] });
+check('an edit replaces the links', !(await linksOf(covered)).includes(linkedCase.id) && (await linksOf(uncovered)).includes(linkedCase.id));
+await ok(admin, 'PATCH', `${P}/cases/${linkedCase.id}`, { title: 'Pay with a stored card' });
+check('...and an edit without requirementIds keeps them', (await linksOf(uncovered)).includes(linkedCase.id));
+const listedCase = (await ok(admin, 'GET', `${P}/cases`)).find((c) => c.id === linkedCase.id);
+check('the case list names the linked requirements', listedCase?.requirements?.[0]?.requirement?.title === 'Refunds are covered', JSON.stringify(listedCase?.requirements));
+await ok(admin, 'PATCH', `${P}/cases/${linkedCase.id}`, { requirementIds: [] });
+check('an empty list removes every link', !(await linksOf(uncovered)).includes(linkedCase.id));
+const foreignReq = await ok(admin, 'POST', `${other}/requirements`, { title: 'Another project' });
+await expectStatus("a requirement of another project can't be linked", 404, admin, 'POST', `${P}/cases`, { title: 'Cross link', requirementIds: [foreignReq.id] });
+await expectStatus('...on an edit either', 404, admin, 'PATCH', `${P}/cases/${linkedCase.id}`, { requirementIds: [foreignReq.id] });
+
 // ---------- suites and milestones
 console.log('--- Suites and milestones ---');
 check('get one suite', (await ok(admin, 'GET', `${P}/suites/${suite.id}`)).name === 'Bulk suite');
