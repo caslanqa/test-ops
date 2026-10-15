@@ -279,6 +279,16 @@ check('the case-ids endpoint returns the release2Plan order',
 check('a release2Plan can assign its cases', planNow.items.filter((i) => i.assigneeId === testerId).length === 2);
 await expectStatus('a single release2Plan case can be assigned', 200, admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases/${c3.id}`, { assigneeId: testerId });
 await expectStatus('only people with access to the project can be assigned', 404, admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases/${c3.id}`, { assigneeId: 'not-a-user' });
+// Assigning every case of the plan at once while planning: all or none.
+const planCaseIds = [c2.id, c1.id, c3.id];
+const planAssignees = async () => (await ok(admin, 'GET', `${P}/plans/${release2Plan.id}`)).items.map((i) => i.assigneeId);
+const unassignedAll = await call(admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases`, { testCaseIds: planCaseIds, assigneeId: null });
+check(`[${unassignedAll.status}] every case of a plan can be unassigned at once`,
+  unassignedAll.status === 200 && unassignedAll.json.count === 3 && (await planAssignees()).every((a) => a === null), JSON.stringify(unassignedAll.json));
+await expectStatus('a case outside the plan makes the whole assignment fail', 404, admin, 'PATCH', `${P}/plans/${release2Plan.id}/cases`, { testCaseIds: [c1.id, caseA.id], assigneeId: testerId });
+check('...and changes nothing', (await planAssignees()).every((a) => a === null));
+await expectStatus('a tester assigns every case of the plan at once', 200, tester, 'PATCH', `${P}/plans/${release2Plan.id}/cases`, { testCaseIds: planCaseIds, assigneeId: testerId });
+check('...to that person', (await planAssignees()).every((a) => a === testerId));
 await ok(admin, 'DELETE', `${P}/cases/${c3.id}`); // archived after it was planned
 const fromPlan = await ok(admin, 'POST', `${P}/runs`, { title: 'Release 2 run', planId: release2Plan.id });
 check('a run from a release2Plan takes its milestone, environment and configuration',
