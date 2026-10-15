@@ -9,6 +9,7 @@ import { AccountPage } from './pages/AccountPage';
 import { SupportPage } from './pages/SupportPage';
 import { WorkspaceMembersPage } from './pages/WorkspaceMembersPage';
 import { ProjectMembersPage } from './pages/project/ProjectMembersPage';
+import { IntegrationsPage } from './pages/project/IntegrationsPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 import { WorkspaceDetailPage } from './pages/WorkspaceDetailPage';
 import { SuitesCasesPage } from './pages/project/SuitesCasesPage';
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="runs/:runId" element={<RunDetailPage />} />
               <Route path="defects" element={<DefectsPage />} />
               <Route path="members" element={<ProjectMembersPage />} />
+              <Route path="integrations" element={<IntegrationsPage />} />
             </Route>
           </Route>
         </Route>

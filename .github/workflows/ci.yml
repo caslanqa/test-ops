@@ -84,6 +84,7 @@ jobs:
           node tests/smoke/api-crud.mjs
           node tests/smoke/users.mjs
           node tests/smoke/results.mjs
+          node tests/smoke/webhooks.mjs
           bash tests/smoke/attachments.sh
           node tests/smoke/ratelimit.mjs
 
@@ -96,6 +97,12 @@ jobs:
           node tests/smoke/demo-workspace.mjs
           DEMO_WORKSPACE=false docker compose up -d --wait --wait-timeout 120 app
           node tests/smoke/demo-workspace.mjs --disabled
+
+      # Real webhook calls, to a receiver inside the app container, so private addresses are allowed.
+      - name: Webhook delivery smoke test
+        run: |
+          WEBHOOK_ALLOW_PRIVATE_NETWORKS=true docker compose up -d --wait --wait-timeout 120 app
+          node tests/smoke/webhooks.mjs --deliver
 
       # Recreates only the app container with sign-up disabled; the database and seed data stay.
       - name: Closed installation smoke test

@@ -124,9 +124,64 @@ model Project {
   runs         TestRun[]
   defects      Defect[]
   auditLog     AuditLog[]
+  webhook      ProjectWebhook?
 
   @@unique([workspaceId, key])
   @@map("projects")
+}
+
+/// A project's CI webhook (FR-079): called when a run starts that has cases for automation to run,
+/// so CI can run them. Secrets are encrypted at rest (common/secret-box.ts) and never returned.
+model ProjectWebhook {
+  id               String   @id @default(uuid())
+  projectId        String   @unique
+  url              String
+  /// The TestOps address put in the calls (api_url, run links): PUBLIC_URL, or else the address the
+  /// admin saved the webhook from. Never taken from the request that starts a run, so whoever starts
+  /// one can't point CI, and the token CI reports with, at another server.
+  baseUrl          String
+  /// Extra request headers, e.g. Authorization for GitHub: encrypted JSON of { name: value }.
+  headersEncrypted String?
+  /// The names of those headers, so they can be listed without decrypting them.
+  headerNames      String[] @default([])
+  /// The key of the X-TestOps-Signature-256 HMAC, encrypted.
+  secretEncrypted  String
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@map("project_webhooks")
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+/// One call of a project webhook, with its outcome, so people can see whether CI was reached.
+model WebhookDelivery {
+  id           String                @id @default(uuid())
+  webhookId    String
+  runId        String?
+  /// "run.started", or "ping" for a test from the settings page.
+  event        String
+  status       WebhookDeliveryStatus @default(PENDING)
+  attempts     Int                   @default(0)
+  responseCode Int?
+  error        String?
+  createdAt    DateTime              @default(now())
+  completedAt  DateTime?
+
+  webhook ProjectWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  run     TestRun?       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
+  @@index([runId, createdAt])
+  @@map("webhook_deliveries")
 }
 
 model ProjectMember {
@@ -384,6 +439,7 @@ model TestRun {
   milestone Milestone? @relation(fields: [milestoneId], references: [id])
   createdBy User       @relation("TestRunCreatedBy", fields: [createdById], references: [id])
   runCases  RunCase[]
+  webhookDeliveries WebhookDelivery[]
 
   @@index([projectId])
   @@map("test_runs")

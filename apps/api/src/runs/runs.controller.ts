@@ -12,13 +12,17 @@ import {
   AuthenticatedUser,
 } from "../common/decorators/current-user.decorator";
 import type { Response } from "express";
+import { WebhooksService } from "../webhooks/webhooks.service";
 import { PagedResponse, sendPage } from "../common/pagination";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
 
 @ApiTags("runs")
 @Controller("projects/:projectId/runs")
 export class RunsController {
-  constructor(private readonly runsService: RunsService) {}
+  constructor(
+    private readonly runsService: RunsService,
+    private readonly webhooksService: WebhooksService,
+  ) {}
 
   @Get()
   @PagedResponse()
@@ -40,13 +44,19 @@ export class RunsController {
     return this.runsService.getOne(user.id, projectId, runId);
   }
 
+  /**
+   * Starts a run. When the project has a CI webhook and the run has cases for automation, CI is
+   * called in the background (not for runs CI starts itself); GET …/runs/{runId}/ci shows how it went.
+   */
   @Post()
-  create(
+  async create(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
     @Body() dto: CreateRunDto,
   ) {
-    return this.runsService.create(user.id, projectId, dto);
+    const run = await this.runsService.create(user.id, projectId, dto);
+    void this.webhooksService.runStarted(run);
+    return run;
   }
 
   @Patch(":runId")

@@ -84,6 +84,14 @@ export default () => ({
       JSON_DEFAULT_MAX_REQUEST_SIZE_BYTES,
     ),
   },
+  webhooks: {
+    // Lets webhooks reach private and local addresses, for CI on the internal network (see
+    // webhooks/safe-post.ts). Off by default, so a shared server can't be used to probe its own network.
+    allowPrivateNetworks: process.env.WEBHOOK_ALLOW_PRIVATE_NETWORKS?.trim().toLowerCase() === "true",
+  },
+  // The app's public address, for links sent to CI; Coolify sets SERVICE_URL_APP_3000. Without
+  // either, the address the request came to is used.
+  publicUrl: (process.env.PUBLIC_URL?.trim() || process.env.SERVICE_URL_APP_3000?.trim() || "").replace(/\/+$/, "") || null,
   jwt: {
     secret: resolveJwtSecret(),
     expiresIn: process.env.JWT_EXPIRES_IN ?? "8h",
