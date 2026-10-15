@@ -51,6 +51,8 @@ interface RunCase {
   testCaseId: string;
   assigneeId: string | null;
   status: string;
+  /** How the case is meant to run in this run, chosen when the run started. */
+  executionMode: 'MANUAL' | 'AUTOMATED';
   position: number;
   caseSnapshot: CaseSnapshot | null;
   testCase: { id: string; title: string };
@@ -338,14 +340,17 @@ function ResultHistory({
   );
 }
 
-/** Where the case's latest result came from, as an icon plus text so it doesn't rely on the icon alone. */
-function SourceLabel({ result }: { result: ResultRow | undefined }) {
-  if (!result) return <span className="muted">—</span>;
-  const manual = result.source === 'MANUAL';
+/**
+ * Where the case's latest result came from, as an icon plus text so it doesn't rely on the icon
+ * alone. Before the first result it shows, dimmed, how the case is planned to run.
+ */
+function SourceLabel({ result, mode }: { result: ResultRow | undefined; mode: RunCase['executionMode'] }) {
+  const manual = result ? result.source === 'MANUAL' : mode === 'MANUAL';
   return (
-    <span className="source-label">
+    <span className={`source-label${result ? '' : ' muted'}`} title={result ? undefined : 'Planned for this run; no result yet'}>
       {manual ? <Hand size={14} aria-hidden="true" /> : <Bot size={14} aria-hidden="true" />}
       {manual ? 'Manual' : 'Automation'}
+      {!result && <span className="visually-hidden"> (planned, no result yet)</span>}
     </span>
   );
 }
@@ -726,12 +731,14 @@ export function RunDetailPage() {
   // Admins and testers assign cases; a tester can narrow the list to their own.
   const canAssign = editRepository;
   const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
-  // Cases without a result have no source, so a source filter leaves them out.
+  // A case's source is where its latest result came from, or before that how it is planned to run.
+  const sourceOf = (rc: RunCase) =>
+    latestResultByCase.get(rc.testCaseId)?.source ?? (rc.executionMode === 'AUTOMATED' ? 'AUTOMATION' : 'MANUAL');
   const matchesFilters = (rc: RunCase) =>
     (!onlyCaseId || rc.id === onlyCaseId) &&
     (!onlyMine || rc.assigneeId === user?.id) &&
     (!statusFilter || rc.status === statusFilter) &&
-    (sourceFilter === 'ALL' || latestResultByCase.get(rc.testCaseId)?.source === sourceFilter);
+    (sourceFilter === 'ALL' || sourceOf(rc) === sourceFilter);
   const shownCases = runCases.filter(matchesFilters);
   const filtered = onlyCaseId !== null || onlyMine || statusFilter !== null || sourceFilter !== 'ALL';
   const onlyCase = onlyCaseId ? runCases.find((rc) => rc.id === onlyCaseId) : undefined;
@@ -961,7 +968,7 @@ export function RunDetailPage() {
                     {/* On narrow screens the assignee and source columns are hidden, so they sit under the title. */}
                     <div className="runcase-assignee show-sm">
                       {assigneeControl(rc)}
-                      <SourceLabel result={latestResultByCase.get(rc.testCaseId)} />
+                      <SourceLabel result={latestResultByCase.get(rc.testCaseId)} mode={rc.executionMode} />
                     </div>
                     {canRecord && (
                       <div className="show-sm cell-actions-sm">
@@ -982,7 +989,7 @@ export function RunDetailPage() {
                     </span>
                   </td>
                   <td className="hide-sm">
-                    <SourceLabel result={latestResultByCase.get(rc.testCaseId)} />
+                    <SourceLabel result={latestResultByCase.get(rc.testCaseId)} mode={rc.executionMode} />
                   </td>
                   <td className="hide-sm num muted">{formatDuration(rc.durationMs)}</td>
                   {canRecord && (

@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import * as crypto from "crypto";
 import { Prisma, ProjectRole, RunCaseStatus, RunStatus } from "@prisma/client";
+import { AutomationStatus, ExecutionMode } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
 import { CreateRunDto } from "./dto/create-run.dto";
@@ -212,6 +213,21 @@ export class RunsService {
         : [];
     const caseById = new Map(testCases.map((tc) => [tc.id, tc]));
 
+    // How each case runs in this run: the request's choice, or else as the case is defined.
+    let automated: Set<string> | null = null;
+    if (dto.automatedCaseIds) {
+      const inRun = new Set(items.map((i) => i.testCaseId));
+      const outside = dto.automatedCaseIds.filter((id) => !inRun.has(id));
+      if (outside.length > 0) {
+        throw new BadRequestException(`automatedCaseIds can only name cases of this run: ${outside.join(", ")}`);
+      }
+      automated = new Set(dto.automatedCaseIds);
+    }
+    const modeOf = (testCaseId: string) =>
+      (automated ? automated.has(testCaseId) : caseById.get(testCaseId)!.automationStatus === AutomationStatus.AUTOMATED)
+        ? ExecutionMode.AUTOMATED
+        : ExecutionMode.MANUAL;
+
     return this.prisma.testRun.create({
       data: {
         projectId,
@@ -231,6 +247,7 @@ export class RunsService {
           create: items.map((item, index) => ({
             testCaseId: item.testCaseId,
             assigneeId: item.assigneeId,
+            executionMode: modeOf(item.testCaseId),
             position: index,
             caseSnapshot: buildCaseSnapshot(caseById.get(item.testCaseId)!) as Prisma.InputJsonValue,
           })),

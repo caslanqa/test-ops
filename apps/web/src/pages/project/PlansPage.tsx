@@ -1,6 +1,6 @@
 import { Fragment, useId, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, ChevronRight, ClipboardList, Pencil, Play, Plus } from 'lucide-react';
+import { Archive, ArchiveRestore, Bot, ChevronRight, ClipboardList, Hand, Pencil, Play, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
@@ -165,6 +165,139 @@ function PlanCases({
         ))}
       </ol>
     </div>
+  );
+}
+
+/** How a case runs in a run: by a tester, or by automation from CI. */
+type ExecutionMode = 'MANUAL' | 'AUTOMATED';
+
+const definedMode = (testCase: { automationStatus: string }): ExecutionMode =>
+  testCase.automationStatus === 'AUTOMATED' ? 'AUTOMATED' : 'MANUAL';
+
+function StartRunDialog({ plan, ...props }: Omit<Parameters<typeof StartRunForm>[0], 'plan'> & { plan: PlanRow | null }) {
+  return (
+    <Dialog
+      open={plan !== null}
+      onClose={props.onClose}
+      title="Start a run"
+      description={plan ? `From "${plan.title}". Choose how each case runs this time; the cases themselves don't change.` : undefined}
+      wide
+    >
+      {plan && <StartRunForm plan={plan} {...props} />}
+    </Dialog>
+  );
+}
+
+/**
+ * Starts a run from a plan. Every case starts as its automation status says (automated cases run
+ * from CI, the rest by testers), and can be switched for this run only.
+ */
+function StartRunForm({
+  projectId,
+  plan,
+  onClose,
+  onStarted,
+}: {
+  projectId: string;
+  plan: PlanRow;
+  onClose: () => void;
+  onStarted: (runId: string) => void;
+}) {
+  const detail = useResource(() => api.get<PlanDetail>(`/projects/${projectId}/plans/${plan.id}`), [projectId, plan.id]);
+  const [title, setTitle] = useState(() => runTitleFor(plan.title));
+  // The modes chosen here, by case; a case not in it runs as it is defined.
+  const [chosen, setChosen] = useState<Record<string, ExecutionMode>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const titleId = useId();
+  // Archived cases are left out of new runs, so they aren't offered.
+  const cases = (detail.data?.items ?? []).filter((item) => !item.testCase.archivedAt).map((item) => item.testCase);
+  const modeOf = (testCase: PlanDetail['items'][number]['testCase']) => chosen[testCase.id] ?? definedMode(testCase);
+  const automated = cases.filter((c) => modeOf(c) === 'AUTOMATED');
+  const setAll = (mode: ExecutionMode | null) =>
+    setChosen(mode ? Object.fromEntries(cases.map((c) => [c.id, mode])) : {});
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      const run = await api.post<{ id: string }>(`/projects/${projectId}/runs`, {
+        title: title.trim(),
+        planId: plan.id,
+        source: 'MANUAL',
+        automatedCaseIds: automated.map((c) => c.id),
+      });
+      onStarted(run.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't start the run");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="dialog-body" onSubmit={onSubmit}>
+      <div className="field">
+        <label htmlFor={titleId} className="field-label">Run title</label>
+        <input id={titleId} value={title} required maxLength={300} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      {detail.error ? (
+        <p className="form-error" role="alert">{detail.error}</p>
+      ) : !detail.data ? (
+        <Loading label="Loading the plan's cases…" />
+      ) : (
+        <fieldset className="mode-picker">
+          <legend className="field-label">How the cases run</legend>
+          <div className="mode-picker-tools">
+            <span className="muted" role="status">
+              {automated.length} automated, {cases.length - automated.length} manual
+            </span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll(null)}>As defined</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll('MANUAL')}>All manual</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAll('AUTOMATED')}>All automated</button>
+          </div>
+          <p className="field-hint">Automated cases wait for their results from CI; testers record the manual ones.</p>
+          <ul className="mode-list">
+            {cases.map((testCase) => {
+              const mode = modeOf(testCase);
+              const changed = mode !== definedMode(testCase);
+              return (
+                <li key={testCase.id}>
+                  <span className="mode-case-title">
+                    {testCase.title}
+                    {changed && <span className="muted"> · changed for this run</span>}
+                  </span>
+                  <span className="segmented segmented--sm" role="group" aria-label={`How "${testCase.title}" runs`}>
+                    <button
+                      type="button"
+                      aria-pressed={mode === 'MANUAL'}
+                      onClick={() => setChosen((current) => ({ ...current, [testCase.id]: 'MANUAL' }))}
+                    >
+                      <Hand size={14} aria-hidden="true" /> Manual
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={mode === 'AUTOMATED'}
+                      onClick={() => setChosen((current) => ({ ...current, [testCase.id]: 'AUTOMATED' }))}
+                    >
+                      <Bot size={14} aria-hidden="true" /> Automation
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+      )}
+      <FormError message={error} />
+      <div className="dialog-footer">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={saving || !detail.data || cases.length === 0}>
+          <Play size={16} aria-hidden="true" />
+          Start run
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -397,7 +530,8 @@ export function PlansPage() {
   const [archiving, setArchiving] = useState<PlanRow | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [starting, setStarting] = useState<string | null>(null);
+  // The plan whose start-run dialog is open.
+  const [startFrom, setStartFrom] = useState<PlanRow | null>(null);
   // Plans whose cases are listed under their row, and a counter that refreshes those lists.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [casesVersion, setCasesVersion] = useState(0);
@@ -428,22 +562,6 @@ export function PlansPage() {
       reload();
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Couldn't restore the plan");
-    }
-  }
-
-  async function startRun(plan: PlanRow) {
-    setStarting(plan.id);
-    setStartError(null);
-    try {
-      const run = await api.post<{ id: string }>(`/projects/${projectId}/runs`, {
-        title: runTitleFor(plan.title),
-        planId: plan.id,
-        source: 'MANUAL',
-      });
-      navigate(`/projects/${projectId}/runs/${run.id}`);
-    } catch (err) {
-      setStartError(err instanceof Error ? err.message : "Couldn't start the run");
-      setStarting(null);
     }
   }
 
@@ -520,8 +638,8 @@ export function PlansPage() {
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={() => startRun(plan)}
-                        disabled={starting === plan.id || plan._count.items === 0}
+                        onClick={() => { setStartError(null); setStartFrom(plan); }}
+                        disabled={plan._count.items === 0}
                         aria-label={`Start a run from ${plan.title}`}
                       >
                         <Play size={14} aria-hidden="true" />
@@ -569,6 +687,12 @@ export function PlansPage() {
           </table>
         </div>
       )}
+      <StartRunDialog
+        projectId={projectId}
+        plan={startFrom}
+        onClose={() => setStartFrom(null)}
+        onStarted={(runId) => navigate(`/projects/${projectId}/runs/${runId}`)}
+      />
       <CreatePlanDialog
         projectId={projectId}
         open={creating}
