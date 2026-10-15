@@ -86,6 +86,8 @@ const ui = await fetch(`${ORIGIN}/api/docs`);
 const html = await ui.text();
 check(`[${ui.status}] Swagger UI is served`, ui.status === 200 && html.includes('TestOps API reference'));
 
+const publicConfig = await (await fetch(`${BASE}/auth/config`)).json();
+check('the sign-in screen gets the running version', typeof publicConfig.version === 'string' && publicConfig.version.length > 0, JSON.stringify(publicConfig));
 const anon = await fetch(`${BASE}/system/info`);
 check(`[${anon.status}] /system/info requires sign-in`, anon.status === 401);
 const loginRes = await fetch(`${BASE}/auth/login`, {

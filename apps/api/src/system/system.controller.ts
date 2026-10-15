@@ -9,10 +9,8 @@ export class SystemController {
   constructor(private readonly config: ConfigService) {}
 
   /**
-   * Running version of this installation
-   *
-   * Requires sign-in on purpose: the exact version would tell an anonymous visitor
-   * which known issues apply to this server.
+   * Running version of this installation, with the API version. The version alone is also public in
+   * GET /auth/config, for the sign-in screen.
    */
   @Get("info")
   info(): SystemInfoDto {

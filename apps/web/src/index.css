@@ -2860,8 +2860,28 @@ input[type='checkbox'] {
   position: relative;
   display: grid;
   place-items: center;
-  padding: 2rem 1.5rem;
+  /* Room at the bottom for the version line, so a tall form never runs into it. */
+  padding: 2rem 1.5rem 3.5rem;
   background: var(--surface);
+}
+
+/* The running version, under the sign-in form. */
+.login-version {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 1rem;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+/* The running version, at the very bottom of the side menu. */
+.sidebar-version {
+  margin: 0.25rem 0 0;
+  padding-inline-start: 0.5rem;
+  color: var(--sidebar-muted);
+  font-size: var(--text-xs);
 }
 
 .login-form {
