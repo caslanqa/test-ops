@@ -2281,6 +2281,44 @@ input[type='checkbox'] {
   border-radius: var(--radius-lg);
 }
 
+/* Tick boxes for bulk actions in the run table. */
+.col-select {
+  width: 2.75rem;
+}
+
+.col-select input {
+  width: 1rem;
+  height: 1rem;
+  vertical-align: middle;
+}
+
+.data-table tr.is-checked > td {
+  background: var(--selected);
+}
+
+/* What can be done with the ticked cases; it stays in view while the list scrolls. */
+.bulk-bar {
+  position: sticky;
+  top: calc(var(--topbar-h) + 0.5rem);
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+}
+
+.bulk-count {
+  font-weight: 650;
+  font-size: var(--text-sm);
+  margin-inline-end: 0.25rem;
+}
+
 .result-actions {
   display: flex;
   flex-wrap: nowrap;

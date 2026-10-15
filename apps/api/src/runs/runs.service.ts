@@ -281,6 +281,63 @@ export class RunsService {
     return this.prisma.runCase.findUniqueOrThrow({ where: { id: runCaseId } });
   }
 
+  /** Sets or clears who tests several cases of the run at once: all of them, or none if one isn't in the run. */
+  async assignCases(
+    userId: string,
+    projectId: string,
+    runId: string,
+    runCaseIds: string[],
+    assigneeId: string | null,
+  ) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, [
+      ProjectRole.ADMIN,
+      ProjectRole.TESTER,
+    ]);
+    const run = await this.prisma.testRun.findFirst({
+      where: { id: runId, projectId },
+      select: { id: true },
+    });
+    if (!run) throw new NotFoundException("Run not found");
+    await this.accessControl.assertAssignableUser(projectId, assigneeId);
+    const ids = [...new Set(runCaseIds)];
+    return this.prisma.$transaction(async (tx) => {
+      const found = await tx.runCase.count({ where: { id: { in: ids }, runId } });
+      if (found !== ids.length) throw new NotFoundException("Some of the test cases are not in this run");
+      const { count } = await tx.runCase.updateMany({ where: { id: { in: ids }, runId }, data: { assigneeId } });
+      return { count };
+    });
+  }
+
+  /**
+   * "Run again" for several cases at once: all of them, or none if one isn't in the run or has no
+   * result yet. The cases are locked like a bulk result upload locks them, in the same order, so
+   * the two can't deadlock.
+   */
+  async retestCases(userId: string, projectId: string, runId: string, runCaseIds: string[]) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
+    const ids = [...new Set(runCaseIds)];
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertWritableRun(tx, projectId, runId);
+      const cases = await tx.runCase.findMany({ where: { id: { in: ids }, runId }, select: { testCaseId: true } });
+      if (cases.length !== ids.length) throw new NotFoundException("Some of the test cases are not in this run");
+      for (const testCaseId of cases.map((c) => c.testCaseId).sort()) {
+        const key = `result:${runId}:${testCaseId}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+      }
+      const untested = await tx.runCase.count({ where: { id: { in: ids }, status: RunCaseStatus.UNTESTED } });
+      if (untested > 0) {
+        throw new BadRequestException(
+          `${untested} of these cases ${untested === 1 ? "has" : "have"} no result yet, so there is nothing to run again`,
+        );
+      }
+      await tx.runCase.updateMany({
+        where: { id: { in: ids }, status: { not: RunCaseStatus.RETEST } },
+        data: { status: RunCaseStatus.RETEST },
+      });
+      return { count: ids.length };
+    });
+  }
+
   /**
    * "Run again": marks a case that has a result for another attempt. Its earlier attempts stay in
    * the run; the next result replaces the Retest status. Only open runs, like any result write,

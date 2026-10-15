@@ -6,6 +6,7 @@ import { CreateRunDto } from "./dto/create-run.dto";
 import { UpdateRunDto } from "./dto/update-run.dto";
 import { ToggleShareDto } from "./dto/toggle-share.dto";
 import { AssignCaseDto } from "../common/dto/assign-case.dto";
+import { AssignRunCasesDto, RunCaseIdsDto } from "./dto/run-case-ids.dto";
 import {
   CurrentUser,
   AuthenticatedUser,
@@ -56,6 +57,32 @@ export class RunsController {
     @Body() dto: UpdateRunDto,
   ) {
     return this.runsService.update(user.id, projectId, runId, dto);
+  }
+
+  /**
+   * Sets or clears who tests several cases of the run at once (project admins and testers); all
+   * or none.
+   */
+  @Patch(":runId/cases")
+  assignCases(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Body() dto: AssignRunCasesDto,
+  ) {
+    return this.runsService.assignCases(user.id, projectId, runId, dto.runCaseIds, dto.assigneeId);
+  }
+
+  /** "Run again" for several cases at once (open runs only); all or none, and each needs a result. */
+  @Post(":runId/cases/retest")
+  @HttpCode(200)
+  retestCases(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Body() dto: RunCaseIdsDto,
+  ) {
+    return this.runsService.retestCases(user.id, projectId, runId, dto.runCaseIds);
   }
 
   /** Sets or clears who tests a case in the run (project admins and testers). */
