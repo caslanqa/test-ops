@@ -1266,13 +1266,43 @@ input[type='checkbox'] {
   }
 }
 
+/* The cases of a plan, under its row: order, title, priority, automation, assignee. */
+.plan-cases {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  padding: 0.25rem 0 0.25rem 1.25rem;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.plan-cases > li {
+  display: contents;
+}
+
+@media (max-width: 40rem) {
+  .plan-cases {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 0.125rem;
+  }
+
+  /* Priority, automation and assignee go under the title. */
+  .plan-cases > li > :nth-child(n + 3) {
+    grid-column: 2;
+    font-size: var(--text-xs);
+  }
+}
+
 /* The cases linked to a requirement, under its row: status, title, automation, latest run. */
 .data-table tr.is-expanded > td {
   border-bottom-color: transparent;
   background: var(--surface-hover);
 }
 
-.requirement-cases-row > td {
+.requirement-cases-row > td,
+.expanded-row > td {
   padding-top: 0;
   background: var(--surface-hover);
 }

@@ -1,17 +1,18 @@
-import { useId, useState, type FormEvent } from 'react';
+import { Fragment, useId, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, ClipboardList, Pencil, Play, Plus } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronRight, ClipboardList, Pencil, Play, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
-import { Tag } from '../../components/StatusChip';
+import { PriorityMark, Tag } from '../../components/StatusChip';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { changedFields, hasChanges } from '../../lib/changes';
 import { useFocusFallback } from '../../lib/focus';
 import { formatDate, formatDateTime } from '../../lib/format';
+import { AUTOMATION_LABEL, labelOf } from '../../lib/labels';
 import { removeLink } from '../../lib/links';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectMembers } from '../../lib/members';
@@ -34,6 +35,59 @@ interface PlanRow {
   archivedAt: string | null;
   createdAt: string;
   _count: { items: number; runs: number };
+}
+
+/** A plan with its cases in order, as GET …/plans/{planId} returns it. */
+interface PlanDetail {
+  items: {
+    id: string;
+    assigneeId: string | null;
+    testCase: { id: string; title: string; priority: string; automationStatus: string; archivedAt: string | null };
+  }[];
+}
+
+/**
+ * The cases of a plan, in plan order, under its row: priority, whether each is automated, and
+ * who it is assigned to. Loaded when the row opens, and again after the plan is edited.
+ */
+function PlanCases({
+  id,
+  projectId,
+  plan,
+  version,
+  memberName,
+}: {
+  id: string;
+  projectId: string;
+  plan: PlanRow;
+  version: number;
+  memberName: Map<string, string>;
+}) {
+  const detail = useResource(
+    () => api.get<PlanDetail>(`/projects/${projectId}/plans/${plan.id}`),
+    [projectId, plan.id, version],
+  );
+  if (detail.error) return <p id={id} className="form-error" role="alert">{detail.error}</p>;
+  if (!detail.data) return <div id={id}><Loading label="Loading the plan's cases…" /></div>;
+  if (detail.data.items.length === 0) return <p id={id} className="muted">This plan has no cases yet.</p>;
+  return (
+    <ol id={id} className="plan-cases" aria-label={`Cases in ${plan.title}`}>
+      {detail.data.items.map((item, index) => (
+        <li key={item.id}>
+          <span className="muted num">{index + 1}</span>
+          <span className="plan-case-title">
+            {item.testCase.title}
+            {item.testCase.archivedAt && <span className="muted"> (archived, left out of new runs)</span>}
+          </span>
+          <PriorityMark priority={item.testCase.priority} />
+          <span className="muted">{labelOf(AUTOMATION_LABEL, item.testCase.automationStatus)}</span>
+          <span className="muted">
+            {item.assigneeId ? memberName.get(item.assigneeId) ?? 'Assigned' : 'Unassigned'}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 // No `key` on the dialog: its form mounts only while it is open, and a changing key would remove
@@ -266,6 +320,11 @@ export function PlansPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  // Plans whose cases are listed under their row, and a counter that refreshes those lists.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [casesVersion, setCasesVersion] = useState(0);
+  const members = useProjectMembers(projectId);
+  const memberName = new Map((members.data ?? []).map((m) => [m.user.id, m.user.displayName]));
   const { notify } = useNotice();
   const { data: plans, error, loading, reload } = useResource(
     () => api.get<PlanRow[]>(`/projects/${projectId}/plans${showArchived ? '?includeArchived=true' : ''}`),
@@ -274,6 +333,15 @@ export function PlansPage() {
 
   // An archived plan's row can disappear with the change; focus then moves to the page heading.
   const requestFocus = useFocusFallback(plans);
+
+  function toggle(planId: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(planId)) next.delete(planId);
+      else next.add(planId);
+      return next;
+    });
+  }
 
   async function restore(plan: PlanRow) {
     setStartError(null);
@@ -345,10 +413,24 @@ export function PlansPage() {
               </tr>
             </thead>
             <tbody>
-              {plans.map((plan) => (
-                <tr key={plan.id}>
+              {plans.map((plan) => {
+                const isOpen = expanded.has(plan.id);
+                const casesId = `plan-${plan.id}-cases`;
+                return (
+                <Fragment key={plan.id}>
+                <tr className={isOpen ? 'is-expanded' : undefined}>
                   <td>
-                    <span className="cell-title">{plan.title}</span>
+                    {/* The title opens the list of the plan's cases under the row. */}
+                    <button
+                      type="button"
+                      className="row-button disclosure-button"
+                      aria-expanded={isOpen}
+                      aria-controls={isOpen ? casesId : undefined}
+                      onClick={() => toggle(plan.id)}
+                    >
+                      <ChevronRight size={16} aria-hidden="true" className="disclosure-icon" />
+                      {plan.title}
+                    </button>
                     {plan.archivedAt && <> <Tag tone="outline">Archived</Tag></>}
                     {plan.description && <p className="cell-sub">{plan.description}</p>}
                   </td>
@@ -388,7 +470,16 @@ export function PlansPage() {
                   </td>
                   )}
                 </tr>
-              ))}
+                {isOpen && (
+                  <tr className="expanded-row">
+                    <td colSpan={execute || editRepository ? 5 : 4}>
+                      <PlanCases id={casesId} projectId={projectId} plan={plan} version={casesVersion} memberName={memberName} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -410,8 +501,12 @@ export function PlansPage() {
           setEditing(null);
           notify('Plan updated.');
           reload();
+          setCasesVersion((v) => v + 1);
         }}
-        onChanged={reload}
+        onChanged={() => {
+          reload();
+          setCasesVersion((v) => v + 1);
+        }}
       />
       <ConfirmDialog
         open={archiving !== null}
