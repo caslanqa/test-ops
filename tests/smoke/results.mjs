@@ -304,6 +304,32 @@ const afterRetest = await ok(ci, 'GET', `${P}/runs/${manual.id}`);
 check('the run counts Retest and keeps the attempts', afterRetest.progress.RETEST === 1 && afterRetest.runCases.find((rc) => rc.id === withResult.id).attemptCount === 2, JSON.stringify(afterRetest.progress));
 await ok(ci, 'POST', `${P}/runs/${manual.id}/results`, { testCaseId: cases[48].id, status: 'PASSED', source: 'MANUAL' });
 check('the next result replaces Retest', (await caseStatus(manual.id, cases[48].id)) === 'PASSED');
+
+// Bulk actions on the run page: one request for several cases, all or none.
+const bulkRun = await newRun('Bulk actions', { source: 'MANUAL', testCaseIds: cases.slice(30, 34).map((c) => c.id) });
+const bulkCases = (await ok(ci, 'GET', `${P}/runs/${bulkRun.id}`)).runCases;
+const bulkIds = bulkCases.map((rc) => rc.id);
+const me = (await ok(ci, 'GET', '/auth/me')).id;
+const assigned = await call(ci, 'PATCH', `${P}/runs/${bulkRun.id}/cases`, { runCaseIds: bulkIds.slice(0, 3), assigneeId: me });
+const afterAssign = (await ok(ci, 'GET', `${P}/runs/${bulkRun.id}`)).runCases;
+check(`[${assigned.status}] several cases are assigned at once`,
+  assigned.status === 200 && assigned.json.count === 3 && afterAssign.filter((rc) => rc.assigneeId === me).length === 3, JSON.stringify(assigned.json));
+await expectStatus('a case of another run makes the whole assignment fail', 404, ci, 'PATCH', `${P}/runs/${bulkRun.id}/cases`, { runCaseIds: [bulkIds[3], withResult.id], assigneeId: me });
+check('...and changes nothing', (await ok(ci, 'GET', `${P}/runs/${bulkRun.id}`)).runCases.find((rc) => rc.id === bulkIds[3]).assigneeId === null);
+await ok(ci, 'PATCH', `${P}/runs/${bulkRun.id}/cases`, { runCaseIds: bulkIds, assigneeId: null });
+check('null unassigns them all', (await ok(ci, 'GET', `${P}/runs/${bulkRun.id}`)).runCases.every((rc) => rc.assigneeId === null));
+await expectStatus('an empty list is rejected', 400, ci, 'PATCH', `${P}/runs/${bulkRun.id}/cases`, { runCaseIds: [], assigneeId: null });
+await ok(ci, 'POST', `${P}/runs/${bulkRun.id}/results/bulk`, {
+  results: cases.slice(30, 33).map((c) => ({ testCaseId: c.id, status: 'FAILED', source: 'MANUAL' })),
+});
+await expectStatus('Run again on a case without a result makes the whole request fail', 400, ci, 'POST', `${P}/runs/${bulkRun.id}/cases/retest`, { runCaseIds: bulkIds });
+check('...and changes nothing', ((await ok(ci, 'GET', `${P}/runs/${bulkRun.id}`)).progress.RETEST ?? 0) === 0);
+const retested = await call(ci, 'POST', `${P}/runs/${bulkRun.id}/cases/retest`, { runCaseIds: bulkIds.slice(0, 3) });
+const afterRetest2 = await ok(ci, 'GET', `${P}/runs/${bulkRun.id}`);
+check(`[${retested.status}] several cases are set to retest at once`,
+  retested.status === 200 && afterRetest2.progress.RETEST === 3 && afterRetest2.runCases.filter((rc) => rc.attemptCount === 1).length === 3, JSON.stringify(afterRetest2.progress));
+await ok(session, 'POST', `${P}/runs/${bulkRun.id}/complete`);
+await expectStatus('Run again on several cases of a completed run is refused', 403, ci, 'POST', `${P}/runs/${bulkRun.id}/cases/retest`, { runCaseIds: bulkIds.slice(0, 1) });
 await ok(session, 'POST', `${P}/runs/${manual.id}/complete`);
 await expectStatus('Run again on a completed run is refused', 403, ci, 'POST', `${P}/runs/${manual.id}/cases/${withResult.id}/retest`);
 

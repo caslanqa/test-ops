@@ -87,6 +87,9 @@ interface ResultRow {
   runCase: { testCaseId: string };
 }
 
+/** The bulk assign list's value for "Unassigned"; its empty value is the "Assign to…" prompt. */
+const UNASSIGN = '__unassign__';
+
 /** Where a case's latest result came from: a tester in the app, or automation through the API. */
 type SourceFilter = 'ALL' | 'MANUAL' | 'AUTOMATION';
 
@@ -612,6 +615,9 @@ export function RunDetailPage() {
     showAllCases,
   } = useRunView();
   const [pending, setPending] = useState<string | null>(null);
+  // Run cases ticked for a bulk action; only the ones the filters show are acted on.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkPending, setBulkPending] = useState(false);
   const { notify, dismiss } = useNotice();
   // Messages go to the app-wide live region (components/Notice) so that they are announced on every page.
   const setNotice = (notice: { text: string; defectLink?: boolean } | null) => {
@@ -697,6 +703,24 @@ export function RunDetailPage() {
     }
   }
 
+  /**
+   * Runs a bulk action on the ticked cases: one request, all or none, then a message and a fresh
+   * list. The selection is cleared once it succeeded; on an error it stays, so it can be retried.
+   */
+  async function bulk(action: () => Promise<string>, failure: string) {
+    setBulkPending(true);
+    setActionError(null);
+    try {
+      setNotice({ text: await action() });
+      setSelected(new Set());
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : failure);
+    } finally {
+      setBulkPending(false);
+    }
+  }
+
   // The latest result of the case gets the defect; the dialog creates one or links an open one.
   function openDefect(rc: RunCase) {
     setActionError(null);
@@ -733,6 +757,49 @@ export function RunDetailPage() {
     (!statusFilter || rc.status === statusFilter) &&
     (sourceFilter === 'ALL' || latestResultByCase.get(rc.testCaseId)?.source === sourceFilter);
   const shownCases = runCases.filter(matchesFilters);
+  // Bulk actions on an open run, for people who can record results or assign cases.
+  const canSelect = isOpen && (execute || canAssign);
+  const selectedCases = shownCases.filter((rc) => selected.has(rc.id));
+  const allShownSelected = shownCases.length > 0 && selectedCases.length === shownCases.length;
+  // "Run again" needs a result, and a case already waiting for one is left as it is.
+  const retestable = selectedCases.filter((rc) => rc.status !== 'UNTESTED' && rc.status !== 'RETEST');
+  const titleOf = (rc: RunCase) => rc.caseSnapshot?.title ?? rc.testCase.title;
+
+  function toggleSelected(id: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const markSelected = (status: ResultStatus) =>
+    bulk(async () => {
+      await api.post(`/projects/${projectId}/runs/${runId}/results/bulk`, {
+        results: selectedCases.map((rc) => ({ testCaseId: rc.testCaseId, status, source: 'MANUAL' })),
+      });
+      return `${plural(selectedCases.length, 'case')} marked as ${STATUS_META[status].label.toLowerCase()}.`;
+    }, "Couldn't save the results");
+
+  const assignSelected = (assigneeId: string | null) =>
+    bulk(async () => {
+      await api.patch(`/projects/${projectId}/runs/${runId}/cases`, {
+        runCaseIds: selectedCases.map((rc) => rc.id),
+        assigneeId,
+      });
+      return assigneeId
+        ? `${plural(selectedCases.length, 'case')} assigned to ${memberName.get(assigneeId) ?? 'the chosen person'}.`
+        : `${plural(selectedCases.length, 'case')} unassigned.`;
+    }, "Couldn't change the assignee");
+
+  const retestSelected = () =>
+    bulk(async () => {
+      await api.post(`/projects/${projectId}/runs/${runId}/cases/retest`, { runCaseIds: retestable.map((rc) => rc.id) });
+      const left = selectedCases.length - retestable.length;
+      const kept = left === 1 ? '1 case still waiting for a result was left as it was.' : `${left} cases still waiting for a result were left as they were.`;
+      return `${plural(retestable.length, 'case')} set to retest.${left > 0 ? ` ${kept}` : ''}`;
+    }, "Couldn't mark the cases for retest");
   const filtered = onlyCaseId !== null || onlyMine || statusFilter !== null || sourceFilter !== 'ALL';
   const onlyCase = onlyCaseId ? runCases.find((rc) => rc.id === onlyCaseId) : undefined;
   // Choosing the selected status again shows every case.
@@ -929,12 +996,82 @@ export function RunDetailPage() {
         </p>
       )}
 
+      {canSelect && selectedCases.length > 0 && (
+        <div className="bulk-bar" role="region" aria-label="Actions for the selected cases">
+          <span className="bulk-count" role="status">{plural(selectedCases.length, 'case')} selected</span>
+          {canRecord && (
+            <div className="result-buttons" role="group" aria-label="Set the result of the selected cases">
+              {RESULT_CHOICES.map((status) => {
+                const { label, icon: Icon } = STATUS_META[status];
+                return (
+                  <button
+                    key={status}
+                    type="button"
+                    className={`result-button result-button--${status.toLowerCase()}`}
+                    disabled={bulkPending}
+                    onClick={() => markSelected(status)}
+                    title={label}
+                  >
+                    <Icon size={16} aria-hidden="true" />
+                    <span className="result-button-label">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {canAssign && (
+            <Select
+              className="inline-select"
+              aria-label="Assign the selected cases"
+              value=""
+              disabled={bulkPending}
+              onChange={(e) => assignSelected(e.target.value === UNASSIGN ? null : e.target.value)}
+            >
+              <option value="">Assign to…</option>
+              <option value={UNASSIGN}>Unassigned</option>
+              {(members.data ?? []).map((m) => (
+                <option key={m.user.id} value={m.user.id}>{m.user.displayName}</option>
+              ))}
+            </Select>
+          )}
+          {canRecord && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={bulkPending || retestable.length === 0}
+              onClick={retestSelected}
+              title={retestable.length === 0 ? 'Only cases with a result can be run again' : undefined}
+            >
+              <RotateCcw size={14} aria-hidden="true" />
+              Run again
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
+            Clear selection
+          </button>
+        </div>
+      )}
+
       <div className={`run-body${openCase ? ' run-body--with-panel' : ''}`}>
         <div className="surface table-wrap">
           <table className="data-table data-table--interactive">
             <caption className="visually-hidden">Cases in this run and their results</caption>
             <thead>
               <tr>
+                {canSelect && (
+                  <th scope="col" className="col-select">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all shown cases"
+                      checked={allShownSelected}
+                      // Some but not all shown cases ticked.
+                      ref={(el) => {
+                        if (el) el.indeterminate = selectedCases.length > 0 && !allShownSelected;
+                      }}
+                      onChange={() => setSelected(allShownSelected ? new Set() : new Set(shownCases.map((rc) => rc.id)))}
+                    />
+                  </th>
+                )}
                 <th scope="col" className="col-index hide-sm">Order</th>
                 <th scope="col" className="col-main">Test case</th>
                 <th scope="col" className="hide-sm">Assignee</th>
@@ -946,7 +1083,20 @@ export function RunDetailPage() {
             </thead>
             <tbody>
               {shownCases.map((rc) => (
-                <tr key={rc.id} className={rc.id === openCaseId ? 'is-selected' : undefined}>
+                <tr
+                  key={rc.id}
+                  className={[rc.id === openCaseId && 'is-selected', selected.has(rc.id) && 'is-checked'].filter(Boolean).join(' ') || undefined}
+                >
+                  {canSelect && (
+                    <td className="col-select">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${titleOf(rc)}`}
+                        checked={selected.has(rc.id)}
+                        onChange={() => toggleSelected(rc.id)}
+                      />
+                    </td>
+                  )}
                   <td className="col-index muted num hide-sm">{runCases.indexOf(rc) + 1}</td>
                   <td>
                     <button
