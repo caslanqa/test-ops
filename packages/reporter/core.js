@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 
-const CASE_TAG_PREFIX = 'e2e:';
 const COMMENT_MAX = 10_000;
 const BULK_MAX = 500;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -105,19 +104,6 @@ class TestOpsClient {
   }
 
   async report(inputResults, integrationName = 'Test automation') {
-    const cases = await this.request('GET', `${this.projectPath}/cases`);
-    const caseIdByKey = new Map();
-    const duplicateKeys = new Set();
-    for (const testCase of cases) {
-      for (const tag of testCase.tags ?? []) {
-        if (!tag.startsWith(CASE_TAG_PREFIX)) continue;
-        const key = tag.slice(CASE_TAG_PREFIX.length).trim();
-        if (!key) continue;
-        if (caseIdByKey.has(key) && caseIdByKey.get(key) !== testCase.id) duplicateKeys.add(key);
-        else caseIdByKey.set(key, testCase.id);
-      }
-    }
-
     const existingRun = this.settings.runId
       ? await this.request('GET', `${this.projectPath}/runs/${encodeURIComponent(this.settings.runId)}`)
       : null;
@@ -127,13 +113,11 @@ class TestOpsClient {
 
     const linked = [];
     const unlinked = [];
-    const ambiguous = [];
     const outsideRun = [];
     for (const result of inputResults) {
-      const caseId = result.testCaseId || (result.caseKey && !duplicateKeys.has(result.caseKey) ? caseIdByKey.get(result.caseKey) : undefined);
+      const caseId = clean(result.testCaseId);
       if (!caseId) {
-        if (result.caseKey && duplicateKeys.has(result.caseKey)) ambiguous.push(result.title);
-        else unlinked.push(result.title);
+        unlinked.push(result.title);
         continue;
       }
       if (automationCaseIds && !automationCaseIds.has(caseId)) {
@@ -150,7 +134,7 @@ class TestOpsClient {
       console.log(existingRun
         ? "TestOps: no result belongs to this run's automated cases; nothing was sent."
         : 'TestOps: no result is linked to a TestOps case; no run was created.');
-      this.logUnlinked(unlinked, ambiguous, outsideRun);
+      this.logUnlinked(unlinked, outsideRun);
       return;
     }
 
@@ -206,7 +190,69 @@ class TestOpsClient {
     if (!existingRun) await this.request('POST', `${this.projectPath}/runs/${encodeURIComponent(run.id)}/complete`);
     const webBase = this.settings.apiUrl.replace(/\/api\/v\d+$/, '');
     console.log(`TestOps: ${linked.length} ${linked.length === 1 ? 'result' : 'results'} sent to ${webBase}/projects/${this.settings.projectId}/runs/${run.id}`);
-    this.logUnlinked(unlinked, ambiguous, outsideRun);
+    this.logUnlinked(unlinked, outsideRun);
+  }
+
+  async syncTests(inputTests, { apply = false } = {}) {
+    const cases = await this.request('GET', `${this.projectPath}/cases`);
+    const casesById = new Map(cases.map((testCase) => [testCase.id, testCase]));
+    const testsById = new Map();
+    const conflicts = new Set();
+    let unlinked = 0;
+
+    for (const test of inputTests) {
+      const testCaseId = clean(test.testCaseId);
+      const title = clean(test.title);
+      if (!testCaseId || !title) {
+        unlinked += 1;
+        continue;
+      }
+      const existing = testsById.get(testCaseId);
+      if (existing && existing.title !== title) conflicts.add(testCaseId);
+      else testsById.set(testCaseId, { testCaseId, title });
+    }
+
+    console.log(`TestOps sync: discovered ${inputTests.length} Playwright tests; ${testsById.size} linked by TestOps ID; ${unlinked} left unchanged without an ID.`);
+
+    const missing = [];
+    const changes = [];
+    for (const test of testsById.values()) {
+      if (conflicts.has(test.testCaseId)) continue;
+      const testCase = casesById.get(test.testCaseId);
+      if (!testCase) {
+        missing.push(test.testCaseId);
+        continue;
+      }
+      const update = {};
+      if (testCase.title !== test.title) update.title = test.title;
+      if (testCase.automationStatus !== 'AUTOMATED') update.automationStatus = 'AUTOMATED';
+      if (Object.keys(update).length) changes.push({ ...test, currentTitle: testCase.title, update });
+    }
+
+    if (conflicts.size || missing.length) {
+      const problems = [];
+      if (conflicts.size) problems.push(`multiple Playwright tests use the same TestOps ID with different titles: ${shortList([...conflicts])}`);
+      if (missing.length) problems.push(`TestOps IDs not found in project ${this.settings.projectId}: ${shortList(missing)}`);
+      throw new Error(`TestOps sync stopped: ${problems.join('; ')}.`);
+    }
+
+    if (changes.length === 0) {
+      console.log(`TestOps sync: ${testsById.size} linked ${testsById.size === 1 ? 'test is' : 'tests are'} already in sync.`);
+      return;
+    }
+
+    for (const change of changes) {
+      const summary = [
+        change.update.title ? `title: "${change.currentTitle}" → "${change.update.title}"` : undefined,
+        change.update.automationStatus ? 'automation status: AUTOMATED' : undefined,
+      ].filter(Boolean).join(', ');
+      console.log(`TestOps sync: ${apply ? 'updating' : 'would update'} ${change.testCaseId} (${summary}).`);
+      if (apply) {
+        await this.request('PATCH', `${this.projectPath}/cases/${encodeURIComponent(change.testCaseId)}`, change.update, { retryable: true });
+      }
+    }
+    if (!apply) console.log('TestOps sync: dry run only. Pass --apply to update case titles and automation status.');
+    else console.log(`TestOps sync: ${changes.length} ${changes.length === 1 ? 'case' : 'cases'} updated.`);
   }
 
   async uploadAttachments(resultId, attachments) {
@@ -241,9 +287,8 @@ class TestOpsClient {
     return 'CI';
   }
 
-  logUnlinked(unlinked, ambiguous, outsideRun) {
-    if (unlinked.length) console.log(`TestOps: not linked to a case (missing annotation or e2e:<key> tag): ${shortList(unlinked)}.`);
-    if (ambiguous.length) console.warn(`TestOps: case key is duplicated in this project; these results were skipped: ${shortList(ambiguous)}.`);
+  logUnlinked(unlinked, outsideRun) {
+    if (unlinked.length) console.log(`TestOps: not linked to a case (missing TestOps test ID): ${shortList(unlinked)}.`);
     if (outsideRun.length) console.log(`TestOps: not among this run's automated cases: ${shortList(outsideRun)}.`);
   }
 }
@@ -259,4 +304,15 @@ export async function reportResults(results, options = {}, env = process.env) {
   const client = createReporterClient(options, env);
   if (!client) return;
   await client.report(results, options.integrationName ?? 'Test automation');
+}
+
+/** Syncs Playwright case titles and automation status to TestOps using explicit TestOps IDs. */
+export async function syncTestCases(tests, options = {}, env = process.env) {
+  const { apply = false, ...reporterOptions } = options;
+  const client = createReporterClient({
+    ...reporterOptions,
+    token: reporterOptions.token ?? env.TESTOPS_SYNC_TOKEN ?? env.TESTOPS_TOKEN,
+  }, env);
+  if (!client) throw new Error('Configure TESTOPS_URL, TESTOPS_PROJECT_ID and TESTOPS_SYNC_TOKEN (or TESTOPS_TOKEN).');
+  await client.syncTests(tests, { apply });
 }

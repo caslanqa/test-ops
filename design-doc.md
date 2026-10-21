@@ -167,7 +167,7 @@ The case view also summarizes the latest result and a consecutive failed-run cou
 - **FR-075:** Result submission must be idempotent or able to detect duplicate records via the external test ID/run ID.
 - **FR-076:** Automation must be able to submit results to an existing run; a flow for creating a run from a plan ID must be supported.
 - **FR-077:** Error bodies, HTTP codes, rate limit and `Retry-After` behavior must be documented; the rate limit status must be communicated to the client through `RateLimit-Policy`/`RateLimit` (or the equivalent `X-RateLimit-*`) headers, and HTTP 429 with `Retry-After` must be returned when the limit is exceeded.
-- **FR-078:** The initial automation inputs are the generic REST API and JUnit XML import. Framework-specific reporters normalize results through one framework-neutral reporting contract; Playwright is the first npm adapter, followed by JUnit, Cucumber and Cypress adapters.
+- **FR-078:** The initial automation inputs are the generic REST API and JUnit XML import. Framework-specific reporters normalize results through one framework-neutral reporting contract and link results by explicit TestOps case ID; Playwright is the first npm adapter, followed by JUnit, Cucumber and Cypress adapters. Its sync command updates linked case titles and automation status from discovered tests.
 - **FR-079:** Webhook infrastructure for events such as run completion, result creation and defect changes may be added in a later phase; retries and visibility into failed deliveries are required.
 
 ### 6.9 AI-assisted QA workflows (later phase)

@@ -34,15 +34,16 @@ function outcome(test, result) {
   }
 }
 
-export function testops(caseKey, defectTitle) {
-  const key = typeof caseKey === 'string' ? caseKey.trim() : '';
-  if (!/^[A-Za-z0-9._-]+$/.test(key)) {
-    throw new TypeError('A TestOps case key must use letters, digits, dots, underscores or hyphens.');
+export function testops(testCaseId, defectTitle) {
+  const id = typeof testCaseId === 'string' ? testCaseId.trim() : '';
+  if (!id) return { annotation: [] };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new TypeError('A TestOps test ID must be a UUID copied from the test case details.');
   }
   return {
-    tag: `@${key}`,
+    tag: `@testops-${id}`,
     annotation: [
-      { type: 'testops', description: key },
+      { type: 'testops', description: id },
       ...(defectTitle ? [{ type: 'testops-defect', description: defectTitle }] : []),
     ],
   };
@@ -86,10 +87,10 @@ export default class TestOpsReporter {
         if (!result) continue;
         const mapped = outcome(test, result);
         if (!mapped) continue;
-        const caseKey = annotation(test, result, 'testops');
+        const testCaseId = annotation(test, result, 'testops');
         const title = test.titlePath().filter(Boolean).join(' › ');
         results.push({
-          caseKey,
+          testCaseId,
           title,
           status: mapped.status,
           comment: mapped.comment,

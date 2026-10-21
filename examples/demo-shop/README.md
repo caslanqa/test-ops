@@ -23,14 +23,14 @@ Every TestOps user gets the shop's project in a DEMO workspace of their own, as 
                           │
                           ▼
      Bean & Leaf shop project
-     cases (tagged e2e:<key>) · requirements · plan · runs · defects
+     cases (tagged demo-ref:<key> for the per-user fixture) · requirements · plan · runs · defects
 ```
 
 | Path | What it is |
 |---|---|
 | `app/` | The shop: products, a cart with discount codes and free shipping from €40, and a card checkout with test cards. It is three static files with no build step. It has one bug on purpose: a discount code can be applied twice. |
 | `server.mjs` | Serves the shop on port 4173. It has no dependencies; Playwright starts it. |
-| `tests/` | 13 Playwright tests. Each one names its TestOps case with `testops('<key>')`. |
+| `tests/` | 13 Playwright tests. Each one reports the TestOps case UUID supplied by the demo webhook. |
 | `packages/reporter/` | The npm package: a framework-neutral reporting core and its Playwright adapter. |
 | `testops/seed.mjs` | Builds the same project in your own account, so you can send results to it. |
 
@@ -57,17 +57,21 @@ export default defineConfig({
 
 For a CommonJS config, pass `require.resolve('@testops/reporter')` in the reporter list.
 
-Link a test to a TestOps case by its `e2e:<key>` tag. The package exports a helper that adds the
-TestOps annotation and the matching `@<key>` Playwright tag used when TestOps starts a CI run:
+Link a test to a TestOps case with the UUID shown in that case's details. In this per-user demo,
+the webhook supplies the fresh UUIDs and `demoTestops` passes them to the package helper; normal
+projects can pass their case IDs directly to `testops()`:
 
 ```ts
 import { test } from '@playwright/test';
 import { testops } from '@testops/reporter';
 
-test('checkout works', testops('checkout-card'), async ({ page }) => {
+test('checkout works', testops('550e8400-e29b-41d4-a716-446655440000'), async ({ page }) => {
   // ...
 });
 ```
+
+The demo adapter uses `demo-ref:<key>` only to pair each user's generated case UUID from the webhook
+payload with the fixture test. The result reporter still submits the TestOps UUID.
 
 The demo in this repository installs the same package from `packages/reporter/`; published
 projects use the npm registry package shown above.
@@ -118,6 +122,7 @@ The results can go to the shop's project in your DEMO workspace.
 |---|---|
 | `TESTOPS_URL` | API base, e.g. `https://testops.example.com/api/v1` |
 | `TESTOPS_TOKEN` | API token of someone who can record results in the project (Admin, Tester or Automation) |
+| `TESTOPS_SYNC_TOKEN` | Tester/Admin API token used by `testops-sync --apply` to update case titles and automation status |
 | `TESTOPS_PROJECT_ID` | The project the results go to |
 | `TESTOPS_RUN_ID` | Optional: report into this run, which TestOps started, instead of making a new one. Only its cases set to Automation get results, and the run stays open for the manual ones. |
 | `TESTOPS_RUN_TITLE` | Optional. Default: `Playwright – <branch> @ <commit>` on GitHub Actions, `Playwright – local` elsewhere |
@@ -133,21 +138,36 @@ A run started from a plan can send its automated cases to CI and get their resul
    - add the headers `Authorization: Bearer <GitHub token>` and `Accept: application/vnd.github+json`. The token is a fine-grained token for that repository, with Contents set to read and write.
 2. **Give CI a TestOps token.** In the repository, add the secret `TESTOPS_TOKEN`, an API token of someone who can record results in the project.
 3. **Start on the dispatch.** Use a workflow that starts on `repository_dispatch` with type `testops.run.started`, like [demo-shop.yml](../../.github/workflows/demo-shop.yml). It:
-   - runs only the run's cases (`--grep` built from `client_payload.automation_keys`; each test is tagged `@<key>`);
-   - sets `TESTOPS_URL`, `TESTOPS_PROJECT_ID` and `TESTOPS_RUN_ID` from the payload.
+   - runs only the run's cases (`--grep` built from `client_payload.automation_case_ids`; each test is tagged with its TestOps ID);
+   - sets `TESTOPS_URL`, `TESTOPS_PROJECT_ID` and `TESTOPS_RUN_ID` from the payload;
+   - runs `npx testops-sync --apply` to update mapped case titles and automation status. Set `TESTOPS_SYNC_TOKEN` to a Tester/Admin token; keep `TESTOPS_TOKEN` as the Automation result-reporting token.
 4. **Start a run.** In the plan's case list, set the cases CI should run to **Automation**, then start a run from the plan. TestOps calls the webhook, CI runs those tests, and their results appear in the run. The run also gets a link to the CI job.
 
 ### Linking tests to cases
 
-A test names its case with an annotation, and the reporter looks for the case tagged `e2e:<key>`:
+A test names its case with the Test ID shown in the TestOps case details:
 
 ```ts
-test('pays by card and shows the order number', testops('checkout-card'), async ({ page }) => { … });
+test('pays by card and shows the order number', testops('550e8400-e29b-41d4-a716-446655440000'), async ({ page }) => { … });
 ```
 
-The link is a tag rather than a title or an id, so either side can be renamed and the link works on any server. A test without a matching case is listed at the end and left out, because TestOps does not create cases from results yet.
+The reporter submits the exact TestOps case ID, so the test and case titles may change independently. A test without a TestOps ID annotation is listed at the end and left out; results never create new test cases.
 
-`testops('<key>', '<defect title>')` also links a failure of the test to that open defect.
+`testops('<test-case-uuid>', '<defect title>')` also links a failure of the test to that open defect.
+
+### Keep test cases in sync
+
+`testops-sync` discovers tests with `playwright test --list`; it does not execute them. It compares
+their titles and automation status with the TestOps cases referenced by ID. By default it prints a
+dry run. To apply changed titles and set those cases to **Automated**, run this before the test job:
+
+```bash
+npx testops-sync --apply
+```
+
+It leaves descriptions, steps, tags, requirements and all unannotated cases untouched. Use
+`TESTOPS_SYNC_TOKEN` with a Tester or Admin role for write access; the regular reporter can continue
+using a dedicated Automation token.
 
 Results map as follows:
 

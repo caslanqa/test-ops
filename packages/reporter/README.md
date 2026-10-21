@@ -37,23 +37,25 @@ The token needs a project role that can submit results: Automation, Tester or Ad
 required settings are absent, the reporter leaves results in Playwright's own reporters. If only
 some are configured, it fails the Playwright run with a configuration error.
 
+For `testops-sync --apply`, set `TESTOPS_SYNC_TOKEN` to a separate token with the Tester or Admin
+role; the normal reporter can keep using an Automation token.
+
 ## Link a test to a case
 
-Give the TestOps case a tag in the form `e2e:<key>`, then annotate the Playwright test with the same
-key:
+Copy the Test ID from the TestOps case details and pass that ID to `testops()`:
 
 ```ts
 import { test } from '@playwright/test';
 import { testops } from '@testops/reporter';
 
-test('checkout works', testops('checkout-card'), async ({ page }) => {
+test('checkout works', testops('550e8400-e29b-41d4-a716-446655440000'), async ({ page }) => {
   // ...
 });
 ```
 
-`testops(key, defectTitle?)` adds the `testops` annotation, the CI selector tag `@<key>`, and an
-optional known-defect annotation. The key accepts letters, digits, dots, underscores and hyphens.
-The tag keeps a test linked to its case when either title is renamed.
+`testops(testCaseId, defectTitle?)` adds the TestOps case ID annotation, the CI selector tag
+`@testops-<id>`, and an optional known-defect annotation. TestOps case IDs are UUIDs. The reporter
+submits the exact ID, so case and test titles can change independently.
 
 ## Runs and results
 
@@ -67,18 +69,39 @@ last retry, records a stable Playwright test ID for safe result re-sends, includ
 failure details, uploads failure screenshots, and can link a failed test to an existing open defect
 by title. Results are sent in API-supported batches of up to 500.
 
+## Keep test cases in sync
+
+The package installs a `testops-sync` command. It discovers tests with Playwright's `--list` mode
+(tests are not executed), then uses each `testops(TestOpsCaseId)` annotation to compare the test
+title with that case in the configured project. The sync updates only the case title and sets its
+automation status to `AUTOMATED`; descriptions, steps, tags, requirements and cases without an ID
+annotation are left alone. It never creates or deletes cases.
+
+Run a dry run locally, then apply the changes:
+
+```sh
+npx testops-sync
+npx testops-sync --apply
+```
+
+Add `npx testops-sync --apply` before Playwright in CI to keep case metadata in sync when test code
+changes. Applying changes requires a Tester or Admin API token; provide it as `TESTOPS_SYNC_TOKEN`.
+The result reporter can use a separate `TESTOPS_TOKEN` with the Automation role.
+
 TestOps can start the CI job through a project webhook. Use a workflow that listens for the
-`testops.run.started` repository dispatch, selects the requested `@<key>` Playwright tests from
-`client_payload.automation_keys`, and sets the `TESTOPS_*` variables from `client_payload`. Store
-the TestOps API token as a CI secret. The repository's [demo workflow](https://github.com/caslanqa/test-ops/blob/master/.github/workflows/demo-shop.yml)
-is a complete GitHub Actions example.
+`testops.run.started` repository dispatch, selects the requested `@testops-<id>` Playwright tests
+from `client_payload.automation_case_ids`, and sets the `TESTOPS_*` variables from
+`client_payload`. Store the TestOps API token as a CI secret. The repository's
+[demo workflow](https://github.com/caslanqa/test-ops/blob/master/.github/workflows/demo-shop.yml) is
+a complete GitHub Actions example.
 
 ## Shared adapter contract
 
-The `@testops/reporter/core` subpath accepts normalized `TestOpsResult` records and owns case
-resolution, run creation or lookup, bulk submission, attachment upload, defect linking and run
-completion. Node-based adapters should only translate native framework results to this shape; they
-should not introduce separate TestOps API implementations. Non-Node integrations can use the same
-documented REST endpoints directly.
+The `@testops/reporter/core` subpath accepts normalized `TestOpsResult` records with exact TestOps
+case IDs and owns run creation or lookup, bulk submission, attachment upload, defect linking and run
+completion. It also exports `syncTestCases` for framework-neutral test metadata sync. Node-based
+adapters should only translate native framework results to these contracts; they should not
+introduce separate TestOps API implementations. Non-Node integrations can use the same documented
+REST endpoints directly.
 
 Package implementation and example: <https://github.com/caslanqa/test-ops/tree/master/examples/demo-shop>.

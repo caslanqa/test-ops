@@ -1,5 +1,7 @@
 import type { TestDetails } from '@playwright/test';
 import type { Reporter } from '@playwright/test/reporter';
+import type { TestOpsSyncOptions, TestOpsSyncTest } from './core.js';
+export type { TestOpsSyncOptions, TestOpsSyncTest } from './core.js';
 
 export interface TestOpsReporterOptions {
   /** API base URL, e.g. https://testops.example.com/api/v1. Defaults to TESTOPS_URL. */
@@ -18,7 +20,11 @@ export interface TestOpsReporterOptions {
   ciUrl?: string;
 }
 
-export function testops(caseKey: string, defectTitle?: string): TestDetails;
+/** Link a Playwright test to the UUID displayed in its TestOps case details. */
+export function testops(testCaseId?: string, defectTitle?: string): TestDetails;
+
+/** Sync discovered test titles and automation status to TestOps. */
+export function syncTestCases(tests: TestOpsSyncTest[], options?: TestOpsSyncOptions): Promise<void>;
 
 export default class TestOpsReporter implements Reporter {
   constructor(options?: TestOpsReporterOptions);

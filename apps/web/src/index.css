@@ -2065,6 +2065,11 @@ input[type='checkbox'] {
   font-weight: 600;
 }
 
+.case-id {
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+}
+
 .detail-section {
   display: flex;
   flex-direction: column;

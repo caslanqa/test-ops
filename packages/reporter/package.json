@@ -1,7 +1,7 @@
 {
   "name": "@testops/reporter",
   "version": "0.1.0",
-  "description": "TestOps result reporting for Playwright and future framework adapters",
+  "description": "Playwright result reporting and test metadata sync for TestOps",
   "keywords": ["testops", "playwright", "test-reporter", "test-results"],
   "license": "MIT",
   "type": "module",
@@ -12,6 +12,9 @@
   },
   "main": "./index.js",
   "types": "./index.d.ts",
+  "bin": {
+    "testops-sync": "./sync-cli.js"
+  },
   "exports": {
     ".": {
       "types": "./index.d.ts",
@@ -26,6 +29,8 @@
     "index.js",
     "index.d.ts",
     "reporter.js",
+    "sync-cli.js",
+    "sync-reporter.js",
     "core.js",
     "core.d.ts",
     "README.md",
@@ -46,6 +51,6 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node --check index.js && node --check reporter.js && node --check core.js"
+    "build": "node --check index.js && node --check reporter.js && node --check core.js && node --check sync-reporter.js && node --check sync-cli.js"
   }
 }
