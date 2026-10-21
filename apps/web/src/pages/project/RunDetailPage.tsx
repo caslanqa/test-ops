@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { api, downloadFile } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
+import { ClickableRow } from '../../components/ClickableRow';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
@@ -1208,7 +1209,7 @@ export function RunDetailPage() {
             </thead>
             <tbody>
               {shownCases.map((rc) => (
-                <tr
+                <ClickableRow
                   key={rc.id}
                   className={[rc.id === openCaseId && 'is-selected', selected.has(rc.id) && 'is-checked'].filter(Boolean).join(' ') || undefined}
                 >
@@ -1265,7 +1266,7 @@ export function RunDetailPage() {
                       <ResultActions runCase={rc} pending={pending === rc.id} onMark={markResult} onDefect={openDefect} />
                     </td>
                   )}
-                </tr>
+                </ClickableRow>
               ))}
             </tbody>
           </table>

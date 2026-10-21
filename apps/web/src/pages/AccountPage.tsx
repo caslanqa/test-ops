@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Check, Copy, KeyRound, Plus } from 'lucide-react';
 import { api, ApiError, setToken } from '../api/client';
 import { useAuth, type CurrentUser } from '../auth/AuthContext';
@@ -311,13 +311,41 @@ function ApiTokensSection() {
 export function AccountPage() {
   usePageTitle('Account');
   const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'tokens'>('profile');
+  const tabsId = useId();
   if (!user) return null;
+
+  function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    const currentIndex = tabs.indexOf(event.target as HTMLButtonElement);
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = tabs.length - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = tabs[nextIndex];
+    nextTab.focus();
+    setActiveTab(nextTab.dataset.tab as 'profile' | 'password' | 'tokens');
+  }
+
   return (
     <>
       <PageHeader title="Account" description="Your profile, password and API tokens for automation." />
-      <div className="settings-stack">
+      <div className="tabs account-tabs" role="tablist" aria-label="Account settings" onKeyDown={onTabKeyDown}>
+        <button type="button" role="tab" id={`${tabsId}-profile-tab`} aria-controls={`${tabsId}-profile-panel`} aria-selected={activeTab === 'profile'} tabIndex={activeTab === 'profile' ? 0 : -1} data-tab="profile" onClick={() => setActiveTab('profile')}>Profile</button>
+        <button type="button" role="tab" id={`${tabsId}-password-tab`} aria-controls={`${tabsId}-password-panel`} aria-selected={activeTab === 'password'} tabIndex={activeTab === 'password' ? 0 : -1} data-tab="password" onClick={() => setActiveTab('password')}>Password</button>
+        <button type="button" role="tab" id={`${tabsId}-tokens-tab`} aria-controls={`${tabsId}-tokens-panel`} aria-selected={activeTab === 'tokens'} tabIndex={activeTab === 'tokens' ? 0 : -1} data-tab="tokens" onClick={() => setActiveTab('tokens')}>API tokens</button>
+      </div>
+      <div className="settings-tab-panel" role="tabpanel" id={`${tabsId}-profile-panel`} aria-labelledby={`${tabsId}-profile-tab`} tabIndex={0} hidden={activeTab !== 'profile'}>
         <ProfileSection user={user} />
+      </div>
+      <div className="settings-tab-panel" role="tabpanel" id={`${tabsId}-password-panel`} aria-labelledby={`${tabsId}-password-tab`} tabIndex={0} hidden={activeTab !== 'password'}>
         <PasswordSection />
+      </div>
+      <div className="settings-tab-panel" role="tabpanel" id={`${tabsId}-tokens-panel`} aria-labelledby={`${tabsId}-tokens-tab`} tabIndex={0} hidden={activeTab !== 'tokens'}>
         <ApiTokensSection />
       </div>
     </>

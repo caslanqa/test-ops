@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Play, PlayCircle } from 'lucide-react';
 import { api } from '../../api/client';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
+import { ClickableRow } from '../../components/ClickableRow';
 import { Dialog } from '../../components/Dialog';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ResultRibbon } from '../../components/ResultRibbon';
@@ -223,7 +224,7 @@ export function RunsPage() {
                 const total = Object.values(counts).reduce((a, b) => a + b, 0);
                 const done = total - pendingCount(counts);
                 return (
-                  <tr key={run.id}>
+                  <ClickableRow key={run.id}>
                     <td>
                       <Link to={`/projects/${projectId}/runs/${run.id}`} className="row-link">{run.title}</Link>
                       {(run.environment || run.build) && (
@@ -245,7 +246,7 @@ export function RunsPage() {
                     </td>
                     <td className="hide-sm">{labelOf(RUN_SOURCE_LABEL, run.source)}</td>
                     <td className="hide-sm muted num">{formatDate(run.createdAt)}</td>
-                  </tr>
+                  </ClickableRow>
                 );
               })}
             </tbody>

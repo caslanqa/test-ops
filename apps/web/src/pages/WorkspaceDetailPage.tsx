@@ -4,6 +4,7 @@ import { Archive, ArchiveRestore, FolderPlus, Pencil, Plus, Trash2 } from 'lucid
 import { api } from '../api/client';
 import { ArchivedToggle } from '../components/ArchivedToggle';
 import { Dialog } from '../components/Dialog';
+import { ClickableRow } from '../components/ClickableRow';
 import { ConfirmDialog } from '../components/Members';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../components/Page';
 import { Tag } from '../components/StatusChip';
@@ -242,7 +243,7 @@ export function WorkspaceDetailPage() {
             </thead>
             <tbody>
               {projects.map((p) => (
-                <tr key={p.id}>
+                <ClickableRow key={p.id}>
                   <td>
                     <Link to={`/projects/${p.id}/cases`} className="row-link">{p.name}</Link>
                     {p.archivedAt && <> <Tag tone="outline">Archived</Tag></>}
@@ -274,7 +275,7 @@ export function WorkspaceDetailPage() {
                       )}
                     </td>
                   )}
-                </tr>
+                </ClickableRow>
               ))}
             </tbody>
           </table>

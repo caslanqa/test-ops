@@ -4,6 +4,7 @@ import { Archive, ArchiveRestore, ChevronRight, Link2, ListChecks, Pencil, Plus 
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
+import { ClickableRow } from '../../components/ClickableRow';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
@@ -405,7 +406,7 @@ export function RequirementsPage() {
                 const casesId = `requirement-${r.id}-cases`;
                 return (
                   <Fragment key={r.id}>
-                  <tr className={isOpen ? 'is-expanded' : undefined}>
+                  <ClickableRow className={isOpen ? 'is-expanded' : undefined}>
                     <td>
                       {/* The title opens the list of linked cases under the row. */}
                       <button
@@ -467,7 +468,7 @@ export function RequirementsPage() {
                       )}
                     </td>
                     )}
-                  </tr>
+                  </ClickableRow>
                   {isOpen && (
                     <tr className="requirement-cases-row">
                       <td colSpan={editRepository ? 3 : 2}>
