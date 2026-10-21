@@ -4,6 +4,7 @@ import { Archive, ArchiveRestore, ChevronRight, ClipboardList, Pencil, Play, Plu
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
+import { ClickableRow } from '../../components/ClickableRow';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
@@ -628,7 +629,7 @@ export function PlansPage() {
                 const casesId = `plan-${plan.id}-cases`;
                 return (
                 <Fragment key={plan.id}>
-                <tr className={isOpen ? 'is-expanded' : undefined}>
+                <ClickableRow className={isOpen ? 'is-expanded' : undefined}>
                   <td>
                     {/* The title opens the list of the plan's cases under the row. */}
                     <button
@@ -679,7 +680,7 @@ export function PlansPage() {
                     )}
                   </td>
                   )}
-                </tr>
+                </ClickableRow>
                 {isOpen && (
                   <tr className="expanded-row">
                     <td colSpan={execute || editRepository ? 5 : 4}>

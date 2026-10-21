@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Boxes, Info, Plus, Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import { Dialog } from '../components/Dialog';
+import { ClickableRow } from '../components/ClickableRow';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../components/Page';
 import { Tag } from '../components/StatusChip';
 import { slugify } from '../lib/format';
@@ -200,13 +201,13 @@ export function WorkspacesPage() {
             </thead>
             <tbody>
               {workspaces.map((w) => (
-                <tr key={w.id}>
+                <ClickableRow key={w.id}>
                   <td>
                     <Link to={`/workspaces/${w.id}`} className="row-link">{w.name}</Link>
                     {w.isDemo && <> <Tag tone="outline">Demo</Tag></>}
                   </td>
                   <td className="muted">{w.slug}</td>
-                </tr>
+                </ClickableRow>
               ))}
             </tbody>
           </table>

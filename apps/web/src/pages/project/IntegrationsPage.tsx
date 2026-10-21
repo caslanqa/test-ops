@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Plus, Send, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { CopyButton } from '../../components/CopyButton';
+import { ClickableRow } from '../../components/ClickableRow';
 import { ConfirmDialog } from '../../components/Members';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { Tag } from '../../components/StatusChip';
@@ -277,15 +278,15 @@ export function IntegrationsPage() {
             </thead>
             <tbody>
               {webhook.deliveries.map((d) => (
-                <tr key={d.id}>
+                <ClickableRow key={d.id} enabled={Boolean(d.run)}>
                   <td className="num muted">{formatDateTime(d.createdAt)}</td>
                   <td><code>{d.event}</code></td>
-                  <td>{d.run ? <Link to={`/projects/${projectId}/runs/${d.run.id}`}>{d.run.title}</Link> : <span className="muted">—</span>}</td>
+                  <td>{d.run ? <Link to={`/projects/${projectId}/runs/${d.run.id}`} className="row-link">{d.run.title}</Link> : <span className="muted">—</span>}</td>
                   <td>
                     <Tag tone={d.status === 'SUCCEEDED' ? 'strong' : 'outline'}>{DELIVERY_LABEL[d.status]}</Tag>{' '}
                     <span className="muted">{describeDelivery(d)}{d.attempts > 1 ? ` · ${d.attempts} tries` : ''}</span>
                   </td>
-                </tr>
+                </ClickableRow>
               ))}
             </tbody>
           </table>
