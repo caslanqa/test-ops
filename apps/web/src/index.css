@@ -854,6 +854,8 @@ input[type='checkbox'] {
   position: relative;
   display: flex;
   align-items: center;
+  box-sizing: border-box;
+  width: 100%;
   gap: 0.625rem;
   min-height: 2.25rem;
   padding: 0 0.625rem;
@@ -1181,6 +1183,10 @@ input[type='checkbox'] {
 
 .data-table tbody tr:hover {
   background: var(--surface-hover);
+}
+
+.data-table tbody tr.clickable-row {
+  cursor: pointer;
 }
 
 .data-table tbody tr.is-selected {
@@ -2895,7 +2901,23 @@ input[type='checkbox'] {
   text-decoration: none;
 }
 
+.tabs button {
+  position: relative;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .tabs a:hover {
+  color: var(--ink);
+}
+
+.tabs button:hover {
   color: var(--ink);
 }
 
@@ -2904,7 +2926,21 @@ input[type='checkbox'] {
   color: var(--ink);
 }
 
+.tabs button[aria-selected='true'] {
+  color: var(--ink);
+}
+
 .tabs a[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0.5rem;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--ink);
+}
+
+.tabs button[aria-selected='true']::after {
   content: '';
   position: absolute;
   inset-inline: 0.5rem;
@@ -3403,7 +3439,8 @@ code {
 }
 
 @media (max-width: 40rem) {
-  .tabs a {
+  .tabs a,
+  .tabs button {
     padding-inline: 0.5rem;
   }
 

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
+import { ClickableRow } from '../../components/ClickableRow';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
@@ -976,7 +977,7 @@ export function SuitesCasesPage() {
                         </tr>
                       )}
                       {group.cases.map((c) => (
-                        <tr key={c.id} className={c.id === openCaseId ? 'is-selected' : undefined}>
+                        <ClickableRow key={c.id} className={c.id === openCaseId ? 'is-selected' : undefined}>
                           <td>
                             <button
                               type="button"
@@ -992,7 +993,7 @@ export function SuitesCasesPage() {
                           <td><PriorityMark priority={c.priority} /></td>
                           <td className="hide-sm col-optional">{labelOf(CASE_TYPE_LABEL, c.type)}</td>
                           <td className="hide-sm col-optional">{labelOf(AUTOMATION_LABEL, c.automationStatus)}</td>
-                        </tr>
+                        </ClickableRow>
                       ))}
                     </tbody>
                   ))}
