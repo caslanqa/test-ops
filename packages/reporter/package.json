@@ -1,0 +1,51 @@
+{
+  "name": "@testops/reporter",
+  "version": "0.1.0",
+  "description": "TestOps result reporting for Playwright and future framework adapters",
+  "keywords": ["testops", "playwright", "test-reporter", "test-results"],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/caslanqa/test-ops.git",
+    "directory": "packages/reporter"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./core": {
+      "types": "./core.d.ts",
+      "import": "./core.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "reporter.js",
+    "core.js",
+    "core.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.40"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node --check index.js && node --check reporter.js && node --check core.js"
+  }
+}

@@ -213,7 +213,7 @@ An API token cannot create, list or revoke API tokens, change a password, create
 
 The **Help & support** page also links to the API reference and includes an example for submitting automation results from CI.
 
-For a complete example, see [`examples/demo-shop`](examples/demo-shop). It has a small web shop, its Playwright tests and a reporter that sends their results to TestOps and links failures to known defects. Every user's [DEMO workspace](#demo-workspace) has its project.
+For a complete Playwright integration example, see [`examples/demo-shop`](examples/demo-shop). Install the [`@testops/reporter` npm package](packages/reporter), configure it in `playwright.config.ts`, and link tests to TestOps cases with `testops('<key>')`. It creates and completes CI runs, or reports into a run started by TestOps, uploads failure screenshots and links failures to known defects. The package's framework-neutral reporting core is the contract for future JUnit, Cucumber and Cypress adapters. Every user's [DEMO workspace](#demo-workspace) has the example project.
 
 ## Development
 

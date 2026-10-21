@@ -4,7 +4,7 @@ The example behind TestOps' built-in **DEMO workspace**. It contains:
 
 - a small web shop, **Bean & Leaf**;
 - Playwright tests for the shop;
-- a reporter that sends the test results to TestOps.
+- the `@testops/reporter` npm package, which sends test results to TestOps.
 
 Every TestOps user gets the shop's project in a DEMO workspace of their own, as its admin. The server makes it from [`apps/api/src/demo/demo-shop.json`](../../apps/api/src/demo/demo-shop.json), so there is nothing to set up (see [Demo workspace](../../README.md#demo-workspace)). The project shows:
 
@@ -16,7 +16,7 @@ Every TestOps user gets the shop's project in a DEMO workspace of their own, as 
 
 ```
  app/ (the shop) ◄── tests/*.spec.ts (Playwright)
-                          │  testops/reporter.ts
+                          │  @testops/reporter
                           ▼
              TestOps API: a run, one result per test,
              screenshots of failures, links to known defects
@@ -31,8 +31,46 @@ Every TestOps user gets the shop's project in a DEMO workspace of their own, as 
 | `app/` | The shop: products, a cart with discount codes and free shipping from €40, and a card checkout with test cards. It is three static files with no build step. It has one bug on purpose: a discount code can be applied twice. |
 | `server.mjs` | Serves the shop on port 4173. It has no dependencies; Playwright starts it. |
 | `tests/` | 13 Playwright tests. Each one names its TestOps case with `testops('<key>')`. |
-| `testops/reporter.ts` | The Playwright reporter that sends results to TestOps. |
+| `packages/reporter/` | The npm package: a framework-neutral reporting core and its Playwright adapter. |
 | `testops/seed.mjs` | Builds the same project in your own account, so you can send results to it. |
+
+## Install in a Playwright project
+
+In your own Playwright project, install the package:
+
+```bash
+npm install --save-dev @testops/reporter
+```
+
+Add it to `playwright.config.ts`:
+
+```ts
+import { defineConfig } from '@playwright/test';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
+export default defineConfig({
+  reporter: [['list'], ['html', { open: 'never' }], [require.resolve('@testops/reporter')]],
+});
+```
+
+For a CommonJS config, pass `require.resolve('@testops/reporter')` in the reporter list.
+
+Link a test to a TestOps case by its `e2e:<key>` tag. The package exports a helper that adds the
+TestOps annotation and the matching `@<key>` Playwright tag used when TestOps starts a CI run:
+
+```ts
+import { test } from '@playwright/test';
+import { testops } from '@testops/reporter';
+
+test('checkout works', testops('checkout-card'), async ({ page }) => {
+  // ...
+});
+```
+
+The demo in this repository installs the same package from `packages/reporter/`; published
+projects use the npm registry package shown above.
 
 ## Run the tests
 
@@ -84,6 +122,7 @@ The results can go to the shop's project in your DEMO workspace.
 | `TESTOPS_RUN_ID` | Optional: report into this run, which TestOps started, instead of making a new one. Only its cases set to Automation get results, and the run stays open for the manual ones. |
 | `TESTOPS_RUN_TITLE` | Optional. Default: `Playwright – <branch> @ <commit>` on GitHub Actions, `Playwright – local` elsewhere |
 | `TESTOPS_ENVIRONMENT` | Optional. Default: `CI` on CI, `local` elsewhere |
+| `TESTOPS_CI_URL` | Optional. Overrides the CI job URL detected from GitHub Actions, GitLab CI, CircleCI or Buildkite. |
 
 ### Let TestOps start CI
 
