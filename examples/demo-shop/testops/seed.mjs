@@ -5,7 +5,7 @@
 //   TESTOPS_URL=http://localhost:8080/api/v1 TESTOPS_TOKEN=<API token> npm run seed
 //
 // It creates the workspace "Demo shop" (TESTOPS_WORKSPACE_SLUG, default "demo-shop") and its
-// project, suites, cases with steps (automated ones tagged e2e:<key> for the reporter),
+// project, suites, cases with steps (automated ones tagged demo-ref:<key> for the demo adapter),
 // requirements, a milestone, a plan, a manual run with results and the defects. The data comes from
 // the same file the server uses for its DEMO workspace. Re-running is safe: whatever exists is
 // found by name and only what is missing is added.
@@ -65,7 +65,7 @@ for (const suite of data.suites) {
         priority: c.priority ?? 'MEDIUM',
         type: c.type ?? 'FUNCTIONAL',
         automationStatus: c.automationStatus ?? 'AUTOMATED',
-        tags: c.key ? [`e2e:${c.key}`, suite.name.toLowerCase()] : [suite.name.toLowerCase()],
+        tags: c.key ? [`demo-ref:${c.key}`, suite.name.toLowerCase()] : [suite.name.toLowerCase()],
         steps: c.steps,
       }));
     caseIds.set(c.key ?? c.title, testCase.id);

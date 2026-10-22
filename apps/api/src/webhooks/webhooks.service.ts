@@ -237,9 +237,9 @@ export class WebhooksService {
     });
     if (run.runCases.length === 0) return null;
     const base = this.baseUrl(webhook);
-    // The keys of the cases' e2e:<key> tags, for running just these tests (e.g. a grep).
-    const keys = [
-      ...new Set(run.runCases.flatMap((rc) => rc.testCase.tags.filter((t) => t.startsWith("e2e:")).map((t) => t.slice(4)))),
+    // Keep the previous key payload for existing customer workflows while new clients use IDs.
+    const legacyKeys = [
+      ...new Set(run.runCases.flatMap((rc) => rc.testCase.tags.filter((tag) => tag.startsWith("e2e:")).map((tag) => tag.slice(4)))),
     ];
     return {
       webhook,
@@ -251,7 +251,8 @@ export class WebhooksService {
         project: run.project,
         run: { id: run.id, title: run.title, url: `${base}/projects/${run.projectId}/runs/${run.id}` },
         automated_cases: run.runCases.map((rc) => ({ test_case_id: rc.testCaseId, title: rc.testCase.title, tags: rc.testCase.tags })),
-        automation_keys: keys,
+        automation_case_ids: run.runCases.map((rc) => rc.testCaseId),
+        automation_keys: legacyKeys,
       },
     };
   }

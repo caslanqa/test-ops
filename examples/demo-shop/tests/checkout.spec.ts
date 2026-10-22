@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { addToCart, cartBadge, testops } from './shop';
+import { addToCart, cartBadge, demoTestops } from './shop';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
@@ -15,7 +15,7 @@ async function fillCard(page: Page, card: string, { email = 'ada@example.com' } 
   await page.getByLabel('CVC').fill('123');
 }
 
-test('pays by card and shows the order number', testops('checkout-card'), async ({ page }) => {
+test('pays by card and shows the order number', demoTestops('checkout-card'), async ({ page }) => {
   await fillCard(page, '4242 4242 4242 4242');
   await page.getByRole('button', { name: 'Pay €14.80' }).click();
 
@@ -24,7 +24,7 @@ test('pays by card and shows the order number', testops('checkout-card'), async 
   await expect(cartBadge(page)).toHaveText('0');
 });
 
-test('a declined card shows an error and keeps the cart', testops('checkout-declined'), async ({ page }) => {
+test('a declined card shows an error and keeps the cart', demoTestops('checkout-declined'), async ({ page }) => {
   await fillCard(page, '4000 0000 0000 0002');
   await page.getByRole('button', { name: /Pay/ }).click();
 
@@ -32,7 +32,7 @@ test('a declined card shows an error and keeps the cart', testops('checkout-decl
   await expect(cartBadge(page)).toHaveText('1');
 });
 
-test('the form asks for a valid email and card number', testops('checkout-validation'), async ({ page }) => {
+test('the form asks for a valid email and card number', demoTestops('checkout-validation'), async ({ page }) => {
   await fillCard(page, '4242 4242', { email: 'ada@' });
   await page.getByRole('button', { name: /Pay/ }).click();
 
@@ -41,6 +41,6 @@ test('the form asks for a valid email and card number', testops('checkout-valida
   await expect(page.getByLabel('Email')).toBeFocused();
 });
 
-test('pays with PayPal', testops('checkout-paypal'), async () => {
+test('pays with PayPal', demoTestops('checkout-paypal'), async () => {
   test.skip(true, "PayPal isn't available in the demo shop yet");
 });

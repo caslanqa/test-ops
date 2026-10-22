@@ -1,20 +1,10 @@
-import type { Page, TestDetails } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { testops } from '@testops/reporter';
 
-/**
- * Links a test to its TestOps case. The reporter finds the case that has the tag `e2e:<key>`
- * (the DEMO workspace and testops/seed.mjs have them), so the link survives renaming either side.
- * The test also gets the Playwright tag @<key>, so CI can run just the cases TestOps asks for
- * (--grep, from the webhook's automation_keys). `defect` names an open TestOps defect that a
- * failure of this test is linked to.
- */
-export function testops(key: string, defect?: string): TestDetails {
-  return {
-    tag: `@${key}`,
-    annotation: [
-      { type: 'testops', description: key },
-      ...(defect ? [{ type: 'testops-defect', description: defect }] : []),
-    ],
-  };
+/** The per-user demo gets fresh TestOps IDs; the webhook supplies those IDs for the demo refs. */
+export function demoTestops(ref: string, defectTitle?: string) {
+  const name = ref.replace(/[^A-Za-z0-9]/g, '_').toUpperCase();
+  return testops(process.env[`TESTOPS_CASE_${name}`], defectTitle);
 }
 
 export async function addToCart(page: Page, productName: string, times = 1) {

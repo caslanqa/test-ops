@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
+import { CopyButton } from '../../components/CopyButton';
 import { ClickableRow } from '../../components/ClickableRow';
 import { Dialog } from '../../components/Dialog';
 import { ConfirmDialog } from '../../components/Members';
@@ -176,6 +177,7 @@ function CaseDetail({
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
+  const testCaseIdFieldId = useId();
 
   // When the panel opens, keyboard users are moved into its content.
   useEffect(() => {
@@ -218,6 +220,15 @@ function CaseDetail({
       </p>
 
       <dl className="props">
+        <div>
+          <dt>Test ID</dt>
+          <dd>
+            <div className="copy-field">
+              <span id={testCaseIdFieldId} className="mono case-id">{testCase.id}</span>
+              <CopyButton text={testCase.id} what="TestOps test ID" targetId={testCaseIdFieldId} />
+            </div>
+          </dd>
+        </div>
         <div>
           <dt>Priority</dt>
           <dd><PriorityMark priority={testCase.priority} /></dd>
