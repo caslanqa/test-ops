@@ -18,11 +18,13 @@
   "exports": {
     ".": {
       "types": "./index.d.ts",
-      "import": "./index.js"
+      "import": "./index.js",
+      "default": "./index.js"
     },
     "./core": {
       "types": "./core.d.ts",
-      "import": "./core.js"
+      "import": "./core.js",
+      "default": "./core.js"
     }
   },
   "files": [
@@ -51,6 +53,7 @@
     "access": "public"
   },
   "scripts": {
+    "test": "node --test",
     "build": "node --check index.js && node --check reporter.js && node --check core.js && node --check sync-reporter.js && node --check sync-cli.js"
   }
 }
