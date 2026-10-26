@@ -127,7 +127,18 @@ file are applied from the bottom up so earlier locations stay valid. `--link` on
 token that can read the project is enough; `--apply` also updates titles and status and needs
 `TESTOPS_SYNC_TOKEN` with Tester or Admin.
 
-### 5. Configuration
+### 5. Module formats
+
+The package is usable from ES module and CommonJS projects. Node before 20.19 and 22.12 cannot `require()` an
+ES module, and Playwright compiles a linked (symlinked) workspace package as project code, so an ES-module-only
+package fails to load in a CommonJS project in both cases. The `exports` map therefore has an `import` entry
+(`index.js`, `core.js`) and a `require` entry (`index.cjs`, `core.cjs`). The CommonJS entries are thin: they load
+the ES modules with `import()`, which every Node version allows, and share `testops()` as CommonJS
+(`annotation.cjs`) because a test file needs it synchronously. `createReporterClient` stays ES-only (it returns
+synchronously). `.d.cts` files are copies of the `.d.ts` files for TypeScript projects that resolve like Node.
+Tests pin that both entries export the same names, load without `require(esm)`, and keep the declarations equal.
+
+### 6. Configuration
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
@@ -136,7 +147,7 @@ token that can read the project is enough; `--apply` also updates titles and sta
 
 Everything else keeps its current meaning. `testops-sync` gets the `--link` flag only.
 
-### 6. Failure behavior
+### 7. Failure behavior
 
 Artifact and step problems warn and never fail the run or lose a result. A result that cannot be sent still
 fails the reporter with an error, as today. `--link --apply` never partially edits a file: it computes all

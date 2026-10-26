@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import shared from './annotation.cjs';
 import { ALLOWED_EXTENSIONS, extensionOf } from './artifacts.js';
 import { createReporterClient } from './core.js';
 
@@ -137,20 +138,7 @@ export function collectSteps(steps) {
   return collected;
 }
 
-export function testops(testCaseId, defectTitle) {
-  const id = typeof testCaseId === 'string' ? testCaseId.trim() : '';
-  if (!id) return { annotation: [] };
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-    throw new TypeError('A TestOps test ID must be a UUID copied from the test case details.');
-  }
-  return {
-    tag: `@testops-${id}`,
-    annotation: [
-      { type: 'testops', description: id },
-      ...(defectTitle ? [{ type: 'testops-defect', description: defectTitle }] : []),
-    ],
-  };
-}
+export const testops = shared.testops;
 
 export default class TestOpsReporter {
   constructor(options = {}) {

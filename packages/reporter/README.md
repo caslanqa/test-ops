@@ -12,6 +12,10 @@ npm install --save-dev @testops/reporter
 
 The project should already have `@playwright/test` installed; it is a peer dependency.
 
+The package works in ES module and CommonJS projects alike, on every Node version from 20: ES module
+projects load `index.js`, CommonJS projects load `index.cjs`, which loads the same code with `import()`.
+TypeScript gets matching declarations (`.d.ts` and `.d.cts`) for both.
+
 Add the reporter to `playwright.config.ts`:
 
 ```ts
