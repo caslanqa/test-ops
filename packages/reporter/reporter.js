@@ -34,6 +34,26 @@ function outcome(test, result) {
   }
 }
 
+/**
+ * The user-defined steps of a result in execution order, nested ones included. Playwright also
+ * reports its own steps (expect, page actions, hooks), which are not part of a test's script.
+ */
+export function collectSteps(steps) {
+  const collected = [];
+  for (const step of steps) {
+    if (step.category === 'test.step') {
+      const message = stripAnsi(step.error?.message ?? step.error?.value ?? '');
+      collected.push({
+        title: step.title,
+        status: step.error ? 'FAILED' : 'PASSED',
+        ...(message ? { comment: message } : {}),
+      });
+    }
+    collected.push(...collectSteps(step.steps ?? []));
+  }
+  return collected;
+}
+
 export function testops(testCaseId, defectTitle) {
   const id = typeof testCaseId === 'string' ? testCaseId.trim() : '';
   if (!id) return { annotation: [] };
@@ -104,6 +124,7 @@ export default class TestOpsReporter {
           attachments: result.attachments
             .filter((attachment) => attachment.path && attachment.contentType?.startsWith('image/'))
             .map((attachment) => ({ path: attachment.path, contentType: attachment.contentType })),
+          steps: collectSteps(result.steps ?? []),
           defectTitle: annotation(test, result, 'testops-defect'),
         });
       }

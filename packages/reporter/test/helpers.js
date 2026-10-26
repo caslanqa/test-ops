@@ -1,6 +1,6 @@
 import { createReporterClient } from '../core.js';
 
-const API_BASE = 'https://t.example/api/v1';
+export const API_BASE = 'https://t.example/api/v1';
 
 /**
  * A fetch stand-in for the reporter client. Route keys are "METHOD /path" relative to the API base
@@ -52,4 +52,34 @@ export function testClient(fetch, overrides = {}) {
     {},
     fetch,
   );
+}
+
+/**
+ * A Playwright TestCase stand-in with only what the reporter reads. `results` lists the attempts in
+ * order; the reporter must use the last one.
+ */
+export function fakeTest({ id, title = id, testCaseId, expectedStatus = 'passed', results }) {
+  return {
+    id,
+    title,
+    titlePath: () => ['', 'chromium', 'shop.spec.ts', title],
+    annotations: testCaseId ? [{ type: 'testops', description: testCaseId }] : [],
+    expectedStatus,
+    results: results.map((result) => ({
+      status: result.status,
+      duration: result.duration ?? 5,
+      startTime: new Date('2026-10-23T10:00:00.000Z'),
+      steps: result.steps ?? [],
+      attachments: result.attachments ?? [],
+      stdout: result.stdout ?? [],
+      stderr: result.stderr ?? [],
+      errors: result.errors ?? [],
+      annotations: [],
+    })),
+  };
+}
+
+/** A Playwright Suite stand-in. */
+export function fakeSuite(tests) {
+  return { allTests: () => tests };
 }
