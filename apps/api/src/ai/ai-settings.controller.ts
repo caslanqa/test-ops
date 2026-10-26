@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { AuthenticatedUser, CurrentUser } from "../common/decorators/current-user.decorator";
 import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
@@ -47,6 +47,14 @@ export class AiSettingsController {
     await this.settings.removeWorkspace(user.id, workspaceId);
   }
 
+  /** One small request to the saved workspace default, with no project content; says whether it worked. */
+  @Post("workspaces/:workspaceId/ai/test")
+  @WebSessionOnly()
+  @HttpCode(200)
+  testWorkspace(@CurrentUser() user: AuthenticatedUser, @Param("workspaceId") workspaceId: string) {
+    return this.settings.test(user.id, { workspaceId });
+  }
+
   /** The project's own setting and the workspace default it would use without one (project admins). */
   @Get("projects/:projectId/ai/settings")
   @WebSessionOnly()
@@ -71,5 +79,13 @@ export class AiSettingsController {
   @HttpCode(204)
   async removeProject(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
     await this.settings.removeProject(user.id, projectId);
+  }
+
+  /** One small request to the project's own saved setting, with no project content; says whether it worked. */
+  @Post("projects/:projectId/ai/settings/test")
+  @WebSessionOnly()
+  @HttpCode(200)
+  testProject(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
+    return this.settings.test(user.id, { projectId });
   }
 }

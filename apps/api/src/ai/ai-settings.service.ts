@@ -1,11 +1,14 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { AiProviderKind, ProjectRole, WorkspaceRole, type AiSettings } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { AccessControlService } from "../common/access-control.service";
 import { SecretBox } from "../common/secret-box";
 import { PrismaService } from "../prisma/prisma.service";
+import { AiEndpointError, assertAiEndpoint } from "../webhooks/safe-post";
 import { SaveAiSettingsDto } from "./dto/save-ai-settings.dto";
+import { AiProviderError, scrubProviderError } from "./provider-error";
+import { createAiProvider } from "./providers/provider";
 
 /** Which setting a project uses: its own, its workspace's default, or none. */
 export type AiSource = "PROJECT" | "WORKSPACE" | "NONE";
@@ -28,6 +31,17 @@ export interface AiSettingsView {
 
 /** What a project admin sees of the workspace default they inherit: no limits, no ids, never the key. */
 export type InheritedAiSettings = Pick<AiSettingsView, "provider" | "model" | "endpoint" | "enabled" | "hasCredential">;
+
+/** The longest a connection test waits for the provider, whatever the setting's timeout is. */
+const TEST_TIMEOUT_MS = 30_000;
+/** The most output a connection test asks for: its answer is one small object. */
+const TEST_MAX_OUTPUT_TOKENS = 256;
+const TEST_SCHEMA = {
+  type: "object",
+  properties: { ok: { type: "boolean" } },
+  required: ["ok"],
+  additionalProperties: false,
+};
 
 /** The owner of a setting: a workspace (its default) or a project (its override). */
 type Owner = { kind: "WORKSPACE"; id: string } | { kind: "PROJECT"; id: string };
@@ -68,6 +82,7 @@ const toInherited = (row: AiSettings): InheritedAiSettings => ({
  */
 @Injectable()
 export class AiSettingsService {
+  private readonly logger = new Logger(AiSettingsService.name);
   private readonly box: SecretBox | null;
 
   constructor(
@@ -145,6 +160,70 @@ export class AiSettingsService {
     await this.remove({ kind: "PROJECT", id: projectId }, userId);
   }
 
+  /**
+   * Sends one small request to the saved provider, with no project content, and says whether it answered in
+   * the shape asked for. A pass records it (AI can then be switched on); a failure clears it and switches AI
+   * off. The answer never carries more of the provider's reply than a public endpoint's error text.
+   */
+  async test(
+    userId: string,
+    scope: { workspaceId: string } | { projectId: string },
+  ): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+    const owner: Owner =
+      "workspaceId" in scope ? { kind: "WORKSPACE", id: scope.workspaceId } : { kind: "PROJECT", id: scope.projectId };
+    if (owner.kind === "WORKSPACE") await this.requireWorkspaceAdmin(userId, owner.id);
+    else await this.requireProjectAdmin(userId, owner.id, false);
+    const row = await this.prisma.aiSettings.findUnique({ where: whereOwner(owner) });
+    if (!row) throw new NotFoundException("Save the AI settings before testing them");
+
+    let credential: string | null = null;
+    let failure: string | null = null;
+    const started = Date.now();
+    if (row.credentialCipher && (credential = this.openCredential(row)) === null) {
+      failure = "The saved provider key can't be read, probably because AI_ENCRYPTION_KEY changed; enter the key again";
+    } else {
+      try {
+        const { output } = await createAiProvider({
+          provider: row.provider,
+          model: row.model,
+          endpoint: row.endpoint,
+          credential,
+          maxOutputTokens: Math.min(row.maxOutputTokens, TEST_MAX_OUTPUT_TOKENS),
+          requestTimeoutMs: Math.min(row.requestTimeoutMs, TEST_TIMEOUT_MS),
+        }).generate({
+          system: 'This is a connection test. Answer with the JSON object {"ok": true}.',
+          user: "Reply now.",
+          schemaName: "connection_test",
+          schema: TEST_SCHEMA,
+        });
+        if (typeof output !== "object" || output === null || (output as { ok?: unknown }).ok !== true) {
+          failure = "The model answered, but not in the shape the test asked for";
+        }
+      } catch (error) {
+        if (!(error instanceof AiProviderError)) this.logger.error(`AI connection test failed unexpectedly: ${String(error)}`);
+        failure = scrubProviderError(
+          error instanceof AiProviderError ? error.message : "The test failed unexpectedly",
+          credential,
+        );
+      }
+    }
+    const latencyMs = Date.now() - started;
+    // Only if the connection settings are still the ones that were tested: a save during the test wins.
+    const unchanged = {
+      id: row.id,
+      provider: row.provider,
+      model: row.model,
+      endpoint: row.endpoint,
+      credentialCipher: row.credentialCipher,
+    };
+    if (failure) {
+      await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: null, enabled: false } });
+      return { ok: false, latencyMs, error: failure };
+    }
+    await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: new Date() } });
+    return { ok: true, latencyMs };
+  }
+
   private requireWorkspaceAdmin(userId: string, workspaceId: string) {
     return this.accessControl.requireWorkspaceRole(userId, workspaceId, [WorkspaceRole.ADMIN]);
   }
@@ -167,17 +246,11 @@ export class AiSettingsService {
   private parseEndpoint(raw: string | undefined): string | null {
     const value = raw?.trim().replace(/\/+$/, "");
     if (!value) return null;
-    let url: URL;
     try {
-      url = new URL(value);
-    } catch {
-      throw new BadRequestException("The endpoint isn't a valid URL");
-    }
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new BadRequestException("The endpoint must start with https:// or http://");
-    }
-    if (url.username || url.password) {
-      throw new BadRequestException("Put the provider key in the key field, not in the endpoint");
+      assertAiEndpoint(value);
+    } catch (error) {
+      if (error instanceof AiEndpointError) throw new BadRequestException(error.message);
+      throw error;
     }
     return value;
   }

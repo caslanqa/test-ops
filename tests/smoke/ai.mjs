@@ -9,7 +9,8 @@
 //
 // The rule (README, "AI assistant"): workspace admins define the workspace default and project admins their
 // project's setting, which replaces the default whole; Tester, Automation, Viewer and API tokens cannot.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
@@ -60,8 +61,40 @@ async function expectStatus(label, expected, token, method, path, body) {
 const psql = (sql) =>
   execFileSync('docker', ['compose', 'exec', '-T', 'postgres', 'psql', '-U', 'testops', '-d', 'testops', '-At', '-c', sql], {
     encoding: 'utf8',
+    // The error text is read from the thrown error when a statement is meant to fail; it isn't echoed.
+    stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 const keys = (object) => Object.keys(object ?? {}).sort().join(',');
+
+/** Runs a piece of JavaScript inside the app container and returns what it printed. */
+const inApp = (code) =>
+  execFileSync('docker', ['compose', 'exec', '-T', 'app', 'node', '-e', code], { encoding: 'utf8' }).trim();
+const fakeUrl = 'http://127.0.0.1:8098';
+const fromFake = (path, method = 'GET') =>
+  inApp(`fetch('${fakeUrl}${path}',{method:'${method}'}).then(r=>r.text()).then(t=>process.stdout.write(t))`);
+const lastRequest = () => JSON.parse(fromFake('/__last'));
+/** Starts the fake provider (tests/smoke/fake-ai-provider.cjs) in the app container and waits until it listens. */
+async function startFakeProvider() {
+  try { fromFake('/__quit', 'POST'); } catch { /* none was running */ }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const child = spawn('docker', ['compose', 'exec', '-T', 'app', 'node', '-'], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const ready = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 20_000);
+    child.stdout.on('data', (chunk) => {
+      if (String(chunk).includes('READY')) {
+        clearTimeout(timer);
+        resolve(true);
+      }
+    });
+    child.stdin.write(readFileSync(new URL('./fake-ai-provider.cjs', import.meta.url)));
+    child.stdin.end();
+  });
+  check('the fake provider started in the app container', ready);
+  process.on('exit', () => {
+    try { fromFake('/__quit', 'POST'); } catch { /* already gone */ }
+    child.kill();
+  });
+}
 
 const admin = (await ok(null, 'POST', '/auth/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).accessToken;
 
@@ -179,6 +212,150 @@ check('the workspace default applies again', afterRemove.source === 'WORKSPACE',
 const afterRemoveView = await ok(pa.token, 'GET', PS);
 check('...and the project has no setting of its own', afterRemoveView.own === null && afterRemoveView.source === 'WORKSPACE', JSON.stringify(afterRemoveView));
 await expectStatus('removing it again is a 404', 404, pa.token, 'DELETE', PS);
+
+console.log('--- Connection test ---');
+await startFakeProvider();
+const openAi = (model, extra = {}) => ({ provider: 'OPENAI_COMPATIBLE', model, endpoint: ENDPOINT, ...extra });
+const testWorkspace = () => call(admin, 'POST', `${WS}/test`);
+const workspaceView = async () => (await ok(admin, 'GET', WS)).settings;
+
+await ok(admin, 'PUT', WS, openAi('ok'));
+const passed = await testWorkspace();
+check(`[${passed.status}] a working provider passes the test`, passed.status === 200 && passed.json?.ok === true && typeof passed.json?.latencyMs === 'number', passed.text);
+check('...which is recorded', (await workspaceView()).testedAt !== null);
+const sent = await lastRequest();
+check('the request went to chat completions with the saved key', sent.path === '/v1/chat/completions' && sent.headers.authorization === `Bearer ${SECRET}`, JSON.stringify(sent));
+check('...asking for the answer in a JSON schema', sent.body.response_format?.type === 'json_schema' && sent.body.response_format.json_schema?.strict === true && sent.body.model === 'ok', JSON.stringify(sent.body));
+check('...with the output limit from the settings', sent.body.max_tokens === 256, String(sent.body.max_tokens));
+check('...and no project data in it', !JSON.stringify(sent.body).includes('AI project') && !JSON.stringify(sent.body).includes(project.id));
+await expectStatus('a tested setting can be switched on', 200, admin, 'PUT', WS, openAi('ok', { enabled: true }));
+const nowOn = await ok(tester.token, 'GET', STATUS);
+check('...and then applies to the project', nowOn.enabled === true && nowOn.source === 'WORKSPACE', JSON.stringify(nowOn));
+await ok(admin, 'PUT', WS, openAi('ok-2'));
+const afterModelChange = await workspaceView();
+check('changing only the model clears the test and switches AI off', afterModelChange.testedAt === null && afterModelChange.enabled === false, JSON.stringify(afterModelChange));
+
+for (const [model, label, fits] of [
+  ['fail500', 'an HTTP error shows only its status for a private address', (e) => e.includes('500') && !e.includes('INTERNAL-SECRET-BODY')],
+  ['bad-json', 'an answer that is not JSON', (e) => /valid JSON/.test(e)],
+  ['invalid', 'an answer that does not fit the schema', (e) => /shape/.test(e)],
+  ['huge', 'an answer over 2 MiB', (e) => e.includes('2 MiB')],
+  ['redirect', 'a redirect is not followed', (e) => e.includes('302')],
+  ['unsupported', 'a server without structured output', (e) => /structured output/.test(e)],
+]) {
+  await ok(admin, 'PUT', WS, openAi(model));
+  const failed = await testWorkspace();
+  check(`[${failed.status}] ${label} fails the test`, failed.status === 200 && failed.json?.ok === false && fits(String(failed.json?.error)), failed.text);
+  check('...and leaves AI untested', (await workspaceView()).testedAt === null);
+}
+await ok(admin, 'PUT', WS, openAi('slow', { requestTimeoutMs: 5000 }));
+const slow = await testWorkspace();
+check(`[${slow.status}] a provider that does not answer in time fails the test`, slow.json?.ok === false && String(slow.json?.error).includes('No answer within 5 s'), slow.text);
+await ok(admin, 'PUT', WS, openAi('ok', { requestTimeoutMs: 120000 }));
+
+await ok(admin, 'PUT', WS, { provider: 'ANTHROPIC', model: 'ok', endpoint: fakeUrl, credential: 'sk-anthropic-1' });
+const anthropic = await testWorkspace();
+check(`[${anthropic.status}] the Anthropic provider passes the test`, anthropic.json?.ok === true, anthropic.text);
+const anthropicSent = await lastRequest();
+check('...through the Messages API with its own headers', anthropicSent.path === '/v1/messages' && anthropicSent.headers['x-api-key'] === 'sk-anthropic-1' && Boolean(anthropicSent.headers['anthropic-version']), JSON.stringify(anthropicSent.headers));
+check('...forcing the one tool', anthropicSent.body.tool_choice?.type === 'tool' && anthropicSent.body.tools?.length === 1 && anthropicSent.body.tools[0].name === anthropicSent.body.tool_choice.name, JSON.stringify(anthropicSent.body));
+await ok(admin, 'PUT', WS, openAi('ok', { credential: SECRET }));
+check('going back to the other provider needs a new test', (await workspaceView()).testedAt === null);
+check('...which passes again', (await testWorkspace()).json?.ok === true);
+await expectStatus('...and AI is switched on for the rest of the run', 200, admin, 'PUT', WS, openAi('ok', { enabled: true }));
+
+console.log('--- Where the endpoint may point ---');
+await expectStatus('a link-local address (cloud metadata) is refused', 400, admin, 'PUT', WS, openAi('ok', { endpoint: 'http://169.254.169.254/v1' }));
+await expectStatus('...also written as an IPv4-mapped IPv6 address', 400, admin, 'PUT', WS, openAi('ok', { endpoint: 'http://[::ffff:a9fe:a9fe]/v1' }));
+await expectStatus('...or as a decimal number', 400, admin, 'PUT', WS, openAi('ok', { endpoint: 'http://2852039166/v1' }));
+await expectStatus('...and "this network"', 400, admin, 'PUT', WS, openAi('ok', { endpoint: 'http://0.0.0.0:11434/v1' }));
+await expectStatus('localhost is allowed, for a model on the same machine', 200, admin, 'PUT', WS, openAi('ok', { endpoint: 'http://localhost:8098/v1' }));
+await expectStatus('a private address is allowed, for a model on the network', 200, admin, 'PUT', WS, openAi('ok', { endpoint: 'http://192.168.1.50:11434/v1' }));
+await ok(admin, 'PUT', WS, openAi('ok', { credential: SECRET }));
+await ok(admin, 'POST', `${WS}/test`);
+await ok(admin, 'PUT', WS, openAi('ok', { enabled: true }));
+
+console.log('--- A project tests its own setting ---');
+await expectStatus('a project without a setting has nothing to test', 404, pa.token, 'POST', `${PS}/test`);
+await ok(pa.token, 'PUT', PS, openAi('ok', { credential: 'sk-project-1' }));
+const projectTest = await call(pa.token, 'POST', `${PS}/test`);
+check(`[${projectTest.status}] a project admin tests their project's setting`, projectTest.status === 200 && projectTest.json?.ok === true, projectTest.text);
+check('...with the project key, not the workspace one', (await lastRequest()).headers.authorization === 'Bearer sk-project-1');
+await expectStatus('removing the project setting again', 204, pa.token, 'DELETE', PS);
+for (const user of [tester, automation, viewer]) {
+  await expectStatus(`${user.label}: test the project setting`, 403, user.token, 'POST', `${PS}/test`);
+}
+await expectStatus('a project admin cannot test the workspace default', 403, pa.token, 'POST', `${WS}/test`);
+await expectStatus('an API token cannot test the workspace default', 403, adminToken, 'POST', `${WS}/test`);
+await expectStatus('an API token cannot test a project setting', 403, adminToken, 'POST', `${PS}/test`);
+const emptyWorkspace = await ok(admin, 'POST', '/workspaces', { name: 'AI empty', slug: `ai-empty-${sfx}` });
+await expectStatus('a workspace default that was never saved has nothing to test', 404, admin, 'POST', `/workspaces/${emptyWorkspace.id}/ai/test`);
+
+console.log('--- Address and error helpers, inside the app ---');
+try {
+  const reservedYes = ['169.254.169.254', 'fe80::1', '0.0.0.0', '224.0.0.1', '255.255.255.255', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', '::', 'ff02::1'];
+  const reservedNo = ['127.0.0.1', '10.1.2.3', '192.168.1.5', '172.16.0.1', '100.64.1.1', '::1', 'fd00::1', '8.8.8.8'];
+  // Node's BlockList checks an IPv4 address as an IPv4-mapped IPv6 one, so an IPv6 "mapped" rule in the same
+  // list as the IPv4 ranges would match every IPv4 address, public ones included.
+  const privateYes = ['10.1.2.3', '127.0.0.1', '192.168.1.5', '169.254.169.254', '::1', 'fd00::1', '::ffff:127.0.0.1'];
+  const privateNo = ['8.8.8.8', '1.1.1.1', '93.184.216.34', '2606:4700:4700::1111'];
+  const classified = JSON.parse(
+    inApp(`
+      const { isPrivateAddress } = require('./dist/webhooks/safe-post');
+      console.log(JSON.stringify({
+        yes: ${JSON.stringify(privateYes)}.map((a) => [a, isPrivateAddress(a)]),
+        no: ${JSON.stringify(privateNo)}.map((a) => [a, isPrivateAddress(a)]),
+      }));
+    `),
+  );
+  for (const [address, isPrivate] of classified.yes) check(`${address} is private`, isPrivate === true);
+  for (const [address, isPrivate] of classified.no) check(`${address} is public`, isPrivate === false);
+
+  const helpers = JSON.parse(
+    inApp(`
+      const { isReservedAddress } = require('./dist/webhooks/safe-post');
+      const { scrubProviderError, providerFailureMessage } = require('./dist/ai/provider-error');
+      const edge = 'x'.repeat(498) + 'sk-12345';
+      console.log(JSON.stringify({
+        yes: ${JSON.stringify(reservedYes)}.map((a) => [a, isReservedAddress(a)]),
+        no: ${JSON.stringify(reservedNo)}.map((a) => [a, isReservedAddress(a)]),
+        scrubbed: scrubProviderError('bad key sk-1 here, sk-1 again', 'sk-1'),
+        cut: scrubProviderError('y'.repeat(2000), null).length,
+        edge: scrubProviderError(edge, 'sk-12345'),
+        publicMessage: providerFailureMessage(500, false, 'oops', null),
+        privateMessage: providerFailureMessage(500, true, 'oops', null),
+      }));
+    `),
+  );
+  for (const [address, reserved] of helpers.yes) check(`${address} is reserved`, reserved === true);
+  for (const [address, reserved] of helpers.no) check(`${address} is not reserved`, reserved === false);
+  check('a provider key is removed from error text', !helpers.scrubbed.includes('sk-1'), helpers.scrubbed);
+  check('error text is cut to 500 characters', helpers.cut <= 500, String(helpers.cut));
+  check('...and a key at the cut is removed before cutting', !helpers.edge.includes('sk-'), helpers.edge);
+  check('a public endpoint keeps the error text', helpers.publicMessage.includes('500') && helpers.publicMessage.includes('oops'), helpers.publicMessage);
+  check('a private endpoint shows only the status', helpers.privateMessage.includes('500') && !helpers.privateMessage.includes('oops'), helpers.privateMessage);
+
+  const connect = JSON.parse(
+    inApp(`
+      const dns = require('dns');
+      const { safePost } = require('./dist/webhooks/safe-post');
+      const table = { 'metadata.test': [{ address: '169.254.169.254', family: 4 }], 'local.test': [{ address: '127.0.0.1', family: 4 }] };
+      const real = dns.lookup;
+      dns.lookup = (host, options, cb) => (table[host] ? cb(null, table[host]) : real(host, options, cb));
+      const send = (host) => safePost(new URL('http://' + host + ':8098/__last'), '{}', {}, { allowPrivate: true, refuseReserved: true, timeoutMs: 3000 });
+      (async () => {
+        const out = {};
+        try { out.metadata = 'sent ' + (await send('metadata.test')).status; } catch (e) { out.metadata = e.message; }
+        try { out.local = (await send('local.test')).status; } catch (e) { out.local = e.message; }
+        console.log(JSON.stringify(out));
+      })();
+    `),
+  );
+  check('a name that resolves to a link-local address is refused when connecting', /link-local/.test(connect.metadata), JSON.stringify(connect));
+  check('a name that resolves to loopback is reached', connect.local === 200, JSON.stringify(connect));
+} catch (error) {
+  check('the helper checks ran', false, String(error.message).slice(0, 300));
+}
 
 console.log('--- What the database holds ---');
 check('the key is stored encrypted', psql(`select count(*) from ai_settings where "credentialCipher" like 'v1:%'`) !== '0');
