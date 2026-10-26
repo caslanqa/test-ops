@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { groupFiles, parseAttachmentPolicy, shouldAttach, skipReason } from './artifacts.js';
 import { matchSteps } from './match.js';
 
 const COMMENT_MAX = 10_000;
 const BULK_MAX = 500;
 const REQUEST_TIMEOUT_MS = 30_000;
+// A grouped upload can carry up to 128 MB, which the usual request timeout would cut short.
+const UPLOAD_TIMEOUT_MS = 300_000;
 
 function clean(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -46,6 +49,7 @@ function settingsFrom(options, env) {
   if (!/\/api\/v\d+$/.test(parsed.pathname.replace(/\/+$/, '')) || parsed.search || parsed.hash) {
     throw new Error('TESTOPS_URL must be the versioned API base, e.g. https://testops.example.com/api/v1.');
   }
+  settings.attachments = parseAttachmentPolicy(options.attachments ?? env.TESTOPS_ATTACHMENTS);
   return settings;
 }
 
@@ -83,7 +87,7 @@ class TestOpsClient {
             ...(!form && body !== undefined ? { 'content-type': 'application/json' } : {}),
           },
           body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          signal: AbortSignal.timeout(form ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
         });
         const text = await response.text();
         if (!response.ok) {
@@ -179,16 +183,16 @@ class TestOpsClient {
 
       for (const [index, result] of batch.entries()) {
         const resultId = submitted.results[index].id;
-        if (result.status === 'FAILED') {
-          await this.uploadAttachments(resultId, result.attachments ?? []);
-          if (result.defectTitle) {
-            openDefects ??= await this.listOpenDefects();
-            const defect = openDefects.find((item) => item.title === result.defectTitle);
-            if (defect) {
-              await this.request('POST', `${this.projectPath}/defects/${encodeURIComponent(defect.id)}/results`, { resultIds: [resultId] });
-            } else {
-              console.log(`TestOps: no open defect is titled "${result.defectTitle}"; "${result.title}" was not linked.`);
-            }
+        if (this.wantsAttachments(result.status)) {
+          await this.uploadAttachments(resultId, result.attachments ?? [], result.title);
+        }
+        if (result.status === 'FAILED' && result.defectTitle) {
+          openDefects ??= await this.listOpenDefects();
+          const defect = openDefects.find((item) => item.title === result.defectTitle);
+          if (defect) {
+            await this.request('POST', `${this.projectPath}/defects/${encodeURIComponent(defect.id)}/results`, { resultIds: [resultId] });
+          } else {
+            console.log(`TestOps: no open defect is titled "${result.defectTitle}"; "${result.title}" was not linked.`);
           }
         }
       }
@@ -288,12 +292,45 @@ class TestOpsClient {
     return stepResults.length ? stepResults : undefined;
   }
 
-  async uploadAttachments(resultId, attachments) {
+  /** Whether results with this status get their artifacts uploaded (TESTOPS_ATTACHMENTS). */
+  wantsAttachments(status) {
+    return shouldAttach(this.settings.attachments, status);
+  }
+
+  /**
+   * Uploads a result's files in as few requests as the server limits allow. A file the server would
+   * refuse, an unreadable file and a failed upload each warn; none of them loses the result.
+   */
+  async uploadAttachments(resultId, attachments, title) {
+    const files = [];
     for (const attachment of attachments) {
-      const bytes = new Uint8Array(await readFile(attachment.path));
-      const form = new FormData();
-      form.append('files', new Blob([bytes], { type: attachment.contentType }), basename(attachment.path));
-      await this.request('POST', `${this.projectPath}/results/${encodeURIComponent(resultId)}/attachments`, undefined, { form });
+      const name = attachment.name ?? basename(attachment.path);
+      let size;
+      try {
+        size = (await stat(attachment.path)).size;
+      } catch (error) {
+        console.warn(`TestOps: skipped attachment "${name}": it cannot be read (${error instanceof Error ? error.message : error}).`);
+        continue;
+      }
+      const reason = skipReason({ name, size });
+      if (reason) {
+        console.warn(`TestOps: skipped attachment "${name}": ${reason}.`);
+        continue;
+      }
+      files.push({ ...attachment, name, size });
+    }
+
+    for (const group of groupFiles(files)) {
+      try {
+        const form = new FormData();
+        for (const file of group) {
+          const bytes = new Uint8Array(await readFile(file.path));
+          form.append('files', new Blob([bytes], { type: file.contentType }), file.name);
+        }
+        await this.request('POST', `${this.projectPath}/results/${encodeURIComponent(resultId)}/attachments`, undefined, { form });
+      } catch (error) {
+        console.warn(`TestOps: attachments for "${title}" could not be uploaded. ${error instanceof Error ? error.message : error}`);
+      }
     }
   }
 

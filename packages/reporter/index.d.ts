@@ -18,6 +18,8 @@ export interface TestOpsReporterOptions {
   environment?: string;
   /** Optional CI job URL. Defaults to TESTOPS_CI_URL or a supported CI environment. */
   ciUrl?: string;
+  /** Which results get their artifacts uploaded: failed (default), all or none. Defaults to TESTOPS_ATTACHMENTS. */
+  attachments?: 'failed' | 'all' | 'none';
 }
 
 /** Link a Playwright test to the UUID displayed in its TestOps case details. */

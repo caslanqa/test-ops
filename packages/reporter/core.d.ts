@@ -1,5 +1,13 @@
 export type TestOpsResultStatus = 'PASSED' | 'FAILED' | 'SKIPPED';
 
+/** A file uploaded with a result. */
+export interface TestOpsAttachment {
+  path: string;
+  contentType: string;
+  /** File name sent to TestOps; defaults to the path's base name. */
+  name?: string;
+}
+
 /** A framework step; reported against the case step whose text equals its title (ignoring case and spacing). */
 export interface TestOpsStep {
   title: string;
@@ -20,7 +28,7 @@ export interface TestOpsResult {
   startedAt?: string;
   endedAt?: string;
   durationMs?: number;
-  attachments?: Array<{ path: string; contentType: string }>;
+  attachments?: TestOpsAttachment[];
   /** Steps in execution order, matched to the case's steps by title. */
   steps?: TestOpsStep[];
   defectTitle?: string;
@@ -40,6 +48,11 @@ export interface ReporterOptions {
   runTitle?: string;
   environment?: string;
   ciUrl?: string;
+  /**
+   * Which results get their artifacts uploaded: `failed` (default), `all` or `none`.
+   * Defaults to TESTOPS_ATTACHMENTS.
+   */
+  attachments?: 'failed' | 'all' | 'none';
   /** Adapter name shown on the run and individual results. */
   integrationName?: string;
 }
