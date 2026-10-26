@@ -120,8 +120,9 @@ function InviteMemberForm({
     return (
       <div className="dialog-body">
         <p>
-          Send this link to <strong>{created.email}</strong>. It works once, until {formatDate(created.expiresAt)}, and
-          only with that email address. Copy it now; it isn't shown again.
+          Send this link to <strong>{created.email}</strong>, who joins as <strong>{invitationTypeLabel(created)}</strong>.
+          It works once, until {formatDate(created.expiresAt)}, and only with that email address. Copy it now; it
+          isn't shown again.
         </p>
         <div className="field">
           <label htmlFor={ids.link} className="field-label">Invitation link</label>
@@ -144,27 +145,27 @@ function InviteMemberForm({
         <input id={ids.email} type="email" value={email} required onChange={(e) => setEmail(e.target.value)} />
       </div>
       <RoleRadioGroup legend="Type" name="user-type" value={type} options={TYPE_OPTIONS} onChange={(value) => setType(value as UserType)} />
-      {needsProject && (
+      {needsProject && noProject && (
+        <p className="muted">
+          This workspace has no active project yet. Create one first, or invite a workspace admin.
+        </p>
+      )}
+      {needsProject && projects.error && <LoadError message={projects.error} onRetry={projects.reload} />}
+      {needsProject && !noProject && !projects.error && (
         <div className="field">
           <label htmlFor={ids.project} className="field-label">Project</label>
-          {noProject ? (
-            <p className="muted">
-              This workspace has no active project yet. Create one first, or invite a workspace admin.
-            </p>
-          ) : (
-            <Select id={ids.project} value={projectId} required onChange={(e) => setProjectId(e.target.value)}>
-              <option value="">Choose a project</option>
-              {(projects.data ?? []).map((p) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.key})</option>
-              ))}
-            </Select>
-          )}
+          <Select id={ids.project} value={projectId} required onChange={(e) => setProjectId(e.target.value)}>
+            <option value="">Choose a project</option>
+            {(projects.data ?? []).map((p) => (
+              <option key={p.id} value={p.id}>{p.name} ({p.key})</option>
+            ))}
+          </Select>
         </div>
       )}
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving || noProject}>Create invitation link</button>
+        <button type="submit" className="btn btn-primary" disabled={saving || noProject || (needsProject && Boolean(projects.error))}>Create invitation link</button>
       </div>
     </form>
   );
