@@ -15,18 +15,26 @@ const sfx = Date.now().toString(36);
 let failures = 0;
 
 async function call(token, method, path, body) {
-  const res = await fetch(BASE + path, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let json;
-  try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
-  return { status: res.status, json };
+  // Sign-up and sign-in allow only a few attempts a minute, so a run that follows another suite waits out a
+  // 429 instead of failing.
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(BASE + path, {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 429 && attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, 61_000));
+      continue;
+    }
+    const text = await res.text();
+    let json;
+    try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
+    return { status: res.status, json };
+  }
 }
 async function ok(token, method, path, body) {
   const r = await call(token, method, path, body);
@@ -50,19 +58,7 @@ const ws = await ok(admin, 'POST', '/workspaces', { name: 'Roles test', slug: `r
 const project = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'RL', name: 'Roles project' });
 const members = `/projects/${project.id}/members`;
 
-/**
- * Sign-up allows only a few attempts a minute, so a run that follows another suite waits out a 429 instead
- * of failing.
- */
-async function register(body) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const r = await call(null, 'POST', '/auth/register', body);
-    if (r.status < 300) return r.json;
-    if (r.status !== 429) throw new Error(`POST /auth/register -> ${r.status} ${JSON.stringify(r.json)}`);
-    await new Promise((resolve) => setTimeout(resolve, 61_000));
-  }
-  throw new Error('sign-up stayed rate limited');
-}
+const register = (body) => ok(null, 'POST', '/auth/register', body);
 
 /**
  * An account that joined the workspace by invitation, with `projectRole` in the project (none when null).
@@ -144,6 +140,53 @@ for (const who of [tester, viewer]) {
   await expectStatus(`a ${who.label} cannot remove a member`, 403, who.token, 'DELETE', `${members}/${target}`);
 }
 check('...and the project admin is untouched', (await memberIdOf(pa2)) === target);
+
+console.log('--- Invitations with a project ---');
+const invite = (body) => call(admin, 'POST', `/workspaces/${ws.id}/invitations`, body);
+const roleOf = async (userId) => (await ok(admin, 'GET', members)).find((m) => m.user.id === userId)?.role;
+
+// An existing account accepts an invitation that carries a project and a role.
+const existingEmail = `existing-${sfx}@roles.test`;
+const existing = await register({ email: existingEmail, displayName: 'Existing', password: PASSWORD });
+const withProject = await invite({ email: existingEmail, role: 'MEMBER', projectId: project.id, projectRole: 'TESTER' });
+check(`[${withProject.status}] an invitation can carry a project and a role`, withProject.status === 201 && withProject.json?.projectRole === 'TESTER' && withProject.json?.project?.id === project.id, JSON.stringify(withProject.json));
+const listed = (await ok(admin, 'GET', `/workspaces/${ws.id}/invitations`)).find((i) => i.email === existingEmail);
+check('the list shows its project and role', listed?.projectRole === 'TESTER' && listed?.project?.key === 'RL' && listed?.project?.name === 'Roles project', JSON.stringify(listed));
+const preview = await call(null, 'GET', `/invitations/${withProject.json?.token}`);
+check(`[${preview.status}] the preview shows its project and role without signing in`, preview.status === 200 && preview.json?.projectRole === 'TESTER' && preview.json?.project?.name === 'Roles project', JSON.stringify(preview.json));
+check('the person has no project role before accepting', (await roleOf(existing.user.id)) === undefined);
+await expectStatus('the invited account accepts', 201, existing.accessToken, 'POST', `/invitations/${withProject.json?.token}/accept`);
+check('accepting gives the project role', (await roleOf(existing.user.id)) === 'TESTER', String(await roleOf(existing.user.id)));
+
+// A new account created with the link gets the role too.
+const newEmail = `newcomer-${sfx}@roles.test`;
+const forNewcomer = await invite({ email: newEmail, role: 'MEMBER', projectId: project.id, projectRole: 'VIEWER' });
+const newcomer = await register({ email: newEmail, displayName: 'Newcomer', password: PASSWORD, inviteToken: forNewcomer.json?.token });
+check('signing up with the link gives the project role', (await roleOf(newcomer.user.id)) === 'VIEWER', String(await roleOf(newcomer.user.id)));
+
+// An invitation without a project behaves as before.
+const plainEmail = `plain-${sfx}@roles.test`;
+const plain = await register({ email: plainEmail, displayName: 'Plain', password: PASSWORD });
+const withoutProject = await invite({ email: plainEmail, role: 'MEMBER' });
+check('an invitation without a project has none in the response', withoutProject.json?.project === null && withoutProject.json?.projectRole === null, JSON.stringify(withoutProject.json));
+await expectStatus('...and accepts', 201, plain.accessToken, 'POST', `/invitations/${withoutProject.json?.token}/accept`);
+check('...without a project role', (await roleOf(plain.user.id)) === undefined);
+
+// What an invitation may not combine.
+const other = await invite({ email: `bad-${sfx}@roles.test`, role: 'ADMIN', projectId: project.id, projectRole: 'TESTER' });
+check(`[${other.status}] a workspace admin invitation takes no project`, other.status === 400, JSON.stringify(other.json));
+const onlyProject = await invite({ email: `bad-${sfx}@roles.test`, role: 'MEMBER', projectId: project.id });
+check(`[${onlyProject.status}] a project without a role is rejected`, onlyProject.status === 400, JSON.stringify(onlyProject.json));
+const onlyRole = await invite({ email: `bad-${sfx}@roles.test`, role: 'MEMBER', projectRole: 'TESTER' });
+check(`[${onlyRole.status}] a role without a project is rejected`, onlyRole.status === 400, JSON.stringify(onlyRole.json));
+const otherWorkspace = await ok(admin, 'POST', '/workspaces', { name: 'Roles other', slug: `roles-other-${sfx}` });
+const foreignProject = await ok(admin, 'POST', `/workspaces/${otherWorkspace.id}/projects`, { key: 'RO', name: 'Other project' });
+const foreign = await invite({ email: `bad-${sfx}@roles.test`, role: 'MEMBER', projectId: foreignProject.id, projectRole: 'TESTER' });
+check(`[${foreign.status}] a project of another workspace is not found`, foreign.status === 404, JSON.stringify(foreign.json));
+const archivedProject = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'RA', name: 'Archived project' });
+await ok(admin, 'DELETE', `/projects/${archivedProject.id}`);
+const archived = await invite({ email: `bad-${sfx}@roles.test`, role: 'MEMBER', projectId: archivedProject.id, projectRole: 'TESTER' });
+check(`[${archived.status}] an archived project is rejected`, archived.status === 400, JSON.stringify(archived.json));
 
 console.log(failures === 0 ? '\nAll role checks passed.' : `\n${failures} role check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

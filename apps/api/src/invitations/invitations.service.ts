@@ -1,11 +1,12 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Prisma, WorkspaceRole } from "@prisma/client";
+import { Prisma, ProjectRole, WorkspaceRole } from "@prisma/client";
 import * as crypto from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessControlService } from "../common/access-control.service";
@@ -59,6 +60,30 @@ export class InvitationsService {
         );
       }
     }
+    // A project role goes with a project, and a workspace admin is an admin in every project already.
+    const projectId = dto.projectId ?? null;
+    const projectRole = dto.projectRole ?? null;
+    if ((projectId === null) !== (projectRole === null)) {
+      throw new BadRequestException("projectId and projectRole go together: give both or neither.");
+    }
+    if (projectId !== null && dto.role === WorkspaceRole.ADMIN) {
+      throw new BadRequestException(
+        "A workspace admin is an admin in every project; invite them without a project.",
+      );
+    }
+    let project: { id: string; key: string; name: string } | null = null;
+    if (projectId !== null) {
+      const found = await this.prisma.project.findFirst({
+        where: { id: projectId, workspaceId },
+        select: { id: true, key: true, name: true, archivedAt: true },
+      });
+      // A project of another workspace is "not found", like any id from outside the scope.
+      if (!found) throw new NotFoundException("Project not found");
+      if (found.archivedAt) {
+        throw new BadRequestException("An archived project can't get new members through an invitation.");
+      }
+      project = { id: found.id, key: found.key, name: found.name };
+    }
     const email = dto.email.trim().toLowerCase();
     // Admins can list the members anyway, so saying someone already is one reveals nothing.
     const member = await this.prisma.workspaceMember.findFirst({
@@ -79,6 +104,8 @@ export class InvitationsService {
           workspaceId,
           email,
           role: dto.role,
+          projectId,
+          projectRole,
           tokenHash: hashToken(token),
           invitedById: userId,
           expiresAt: new Date(Date.now() + INVITATION_LIFETIME_MS),
@@ -89,6 +116,8 @@ export class InvitationsService {
       id: invitation.id,
       email,
       role: invitation.role,
+      project,
+      projectRole: invitation.projectRole,
       expiresAt: invitation.expiresAt,
       createdAt: invitation.createdAt,
       token, // visible only in this response
@@ -106,6 +135,8 @@ export class InvitationsService {
         id: true,
         email: true,
         role: true,
+        projectRole: true,
+        project: { select: { id: true, key: true, name: true } },
         expiresAt: true,
         createdAt: true,
         invitedBy: { select: { displayName: true } },
@@ -129,13 +160,18 @@ export class InvitationsService {
   async preview(token: string) {
     const invitation = await this.prisma.workspaceInvitation.findFirst({
       where: { tokenHash: hashToken(token), ...pending() },
-      include: { workspace: { select: { id: true, name: true } } },
+      include: {
+        workspace: { select: { id: true, name: true } },
+        project: { select: { id: true, key: true, name: true } },
+      },
     });
     if (!invitation) throw new NotFoundException(INVALID_LINK);
     return {
       workspace: invitation.workspace,
       email: invitation.email,
       role: invitation.role,
+      project: invitation.project,
+      projectRole: invitation.projectRole,
       expiresAt: invitation.expiresAt,
     };
   }
@@ -156,7 +192,30 @@ export class InvitationsService {
         },
         update: {},
       });
-      return { workspaceId: membership.workspaceId, role: membership.role };
+      await this.joinProject(tx, invitation, user.id);
+      return {
+        workspaceId: membership.workspaceId,
+        role: membership.role,
+        projectId: invitation.projectId,
+        projectRole: invitation.projectRole,
+      };
+    });
+  }
+
+  /**
+   * Gives the person the project role of the invitation, when it has one. Like the workspace role, an
+   * invitation never changes a role the person already holds in the project.
+   */
+  async joinProject(
+    tx: Prisma.TransactionClient,
+    invitation: { projectId: string | null; projectRole: ProjectRole | null },
+    userId: string,
+  ) {
+    if (invitation.projectId === null || invitation.projectRole === null) return;
+    await tx.projectMember.upsert({
+      where: { projectId_userId: { projectId: invitation.projectId, userId } },
+      create: { projectId: invitation.projectId, userId, role: invitation.projectRole },
+      update: {},
     });
   }
 
