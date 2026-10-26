@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { IMPORT_LINE, isEsmFile, linkTestsInSource } from '../link.js';
+import { IMPORT_LINE, linkTestsInSource } from '../link.js';
 import { locationOf } from './helpers.js';
 
 const ID1 = '550e8400-e29b-41d4-a716-446655440000';
@@ -135,22 +132,4 @@ test('an ID that is not a UUID is never written into the source', () => {
   assert.equal(result.source, source);
   assert.equal(result.linked, 0);
   assert.match(result.skipped[0].reason, /UUID/);
-});
-
-test('isEsmFile follows the module type of the nearest package.json and the file extension', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'testops-test-'));
-  try {
-    await mkdir(join(root, 'esm', 'tests'), { recursive: true });
-    await mkdir(join(root, 'cjs', 'tests'), { recursive: true });
-    await mkdir(join(root, 'bare'), { recursive: true });
-    await writeFile(join(root, 'esm', 'package.json'), '{"type":"module"}');
-    await writeFile(join(root, 'cjs', 'package.json'), '{"type":"commonjs"}');
-    assert.equal(await isEsmFile(join(root, 'esm', 'tests', 'a.spec.ts')), true);
-    assert.equal(await isEsmFile(join(root, 'cjs', 'tests', 'a.spec.ts')), false);
-    assert.equal(await isEsmFile(join(root, 'cjs', 'tests', 'a.spec.mts')), true);
-    assert.equal(await isEsmFile(join(root, 'cjs', 'tests', 'a.spec.js')), false);
-    assert.equal(await isEsmFile(join(root, 'bare', 'a.spec.ts')), false);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
 });

@@ -122,21 +122,13 @@ test('without link nothing changes in how sync behaves', async () => {
   assert.match(logs.join('\n'), /0 linked tests are already in sync/);
 });
 
-test('a project that is not an ES module project is reported and its files are untouched', async () => {
-  const { logs, warnings, after, source } = await sync({
+test('tests in a project that is not an ES module project are linked too', async () => {
+  const { after, warnings } = await sync({
     options: { link: true, apply: true },
     packageJson: '{}',
     discover: unlinkedTests,
   });
-  assert.equal(after, source);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /"type": "module"/);
-  assert.match(warnings[0], /cart\.spec\.ts/);
-  assert.equal(logs.some((line) => line.includes('linked 1 test')), false);
-});
-
-test('a dry run does not offer to link tests in a project that is not an ES module project', async () => {
-  const { logs, warnings } = await sync({ options: { link: true }, packageJson: '{}', discover: unlinkedTests });
-  assert.equal(logs.some((line) => line.includes('would link')), false);
-  assert.equal(warnings.length, 1);
+  assert.ok(after.startsWith("import { testops } from '@testops/reporter';\n"));
+  assert.ok(after.includes(`test('Open the cart', testops('${C1}'), async`));
+  assert.deepEqual(warnings, []);
 });

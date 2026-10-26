@@ -143,10 +143,7 @@ npx testops-sync --link --apply
 - Cases that a test already links to are not offered again.
 
 With `--apply`, the ID of each exact match is written into the test: `, testops('<id>')` after the
-title, and `import { testops } from '@testops/reporter';` when the file has no such import. The package
-is ES-module-only, so this is done only in a project that loads the file as an ES module (`"type":
-"module"` in `package.json`, or a `.mjs`/`.mts` file); in any other project the matches are reported
-and no file is changed. Only a
+title, and `import { testops } from '@testops/reporter';` when the file has no such import. Only a
 test written as `test('title', async () => { … })` (also `test.only`, `test.skip`, `test.fixme` and
 `test.fail`) is edited. A test with a details object, a template-literal title, a helper call as its
 second argument, or in a file without a top-level `import` is listed with `file:line` for you to

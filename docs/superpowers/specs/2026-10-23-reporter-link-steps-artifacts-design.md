@@ -117,10 +117,6 @@ unmatched tests.
 4. Adds `import { testops } from '@testops/reporter';` before the first top-level `import` when the file
    has none. A file with no top-level `import` (CommonJS) is reported for a manual edit.
 
-`@testops/reporter` is ES-module-only, so a test file is edited only when the project loads it as an ES module
-(`.mjs`/`.mts`, or `"type": "module"` in the nearest `package.json`); in any other project the matches are
-reported and nothing is written.
-
 Any file that does not fit these rules is left untouched and reported with `file:line`. Parameterized tests
 (a title built from a template literal or a loop) are always reported, never rewritten. Edits within one
 file are applied from the bottom up so earlier locations stay valid. `--link` only reads the case list, so a

@@ -2,9 +2,6 @@
 // the plain shapes it can recognize exactly and reports every other test, so a file is never
 // changed in a way the author did not expect.
 
-import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-
 export const IMPORT_LINE = "import { testops } from '@testops/reporter';";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -15,29 +12,6 @@ const MODIFIER_CALL = /(?:only|skip|fixme|fail)\s*\(/y;
 // The argument after the title must be the test function. A details object or a helper call such as
 // demoTestops(...) would make a second details argument, which Playwright does not accept.
 const INLINE_FUNCTION = /(?:async\b|function\b|\(|[A-Za-z_$][\w$]*\s*=>)/y;
-
-/**
- * Whether the project loads this file as an ES module: the `.mjs` and `.mts` extensions, or
- * `"type": "module"` in the nearest package.json. `@testops/reporter` is ES-module-only, so an import of
- * it in any other file would stop that file from loading.
- */
-export async function isEsmFile(file) {
-  if (/\.m[jt]s$/.test(file)) return true;
-  for (let directory = dirname(file); ; directory = dirname(directory)) {
-    let manifest;
-    try {
-      manifest = await readFile(join(directory, 'package.json'), 'utf8');
-    } catch (error) {
-      if (error.code !== 'ENOENT' || dirname(directory) === directory) return false;
-      continue;
-    }
-    try {
-      return JSON.parse(manifest).type === 'module';
-    } catch {
-      return false;
-    }
-  }
-}
 
 function skipSpace(source, index) {
   let position = index;

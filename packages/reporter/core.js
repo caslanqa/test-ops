@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, relative } from 'node:path';
 import { groupFiles, parseAttachmentPolicy, shouldAttach, skipReason } from './artifacts.js';
-import { isEsmFile, linkTestsInSource } from './link.js';
+import { linkTestsInSource } from './link.js';
 import { dedupeByLocation, matchSteps, matchTestsToCases } from './match.js';
 
 const COMMENT_MAX = 10_000;
@@ -286,23 +286,9 @@ class TestOpsClient {
     const { exact, suggestions, ambiguous, unmatched } = matchTestsToCases(unlinkedTests, candidates);
     const where = (test) => (test.location ? `${relative(process.cwd(), test.location.file)}:${test.location.line}` : 'an unknown location');
 
-    // @testops/reporter is ES-module-only: an import of it breaks every file of a project that loads as CommonJS.
-    const linkable = [];
-    const skippedByFile = new Map();
-    const esmByFile = new Map();
-    for (const item of exact) {
-      const file = item.test.location?.file;
-      if (file !== undefined && !esmByFile.has(file)) esmByFile.set(file, await isEsmFile(file));
-      if (file === undefined || esmByFile.get(file)) linkable.push(item);
-      else skippedByFile.set(file, (skippedByFile.get(file) ?? 0) + 1);
-    }
-    for (const [file, count] of skippedByFile) {
-      console.warn(`TestOps link: not linking ${count} ${count === 1 ? 'test' : 'tests'} in ${relative(process.cwd(), file)}: the project is not an ES module project ("type": "module" is missing in package.json) and @testops/reporter can only be imported from one. Add testops() by hand once the project is ESM.`);
-    }
-
     console.log(`TestOps link: ${unlinkedTests.length} ${unlinkedTests.length === 1 ? 'test has' : 'tests have'} no TestOps ID: ${exact.length} match a case by title, ${suggestions.length} ${suggestions.length === 1 ? 'is a suggestion' : 'are suggestions'}, ${ambiguous.length} ${ambiguous.length === 1 ? 'is ambiguous' : 'are ambiguous'}, ${unmatched.length} ${unmatched.length === 1 ? 'has' : 'have'} no match.`);
     if (!apply) {
-      for (const item of linkable) console.log(`TestOps link: would link ${where(item.test)} "${item.test.title}" to case ${item.caseId}.`);
+      for (const item of exact) console.log(`TestOps link: would link ${where(item.test)} "${item.test.title}" to case ${item.caseId}.`);
     }
     for (const item of suggestions) {
       console.log(`TestOps link: suggestion for ${where(item.test)} "${item.test.title}": case ${item.caseId} "${item.caseTitle}" (similarity ${item.score.toFixed(2)}). Add testops('${item.caseId}') by hand if it is the right case.`);
@@ -310,12 +296,12 @@ class TestOpsClient {
     for (const item of ambiguous) console.log(`TestOps link: skipped ${where(item.test)} "${item.test.title}": ${item.reason}.`);
     if (unmatched.length) console.log(`TestOps link: no case matches ${shortList(unmatched.map((test) => `${where(test)} "${test.title}"`))}.`);
 
-    if (linkable.length === 0) return;
+    if (exact.length === 0) return;
     if (!apply) {
       console.log('TestOps link: dry run only. Pass --link --apply to write the IDs into the test files.');
       return;
     }
-    await this.writeLinks(linkable);
+    await this.writeLinks(exact);
   }
 
   /** Writes the matched case IDs into each test file, one write per file; refused tests are listed, never edited. */
