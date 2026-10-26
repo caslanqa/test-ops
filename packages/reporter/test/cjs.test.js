@@ -33,6 +33,8 @@ test('the CommonJS reporter class reports results like the ES module one', async
   const originalFetch = globalThis.fetch;
   const { fetch, calls } = fakeFetch({
     'GET /projects/p/runs/r1': () => ({ id: 'r1', runCases: [{ testCaseId: ID, executionMode: 'AUTOMATED' }] }),
+    // The reporter reads process.env, so on a CI system it also attaches the CI job URL to the run.
+    'PATCH /projects/p/runs/r1': () => ({}),
     'POST /projects/p/runs/r1/results/bulk': ({ body }) => ({ results: body.results.map(() => ({ id: 'x' })) }),
   });
   globalThis.fetch = fetch;
