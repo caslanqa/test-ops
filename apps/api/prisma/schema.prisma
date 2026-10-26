@@ -62,6 +62,7 @@ model Workspace {
   invitations WorkspaceInvitation[]
   projects    Project[]
   auditLog    AuditLog[]
+  aiSettings  AiSettings?
 
   @@map("workspaces")
 }
@@ -135,6 +136,7 @@ model Project {
   auditLog     AuditLog[]
   webhook      ProjectWebhook?
   invitations  WorkspaceInvitation[]
+  aiSettings   AiSettings?
 
   @@unique([workspaceId, key])
   @@map("projects")
@@ -671,4 +673,43 @@ model AuditLog {
   @@index([workspaceId])
   @@index([projectId])
   @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// AI assistant (docs/superpowers/specs/2026-10-23-ai-assistant-foundation-design.md)
+// ---------------------------------------------------------------------------
+
+enum AiProviderKind {
+  ANTHROPIC
+  OPENAI_COMPATIBLE
+}
+
+/// Where the AI provider is defined: one row per workspace (its default) and one per project (an override
+/// that replaces the default whole). Exactly one of workspaceId and projectId is set; the migration adds
+/// that as a CHECK, which Prisma doesn't model. Only workspace admins and project admins write it.
+model AiSettings {
+  id                   String         @id @default(uuid())
+  workspaceId          String?        @unique
+  projectId            String?        @unique
+  enabled              Boolean        @default(false)
+  provider             AiProviderKind
+  model                String
+  /// OpenAI-compatible: the base URL including /v1. Anthropic: the base URL, or null for the public API.
+  endpoint             String?
+  /// The provider key, encrypted with AI_ENCRYPTION_KEY (common/secret-box.ts); never returned.
+  credentialCipher     String?
+  maxOutputTokens      Int            @default(8192)
+  requestTimeoutMs     Int            @default(120000)
+  maxRunsPerUserPerDay Int            @default(20)
+  /// Set by a passing connection test, cleared by any change to provider, model, endpoint or key.
+  /// AI can only be switched on while it is set.
+  testedAt             DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  updatedById          String?
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("ai_settings")
 }
