@@ -53,8 +53,27 @@ function trustProxyFromEnv(): boolean | number | string {
   return raw;
 }
 
+/**
+ * The key that encrypts saved AI provider keys: 32 bytes written as 64 hex characters. Empty means
+ * none is set, and then a provider key can't be saved. A value that is not a valid key fails at
+ * startup: a mistyped key would otherwise only show when saved keys can't be read.
+ */
+function aiEncryptionKeyFromEnv(): Buffer | null {
+  const raw = process.env.AI_ENCRYPTION_KEY?.trim();
+  if (!raw) return null;
+  if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+    throw new Error(
+      "AI_ENCRYPTION_KEY must be 64 hexadecimal characters (32 bytes); generate one with: openssl rand -hex 32",
+    );
+  }
+  return Buffer.from(raw, "hex");
+}
+
 export default () => ({
   port: parseInt(process.env.PORT ?? "3000", 10),
+  ai: {
+    encryptionKey: aiEncryptionKeyFromEnv(),
+  },
   // Set at image build time from the release version (Dockerfile ARG APP_VERSION); "dev" for local builds.
   version: process.env.APP_VERSION?.trim() || "dev",
   auth: {

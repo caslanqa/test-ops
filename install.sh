@@ -163,6 +163,7 @@ main() {
 # Keep a copy of this file: the database password cannot be recovered without it.
 # All options: https://github.com/caslanqa/test-ops#configuration
 JWT_SECRET=$(random_hex 32)
+AI_ENCRYPTION_KEY=$(random_hex 32)
 POSTGRES_PASSWORD=$(random_hex 16)
 APP_PORT=$port
 EOF
@@ -175,6 +176,11 @@ EOF
         env_set JWT_SECRET "$(random_hex 32)"
         ;;
     esac
+    # Installations from before the AI assistant have none; a key that is set is never replaced.
+    if [ -z "$(env_get AI_ENCRYPTION_KEY)" ]; then
+      say "Generating the missing AI_ENCRYPTION_KEY in .env"
+      env_set AI_ENCRYPTION_KEY "$(random_hex 32)"
+    fi
     if [ -n "${TESTOPS_PORT:-}" ]; then env_set APP_PORT "$port"; fi
   fi
   if [ -n "${TESTOPS_VERSION:-}" ]; then env_set APP_IMAGE "$IMAGE:${TESTOPS_VERSION#v}"; fi

@@ -34,6 +34,8 @@ services:
       # No default: compose stops if it is empty; the app does not start with the example/a short value.
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is not set; add it to .env (scripts/start.sh generates one)}"
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      # Encrypts saved AI provider keys (64 hex characters). Empty: a provider key can't be saved.
+      AI_ENCRYPTION_KEY: ${AI_ENCRYPTION_KEY:-}
       # Self-registration ("Create one" link on the login screen); if false, people join through workspace invitation links.
       SELF_REGISTRATION: ${SELF_REGISTRATION:-true}
       # The built-in DEMO workspace every signed-in user can look around in, read-only; false hides it.

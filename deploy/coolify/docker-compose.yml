@@ -37,6 +37,8 @@ services:
       - DATABASE_URL=postgresql://testops:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/testops?schema=public
       - JWT_SECRET=${SERVICE_HEX_64_JWTSECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-8h}
+      # Encrypts saved AI provider keys; Coolify generates it once and keeps it.
+      - AI_ENCRYPTION_KEY=${SERVICE_HEX_64_AIENCRYPTIONKEY}
       - SELF_REGISTRATION=${SELF_REGISTRATION:-true}
       # The built-in DEMO workspace every visitor can look around in, read-only.
       - DEMO_WORKSPACE=${DEMO_WORKSPACE:-true}
