@@ -24,8 +24,10 @@ on:
       - ".github/workflows/demo-shop.yml"
   workflow_dispatch: {}
 
+# Every dispatch is its own TestOps run, so a newer one must not cancel an older one, and a dispatch
+# that this workflow skips (see the job's if) must not cancel a run of this one.
 concurrency:
-  group: demo-shop-${{ github.ref }}
+  group: demo-shop-${{ github.event_name == 'repository_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 permissions:
