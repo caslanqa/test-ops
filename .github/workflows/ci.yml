@@ -57,6 +57,9 @@ jobs:
       - name: Build TestOps reporter package
         run: pnpm --filter @testops/reporter run build
 
+      - name: Test TestOps reporter package
+        run: pnpm --filter @testops/reporter run test
+
   smoke:
     name: Docker smoke tests
     needs: verify

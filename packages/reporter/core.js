@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 
@@ -64,6 +65,9 @@ class TestOpsClient {
     this.fetch = fetchImpl;
     this.env = env;
     this.projectPath = `/projects/${encodeURIComponent(settings.projectId)}`;
+    // One id per execution: results sent by a later execution into the same run become new attempts
+    // instead of replacing earlier ones, while a retried request of this execution stays idempotent.
+    this.executionId = randomUUID();
   }
 
   async request(method, path, body, { form, retryable = false } = {}) {
@@ -162,7 +166,7 @@ class TestOpsClient {
           status: result.status,
           source: 'AUTOMATION',
           automationSourceLabel: integrationName,
-          externalTestId: result.externalTestId,
+          externalTestId: `${result.externalTestId}:${this.executionId}`,
           comment: result.comment?.slice(0, COMMENT_MAX),
           startedAt: result.startedAt,
           endedAt: result.endedAt,
