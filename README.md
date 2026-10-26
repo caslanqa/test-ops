@@ -93,7 +93,24 @@ The installer creates an admin account with a starter workspace and demo project
 
 By default, users can sign up from the sign-in page. Set `SELF_REGISTRATION=false` in `.env` to disable sign-up; people then join through invitation links that workspace admins create under **Members**, and the link also lets them create their account. While sign-up is disabled, only admins of an existing workspace can create another workspace, so other users can't bring new accounts in by inviting people into workspaces of their own. Being the admin of one's own [demo workspace](#demo-workspace) doesn't count, and demo workspaces can't send invitations then. Invitations and role changes need a signed-in person; API tokens get 403 for them. This is an interim rule: a separate Installation Admin role (design-doc FR-090) is not implemented yet, so any admin of any workspace can still invite people.
 
-Workspace admins manage access on the workspace's **Permissions** tab: one table with each member's workspace role and their role in every project (Admin, Tester, Automation, Viewer or no access). Workspace admins are admins in every project of their workspace. The **Settings** tab renames or deletes the workspace. On the **Projects** tab, project admins edit, archive and restore their projects, and workspace admins can delete an archived project for good.
+### Roles and who can see what
+
+The roles form one ladder, from the top: **Workspace admin**, **Project admin**, **Tester**, **Automation**, **Viewer**. A workspace admin is an admin in every project of the workspace; the other four are roles in one project, held together with workspace membership.
+
+| Role | Can give | Can change or remove members who are |
+|---|---|---|
+| Workspace admin | every role, Workspace admin included | any role |
+| Project admin | Tester, Automation, Viewer | Tester, Automation, Viewer |
+| Tester, Automation, Viewer | nothing | nothing |
+
+So a project admin cannot raise anyone to their own level, touch another project admin, or demote or remove themselves; a workspace admin does that. The server enforces this, and the web app lists only the roles you may give.
+
+- **Inviting.** Workspace admins invite people under **Members** and choose one of the five types. Every type but Workspace admin is given for a project chosen in the form: the person joins the workspace and gets that role in that project. Project admins add people who are already workspace members, from the project's **Members** page.
+- **Changing roles.** Workspace admins change a workspace role (Admin or Member) on the workspace's **Members** page and a project role on the project's **Members** page; project admins change project roles there, within the limit above. There is no separate permissions page.
+- **Who sees what.** **Members** (of a project) is for workspace admins and project admins. **Integrations** is for them and for Automation users, who see the Playwright reporter and GitHub Actions guides; the CI webhook, which holds credentials, is for the admins only. The other roles don't see these sections, and their addresses lead to the project's Test cases.
+- **API tokens** cannot invite people or change roles; do that from a signed-in session.
+
+The workspace's **Settings** tab renames or deletes the workspace. On the **Projects** tab, project admins edit, archive and restore their projects, and workspace admins can delete an archived project for good.
 
 ## Operations and backups
 
@@ -160,7 +177,7 @@ The shop and its Playwright tests are in [`examples/demo-shop`](examples/demo-sh
 
 ### CI webhook
 
-A project admin can connect CI under **Integrations**; the other roles see neither that section nor **Members**. When a run starts with cases set to **Automation** (set per case in the plan's case list, next to the assignee, or by the cases' automation status), TestOps POSTs the run to the webhook URL so CI can run those cases.
+A project admin can connect CI under **Integrations**; Automation users see the section too, without the webhook settings, and the other roles don't see it. When a run starts with cases set to **Automation** (set per case in the plan's case list, next to the assignee, or by the cases' automation status), TestOps POSTs the run to the webhook URL so CI can run those cases.
 
 - **Body.** It has the shape of a GitHub `repository_dispatch` (`event_type: "testops.run.started"`, `client_payload` with the run, the API address and the automated cases), so `https://api.github.com/repos/OWNER/REPO/dispatches` can be the webhook itself.
 - **Headers and signature.** Extra headers, such as `Authorization`, are stored encrypted and never shown again. Every call is signed in `X-TestOps-Signature-256` (HMAC-SHA256 of the body with the webhook's secret).
