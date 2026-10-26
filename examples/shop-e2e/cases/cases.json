@@ -5,6 +5,7 @@
       "description": "Browsing and searching the products",
       "cases": [
         {
+          "key": "catalog-list",
           "title": "The catalog lists every product with its price",
           "priority": "HIGH",
           "type": "SMOKE",
@@ -14,6 +15,7 @@
           ]
         },
         {
+          "key": "catalog-search",
           "title": "Searching narrows the catalog",
           "steps": [
             { "action": "Search for tea", "expectedResult": "Only Green tea is listed" },
@@ -27,6 +29,7 @@
       "description": "Adding, changing and removing products, and the totals",
       "cases": [
         {
+          "key": "cart-add",
           "title": "Adding products updates the cart badge and the totals",
           "priority": "HIGH",
           "steps": [
@@ -35,6 +38,7 @@
           ]
         },
         {
+          "key": "cart-quantity",
           "title": "Changing the quantity updates the totals",
           "steps": [
             { "action": "Add a Filter coffee and open the cart", "expectedResult": "The cart lists one Filter coffee" },
@@ -42,6 +46,7 @@
           ]
         },
         {
+          "key": "cart-remove",
           "title": "Removing the last product empties the cart",
           "steps": [
             { "action": "Add a Ceramic mug and open the cart", "expectedResult": "The cart lists the mug" },
@@ -49,6 +54,7 @@
           ]
         },
         {
+          "key": "cart-free-shipping",
           "title": "Orders from €40 ship for free",
           "steps": [
             { "action": "Add three Filter coffees and open the cart", "expectedResult": "Shipping is free and the total is €43.50" }
@@ -61,18 +67,21 @@
       "description": "Discount codes in the cart",
       "cases": [
         {
+          "key": "discount-valid",
           "title": "A valid code takes 10% off",
           "steps": [
             { "action": "Apply the code WELCOME10", "expectedResult": "The shop confirms it and the discount is €1.45, the total €17.95" }
           ]
         },
         {
+          "key": "discount-invalid",
           "title": "An unknown code is rejected",
           "steps": [
             { "action": "Apply the code SAVE50", "expectedResult": "The shop says the code isn't valid and shows no discount" }
           ]
         },
         {
+          "key": "discount-once",
           "title": "A discount code applies only once",
           "priority": "HIGH",
           "steps": [
@@ -86,6 +95,7 @@
       "description": "Paying for an order",
       "cases": [
         {
+          "key": "checkout-card",
           "title": "Customer pays by card",
           "priority": "CRITICAL",
           "type": "SMOKE",
@@ -95,12 +105,14 @@
           ]
         },
         {
+          "key": "checkout-declined",
           "title": "A declined card shows an error and keeps the cart",
           "steps": [
             { "action": "Pay with the card 4000 0000 0000 0002", "expectedResult": "The shop says the card was declined and the cart keeps its product" }
           ]
         },
         {
+          "key": "checkout-paypal",
           "title": "Pays with PayPal",
           "priority": "LOW",
           "steps": [
@@ -114,6 +126,7 @@
       "description": "Cases kept for every release",
       "cases": [
         {
+          "key": "regression-discount-invalid",
           "title": "An unknown code is rejected",
           "steps": [
             { "action": "Apply the code SAVE50", "expectedResult": "The shop says the code isn't valid" }

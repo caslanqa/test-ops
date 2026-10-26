@@ -48,7 +48,8 @@ for failures, so the reporter has files to upload for passing tests too.
 1. **Create an API token** under **Account → API tokens**. A Tester or Admin token can create cases and
    link tests; the results can use the same token or a separate one with the Automation role.
 2. **Find the project ID** in the address of the project (`/projects/<project id>/…`).
-3. **Create the cases** in the project. It is safe to run again; it adds only what is missing:
+3. **Create the cases** in the project. It is safe to run again, also after step 5 renamed the cases: it
+   finds each case by its `shop-e2e:<key>` tag and adds only what is missing:
 
    ```bash
    export TESTOPS_URL=http://localhost:8080/api/v1 TESTOPS_TOKEN=<token> TESTOPS_PROJECT_ID=<project id>
@@ -75,7 +76,7 @@ for failures, so the reporter has files to upload for passing tests too.
    npx testops-sync --apply
    ```
 
-   The renamed case now carries the test's title, and the linked cases are **Automated**.
+   Every linked case now carries the title of its test (lower case, like the tests) and is **Automated**.
 6. **Run the tests and report:**
 
    ```bash

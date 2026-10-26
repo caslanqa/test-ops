@@ -3,8 +3,10 @@
 //   TESTOPS_URL=http://localhost:8080/api/v1 TESTOPS_TOKEN=<API token> TESTOPS_PROJECT_ID=<id> npm run cases
 //
 // The token needs the Tester or Admin role in the project. Suites, cases and the defect come from
-// cases/cases.json. What exists is found by name (suites) or title (cases, defects) and left alone, so
-// running it again adds only what is missing. The project must exist; it is never created here.
+// cases/cases.json. What exists is left alone, so running it again adds only what is missing: suites and
+// the defect are found by name, and a case by its shop-e2e:<key> tag, not by title, because
+// testops-sync renames cases to the titles of their tests (and a title repeats on purpose). The project
+// must exist; it is never created here.
 import { readFile } from 'node:fs/promises';
 
 const API = process.env.TESTOPS_URL?.trim().replace(/\/+$/, '');
@@ -42,8 +44,8 @@ for (const suite of data.suites) {
     console.log(`+ suite: ${suite.name}`);
   }
   for (const c of suite.cases) {
-    // A title can repeat on purpose (a copied case in another suite), so a case is found by title and suite.
-    let testCase = cases.find((x) => x.title === c.title && x.suiteId === found.id);
+    const tag = `shop-e2e:${c.key}`;
+    let testCase = cases.find((x) => x.tags?.includes(tag));
     if (!testCase) {
       testCase = await call('POST', `${P}/cases`, {
         suiteId: found.id,
@@ -51,6 +53,7 @@ for (const suite of data.suites) {
         priority: c.priority ?? 'MEDIUM',
         type: c.type ?? 'FUNCTIONAL',
         automationStatus: 'TO_BE_AUTOMATED',
+        tags: [tag],
         steps: c.steps,
       });
       console.log(`+ case: ${c.title}`);
