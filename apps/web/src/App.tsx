@@ -2,14 +2,14 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import { AppShell } from './components/AppShell';
-import { ProjectAdminOnly } from './components/ProjectAdminOnly';
+import { ProjectRoleRoute } from './components/ProjectRoleRoute';
+import { INTEGRATIONS_ROLES, MEMBERS_ROLES } from './lib/sections';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { InvitePage } from './pages/InvitePage';
 import { AccountPage } from './pages/AccountPage';
 import { SupportPage } from './pages/SupportPage';
 import { WorkspaceMembersPage } from './pages/WorkspaceMembersPage';
-import { WorkspacePermissionsPage } from './pages/WorkspacePermissionsPage';
 import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
 import { ProjectMembersPage } from './pages/project/ProjectMembersPage';
 import { IntegrationsPage } from './pages/project/IntegrationsPage';
@@ -36,7 +36,6 @@ export default function App() {
             <Route path="/workspaces" element={<WorkspacesPage />} />
             <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
             <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembersPage />} />
-            <Route path="/workspaces/:workspaceId/permissions" element={<WorkspacePermissionsPage />} />
             <Route path="/workspaces/:workspaceId/settings" element={<WorkspaceSettingsPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/support" element={<SupportPage />} />
@@ -48,8 +47,10 @@ export default function App() {
               <Route path="runs" element={<RunsPage />} />
               <Route path="runs/:runId" element={<RunDetailPage />} />
               <Route path="defects" element={<DefectsPage />} />
-              <Route element={<ProjectAdminOnly />}>
+              <Route element={<ProjectRoleRoute roles={MEMBERS_ROLES} />}>
                 <Route path="members" element={<ProjectMembersPage />} />
+              </Route>
+              <Route element={<ProjectRoleRoute roles={INTEGRATIONS_ROLES} />}>
                 <Route path="integrations" element={<IntegrationsPage />} />
               </Route>
             </Route>

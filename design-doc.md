@@ -30,7 +30,7 @@ Established commercial test management tools serve as a functional reference; no
 
 | Role | Core permissions |
 | --- | --- |
-| Installation Admin | Manages installation-wide settings, including AI provider configuration, and grants/revokes Installation Admin access. This role is separate from workspace/project membership. |
+| Installation Admin | Manages installation-wide settings and grants/revokes Installation Admin access. This role is separate from workspace/project membership. Who defines the AI provider is set by FR-096 (Workspace and Project Admins), not by this role. |
 | Workspace Admin | Manages members, workspace settings and projects. |
 | Project Admin / QA Lead | Manages the repository, requirements, plans, runs, fields and project settings. |
 | Tester | Executes the runs assigned to them; adds results, comments and evidence. |
@@ -38,6 +38,13 @@ Established commercial test management tools serve as a functional reference; no
 | Viewer | Views project data and reports in read-only mode. |
 
 Permissions are enforced at workspace and project boundaries. API operations are also subject to the user's role and the token's permissions. Sensitive API tokens should be kept only on the server/CI side.
+
+**Role ladder and assignment.** The roles of workspace and project members form one ladder, from the top: Workspace Admin, Project Admin, Tester, Automation, Viewer.
+
+- Only Workspace Admins and Project Admins change roles. A Workspace Admin may give every role, Workspace Admin included. A Project Admin may give only the roles below Project Admin (Tester, Automation, Viewer), and may change or remove only members who hold one of those roles; a Project Admin cannot raise anyone to their own level, touch a peer, or demote or remove themselves. The server enforces this, and the web app lists only the roles the user may give.
+- The invitation form offers all five types. A type other than Workspace Admin is given for a project chosen in the form, together with workspace membership.
+- A project's Members page is visible to Workspace Admins and Project Admins only. Integrations is visible to Workspace Admins, Project Admins and Automation users; the webhook settings, which hold credentials, are for the admins, so an Automation user sees only the reporter and CI guides.
+- The AI provider URL (with its model and credential) may be defined only by Workspace Admins and Project Admins (FR-096).
 
 ## 4. Domain model and concepts
 
@@ -179,7 +186,7 @@ The case view also summarizes the latest result and a consecutive failed-run cou
 - **FR-084:** A workflow must support asynchronous execution, persisted run/step states, bounded retries, cancellation, resumable human-approval gates and versioned skills/agent definitions. Generated artifacts and step outcomes must be reviewable.
 - **FR-085:** On a completed run, the Run Analyzer may summarize results, group related failures and suggest possible causes from available result comments, step results and history. These are recommendations, not authoritative pass/fail changes.
 - **FR-086:** Agent tools must be explicitly allowlisted and project-scoped. AI workflows must not have arbitrary SQL, shell, unrestricted network or unreviewed mutation tools. Structured model output must be schema-validated before use.
-- **FR-087:** An Installation Admin must configure the AI provider, default model, and (where needed) endpoint and credential in the authenticated system Settings page after installation. The page must support enable/disable and a connection test. One installation-level provider/model applies to all workspaces initially. AI usage must have configurable request/token or cost limits, timeouts and rate limits. The UI must disclose what project data is sent to the selected provider.
+- **FR-087:** An Installation Admin must configure the AI provider, default model, and (where needed) endpoint and credential in the authenticated system Settings page after installation. The page must support enable/disable and a connection test. One installation-level provider/model applies to all workspaces initially. AI usage must have configurable request/token or cost limits, timeouts and rate limits. The UI must disclose what project data is sent to the selected provider. (Open change: FR-096 moves who defines the AI provider URL, so the restriction to an Installation Admin here no longer holds.)
 
 ### 6.10 Installation branding
 
@@ -190,10 +197,11 @@ The case view also summarizes the latest result and a consecutive failed-run cou
 
 ### 6.11 Installation-level settings and AI credentials
 
-- **FR-090:** Installation Admin is a separate authorization role from Workspace Admin. On a fresh install, the first seeded administrator receives Installation Admin access; only an Installation Admin can grant or revoke this role.
-- **FR-091:** AI provider settings are configured after installation in system Settings, not in the installer. The page must identify configured provider/model and connection status, accept provider/model/optional endpoint/credential, allow connection testing without sending project content, and enable/disable AI without revealing a saved credential. If no provider is configured, AI features remain unavailable and core workflows continue.
+- **FR-090:** Installation Admin is a separate authorization role from Workspace Admin. On a fresh install, the first seeded administrator receives Installation Admin access; only an Installation Admin can grant or revoke this role. (Open change: FR-096 — the Installation Admin no longer decides who defines the AI provider; the role stays for installation-wide settings.)
+- **FR-091:** AI provider settings are configured after installation in system Settings, not in the installer. The page must identify configured provider/model and connection status, accept provider/model/optional endpoint/credential, allow connection testing without sending project content, and enable/disable AI without revealing a saved credential. If no provider is configured, AI features remain unavailable and core workflows continue. (Open change: FR-096 moves who defines the AI provider URL, so the restriction to an Installation Admin here no longer holds.)
 - **FR-092:** Provider credentials saved through Settings must be encrypted at rest with a stable installation-level encryption key, never returned by APIs or logged, and replaceable without exposing the old value. The encryption key is created and preserved as a deployment secret; it is not the provider/API key.
-- **FR-093:** Provider/model configuration is installation-wide initially, so every workspace uses the same selected provider/model and its usage limits. A workflow run records the provider/model configuration used for reproducibility. Per-workspace credentials and model routing are deferred.
+- **FR-093:** Provider/model configuration is installation-wide initially, so every workspace uses the same selected provider/model and its usage limits. A workflow run records the provider/model configuration used for reproducibility. Per-workspace credentials and model routing are deferred. (Open change: FR-096 moves who defines the provider, and with it the scope of this configuration.)
+- **FR-096:** The AI provider URL, together with the model and credential, may be defined only by Workspace Admins and Project Admins. Tester, Automation and Viewer users, and API tokens, cannot define or read it. This replaces the restriction of provider configuration to an Installation Admin in FR-087, FR-090 and FR-091, and reopens the installation-wide scope of FR-093: the settings belong to a workspace or a project, and which one applies is decided in the AI assistant spec before it is implemented. Because project admins can then choose the endpoint, an address on a private network is refused unless the installation allows it, as for CI webhooks (to be confirmed in the AI assistant spec). Not implemented yet.
 
 ## 7. Architecture and deployment requirements
 

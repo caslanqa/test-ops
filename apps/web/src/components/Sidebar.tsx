@@ -9,7 +9,7 @@ import {
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useResource } from '../lib/useResource';
-import { PROJECT_ROLE_LABEL, labelOf } from '../lib/labels';
+import { PROJECT_ROLE_LABEL, USER_TYPE_LABEL, labelOf } from '../lib/labels';
 import { useProjectInfo, useRecordsVersion, type Workspace } from '../lib/projectInfo';
 import { PROJECT_SECTIONS } from '../lib/sections';
 import { AppVersion } from './AppVersion';
@@ -68,7 +68,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </p>
                 {/* The role is shown so users understand why some actions aren't available to them. */}
                 <p className="context-role">
-                  Your role: {labelOf(PROJECT_ROLE_LABEL, info.project.currentUserRole)}
+                  Your role:{' '}
+                  {/* A workspace admin is ADMIN in every project, but their authority is the workspace's. */}
+                  {info.workspace.currentUserRole === 'ADMIN'
+                    ? USER_TYPE_LABEL.WORKSPACE_ADMIN
+                    : labelOf(PROJECT_ROLE_LABEL, info.project.currentUserRole)}
                 </p>
                 {info.project.archivedAt && (
                   <p className="context-archived">Archived: read-only until an admin restores it.</p>
@@ -81,7 +85,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
           <nav aria-label="Project sections">
             <ul className="side-nav">
-              {PROJECT_SECTIONS.filter((s) => !('adminOnly' in s) || info?.project.currentUserRole === 'ADMIN').map(({ path, label, icon: Icon }) => (
+              {PROJECT_SECTIONS.filter((s) => {
+                if (!('roles' in s)) return true;
+                const role = info?.project.currentUserRole;
+                return role !== undefined && (s.roles as readonly string[]).includes(role);
+              }).map(({ path, label, icon: Icon }) => (
                 <li key={path}>
                   <NavLink to={`/projects/${projectId}/${path}`} onClick={onNavigate}>
                     <Icon size={18} aria-hidden="true" />

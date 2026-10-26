@@ -88,6 +88,9 @@ model WorkspaceInvitation {
   workspaceId String
   email       String // lowercase
   role        WorkspaceRole @default(MEMBER)
+  // With a project, accepting also gives the person this role in it; never together with the ADMIN role.
+  projectId   String?
+  projectRole ProjectRole?
   tokenHash   String        @unique
   invitedById String
   expiresAt   DateTime
@@ -96,6 +99,7 @@ model WorkspaceInvitation {
   createdAt   DateTime      @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   invitedBy User      @relation(fields: [invitedById], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
@@ -130,6 +134,7 @@ model Project {
   defects      Defect[]
   auditLog     AuditLog[]
   webhook      ProjectWebhook?
+  invitations  WorkspaceInvitation[]
 
   @@unique([workspaceId, key])
   @@map("projects")

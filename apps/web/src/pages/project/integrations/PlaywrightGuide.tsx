@@ -18,11 +18,11 @@ test('checkout works', testops('550e8400-e29b-41d4-a716-446655440000'), async ({
 });`;
 
 /** CI → TestOps: how to send Playwright results to this project, with its URL and ID filled in. */
-export function PlaywrightGuide({ projectId }: { projectId: string }) {
+export function PlaywrightGuide({ projectId, webhookTab }: { projectId: string; webhookTab: boolean }) {
   const environment = `TESTOPS_URL=${window.location.origin}/api/v1
 TESTOPS_TOKEN=<CI secret>
 TESTOPS_PROJECT_ID=${projectId}
-# Optional: report into a run that TestOps started (see the CI webhook tab)
+# Optional: report into a run that TestOps started${webhookTab ? ' (see the CI webhook tab)' : ''}
 # TESTOPS_RUN_ID=<run-id>
 # Optional: which results get screenshots, video, traces and logs: failed (default), all or none
 # TESTOPS_ATTACHMENTS=failed
@@ -84,7 +84,7 @@ TESTOPS_PROJECT_ID=${projectId}
         only case titles and automation status, by Test ID. The link command writes only tests whose title matches one
         case exactly, and lists the rest; run it without Playwright arguments. Without <code>TESTOPS_RUN_ID</code>,
         each CI execution creates and completes a run. Set it when a job is started by the{' '}
-        <Link to={{ search: '?tab=webhook' }} replace>CI webhook</Link> to report into that run; the reporter leaves it
+        {webhookTab ? <Link to={{ search: '?tab=webhook' }} replace>CI webhook</Link> : 'CI webhook'} to report into that run; the reporter leaves it
         open for manual cases.
       </p>
     </section>

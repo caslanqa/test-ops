@@ -4,10 +4,10 @@ import { Info, UserPlus } from 'lucide-react';
 import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
-import { ConfirmDialog, MemberTable, RoleRadioGroup, type MemberRow } from '../../components/Members';
+import { ConfirmDialog, MemberTable, RoleRadioGroup, type MemberRow, type RoleOption } from '../../components/Members';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { PROJECT_ROLE_DESCRIPTION, PROJECT_ROLE_LABEL, type ProjectRole } from '../../lib/labels';
-import { useProjectPermissions } from '../../lib/permissions';
+import { assignableProjectRoles, manageableProjectRoles, useProjectPermissions } from '../../lib/permissions';
 import { useProjectInfo } from '../../lib/projectInfo';
 import { usePageTitle, useResource } from '../../lib/useResource';
 import { Select } from '../../components/Select';
@@ -23,12 +23,15 @@ function AddProjectMemberForm({
   projectId,
   workspaceId,
   existingUserIds,
+  roleOptions,
   onClose,
   onAdded,
 }: {
   projectId: string;
   workspaceId: string;
   existingUserIds: Set<string>;
+  /** The roles the user may give. */
+  roleOptions: RoleOption[];
   onClose: () => void;
   onAdded: () => void;
 }) {
@@ -84,7 +87,7 @@ function AddProjectMemberForm({
           </Select>
         </div>
       )}
-      <RoleRadioGroup legend="Project role" name="project-role" value={role} options={ROLE_OPTIONS} onChange={setRole} />
+      <RoleRadioGroup legend="Project role" name="project-role" value={role} options={roleOptions} onChange={setRole} />
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
@@ -101,6 +104,10 @@ export function ProjectMembersPage() {
   const { user } = useAuth();
   const { data: info } = useProjectInfo(projectId);
   const permissions = useProjectPermissions(projectId);
+  // A workspace admin is ADMIN in every project, so the limit follows the workspace role as well.
+  const who = { workspaceAdmin: info?.workspace.currentUserRole === 'ADMIN' };
+  const assignable = assignableProjectRoles(who);
+  const manageable = manageableProjectRoles(who);
   usePageTitle(info ? `Members (${info.project.name})` : 'Members');
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<MemberRow | null>(null);
@@ -135,6 +142,8 @@ export function ProjectMembersPage() {
           members={members}
           roleOptions={ROLE_OPTIONS}
           canManage={permissions.manageMembers}
+          assignableRoles={assignable}
+          canManageMember={(member) => manageable.includes(member.role as ProjectRole)}
           currentUserId={user?.id}
           onRoleChange={async (member, role) => {
             await api.patch(`/projects/${projectId}/members/${member.id}`, { role });
@@ -160,6 +169,7 @@ export function ProjectMembersPage() {
             projectId={projectId}
             workspaceId={info.workspace.id}
             existingUserIds={new Set((members ?? []).map((m) => m.user.id))}
+            roleOptions={ROLE_OPTIONS.filter((o) => assignable.includes(o.value))}
             onClose={() => setAdding(false)}
             onAdded={() => {
               setAdding(false);

@@ -18,6 +18,47 @@ export interface ProjectWriteOptions {
   allowArchived?: boolean;
 }
 
+/** The project roles a project-member change may give, and the roles it may change or remove. */
+export interface ProjectRoleLimits {
+  assignable: ProjectRole[];
+  manageable: ProjectRole[];
+}
+
+const ALL_PROJECT_ROLES: ProjectRole[] = [
+  ProjectRole.ADMIN,
+  ProjectRole.TESTER,
+  ProjectRole.AUTOMATION,
+  ProjectRole.VIEWER,
+];
+
+/**
+ * The role ladder (README, "Roles and who can see what"): a workspace admin gives and manages every project role. A
+ * project admin only the ones below their own, so they cannot raise anyone to their level, touch a peer,
+ * or change or remove themselves. Callers have passed the project admin check by now.
+ */
+export function projectRoleLimits(viaWorkspaceAdmin: boolean): ProjectRoleLimits {
+  const roles = viaWorkspaceAdmin
+    ? ALL_PROJECT_ROLES
+    : ALL_PROJECT_ROLES.filter((role) => role !== ProjectRole.ADMIN);
+  return { assignable: roles, manageable: roles };
+}
+
+export function assertMayGive(limits: ProjectRoleLimits, role: ProjectRole) {
+  if (!limits.assignable.includes(role)) {
+    throw new ForbiddenException(
+      `You can only give these roles: ${limits.assignable.join(", ")}.`,
+    );
+  }
+}
+
+export function assertMayManage(limits: ProjectRoleLimits, currentRole: ProjectRole) {
+  if (!limits.manageable.includes(currentRole)) {
+    throw new ForbiddenException(
+      `You can't change or remove a member with the role ${currentRole}.`,
+    );
+  }
+}
+
 // FR-003: every query must be limited to the workspace/project the user is authorized for.
 // Membership is verified on every access to prevent data leaks through guessed object IDs.
 // Demo workspaces (DemoService) are ordinary workspaces of their user, with the same checks.
@@ -236,9 +277,10 @@ export class AccessControlService {
   async assertProjectMemberRecord(projectId: string, memberId: string) {
     const member = await this.prisma.projectMember.findFirst({
       where: { id: memberId, projectId },
-      select: { id: true },
+      select: { id: true, role: true },
     });
     if (!member) throw new NotFoundException("Project member not found");
+    return member;
   }
 
   async assertWorkspaceMemberRecord(workspaceId: string, memberId: string) {

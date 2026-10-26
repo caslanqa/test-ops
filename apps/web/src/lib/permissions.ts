@@ -35,6 +35,27 @@ export function projectPermissions(
   };
 }
 
+/** Who is acting: a workspace admin is `ADMIN` in every project, so the project role alone doesn't tell. */
+export interface RoleGiver {
+  workspaceAdmin: boolean;
+}
+
+const BELOW_PROJECT_ADMIN: ProjectRole[] = ['TESTER', 'AUTOMATION', 'VIEWER'];
+
+/**
+ * The project roles the user may give: every role for a workspace admin, the ones below Project admin for
+ * a project admin (a project admin can't raise anyone to their own level). The server enforces the same rule
+ * (projectRoleLimits in the API); this only keeps the other roles out of the lists.
+ */
+export function assignableProjectRoles({ workspaceAdmin }: RoleGiver): ProjectRole[] {
+  return workspaceAdmin ? ['ADMIN', ...BELOW_PROJECT_ADMIN] : BELOW_PROJECT_ADMIN;
+}
+
+/** The roles of the members the user may change or remove: the same list as the roles they may give. */
+export function manageableProjectRoles(who: RoleGiver): ProjectRole[] {
+  return assignableProjectRoles(who);
+}
+
 export function useProjectPermissions(projectId: string | undefined): ProjectPermissions {
   const { data } = useProjectInfo(projectId);
   return projectPermissions(data?.project.currentUserRole, Boolean(data?.project.archivedAt));

@@ -9,12 +9,16 @@ const workflowTrigger = `on:
 # github.event.client_payload.automation_case_ids  TestOps IDs of its automated cases`;
 
 /** TestOps → CI: the values to put into the CI webhook so that a run starts a GitHub Actions workflow. */
-export function GithubActionsGuide() {
+export function GithubActionsGuide({ webhookTab }: { webhookTab: boolean }) {
   return (
     <section className="surface integrations-section" aria-labelledby="github-heading">
       <h2 id="github-heading" className="section-title">GitHub Actions</h2>
       <p className="muted">
-        Enter these values in the form on the <Link to={{ search: '?tab=webhook' }} replace>CI webhook</Link> tab.
+        {webhookTab ? (
+          <>Enter these values in the form on the <Link to={{ search: '?tab=webhook' }} replace>CI webhook</Link> tab.</>
+        ) : (
+          <>A project admin enters these values in the CI webhook settings.</>
+        )}
       </p>
       <ol className="prose-list">
         <li>

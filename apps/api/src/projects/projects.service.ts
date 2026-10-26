@@ -7,7 +7,12 @@ import {
 } from "@nestjs/common";
 import { Prisma, ProjectRole, WorkspaceRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { AccessControlService } from "../common/access-control.service";
+import {
+  AccessControlService,
+  assertMayGive,
+  assertMayManage,
+  projectRoleLimits,
+} from "../common/access-control.service";
 import { pageArgs } from "../common/pagination";
 import { CreateProjectDto } from "./dto/create-project.dto";
 import { UpdateProjectDto } from "./dto/update-project.dto";
@@ -192,12 +197,14 @@ export class ProjectsService {
 
   async addMember(userId: string, projectId: string, dto: AddProjectMemberDto) {
     // Members can still be managed while the project is archived: it decides who can read it.
-    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+    const access = await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       [ProjectRole.ADMIN],
       { allowArchived: true },
     );
+    const limits = projectRoleLimits(access.viaWorkspaceAdmin);
+    assertMayGive(limits, dto.role);
     const project = await this.prisma.project.findUniqueOrThrow({
       where: { id: projectId },
       select: { workspaceId: true },
@@ -222,6 +229,12 @@ export class ProjectsService {
         "This person is not a workspace member; add them to the workspace first.",
       );
     }
+    // Someone who already holds a role the caller may not manage keeps it.
+    const existing = await this.prisma.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId: targetUser.id } },
+      select: { role: true },
+    });
+    if (existing) assertMayManage(limits, existing.role);
     return this.prisma.projectMember.upsert({
       where: { projectId_userId: { projectId, userId: targetUser.id } },
       create: { projectId, userId: targetUser.id, role: dto.role },
@@ -235,13 +248,16 @@ export class ProjectsService {
     memberId: string,
     role: ProjectRole,
   ) {
-    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+    const access = await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       [ProjectRole.ADMIN],
       { allowArchived: true },
     );
-    await this.accessControl.assertProjectMemberRecord(projectId, memberId);
+    const member = await this.accessControl.assertProjectMemberRecord(projectId, memberId);
+    const limits = projectRoleLimits(access.viaWorkspaceAdmin);
+    assertMayManage(limits, member.role);
+    assertMayGive(limits, role);
     return this.prisma.projectMember.update({
       where: { id: memberId },
       data: { role },
@@ -249,13 +265,14 @@ export class ProjectsService {
   }
 
   async removeMember(userId: string, projectId: string, memberId: string) {
-    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+    const access = await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
       userId,
       projectId,
       [ProjectRole.ADMIN],
       { allowArchived: true },
     );
-    await this.accessControl.assertProjectMemberRecord(projectId, memberId);
+    const member = await this.accessControl.assertProjectMemberRecord(projectId, memberId);
+    assertMayManage(projectRoleLimits(access.viaWorkspaceAdmin), member.role);
     await this.prisma.projectMember.delete({ where: { id: memberId } });
   }
 

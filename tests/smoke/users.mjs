@@ -180,6 +180,8 @@ await expectStatus('an API token cannot change a member role', 403, adminToken, 
 await ok(admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'ADMIN' });
 await expectStatus('an admin can be demoted while there is a second admin', 200, admin, 'PATCH', `/workspaces/${ws.id}/members/${userMember.id}`, { role: 'MEMBER' });
 
+// The matrix API stays workspace-admin only (the web page for it is gone); what a project admin may give,
+// change or remove is checked in roles.mjs.
 console.log('--- Permissions matrix ---');
 const matrix = await expectStatus('admins read the permissions matrix', 200, admin, 'GET', `/workspaces/${ws.id}/permissions`);
 check('the matrix lists the members, the projects and the project roles',

@@ -5,13 +5,16 @@ import { useAuth } from '../auth/AuthContext';
 import { AuthLayout } from '../components/AuthLayout';
 import { FormError, Loading } from '../components/Page';
 import { formatDate } from '../lib/format';
-import { WORKSPACE_ROLE_LABEL, labelOf } from '../lib/labels';
+import { invitationTypeLabel } from '../lib/labels';
 import { usePageTitle, useResource } from '../lib/useResource';
 
 interface InvitationPreview {
   workspace: { id: string; name: string };
   email: string;
   role: string;
+  /** Set with `project`: the role the person gets in that project when they join. */
+  projectRole?: string | null;
+  project?: { id: string; key: string; name: string } | null;
   expiresAt: string;
 }
 
@@ -22,7 +25,7 @@ function InvitationIntro({ invitation }: { invitation: InvitationPreview }) {
     <>
       <h1>Join {invitation.workspace.name}</h1>
       <p className="login-hint">
-        You're invited as {labelOf(WORKSPACE_ROLE_LABEL, invitation.role).toLowerCase()} with{' '}
+        You're invited as <strong>{invitationTypeLabel(invitation)}</strong> with{' '}
         <strong>{invitation.email}</strong>. The link works once, until {formatDate(invitation.expiresAt)}.
       </p>
     </>

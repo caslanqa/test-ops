@@ -75,7 +75,7 @@ export function labelOf<T extends Record<string, string>>(
 }
 
 export const PROJECT_ROLE_LABEL = {
-  ADMIN: 'Admin',
+  ADMIN: 'Project admin',
   TESTER: 'Tester',
   AUTOMATION: 'Automation',
   VIEWER: 'Viewer',
@@ -84,7 +84,7 @@ export type ProjectRole = keyof typeof PROJECT_ROLE_LABEL;
 
 /** Descriptions shown in the role picker (matching the server's permission rules). */
 export const PROJECT_ROLE_DESCRIPTION: Record<ProjectRole, string> = {
-  ADMIN: "Can do everything, including managing project members and their roles.",
+  ADMIN: "Manages the project and its members: gives and changes the Tester, Automation and Viewer roles.",
   TESTER: "Creates cases, suites, requirements and plans; starts runs and records results.",
   AUTOMATION: "Starts runs and submits results (from CI with an API token); can't change the repository.",
   VIEWER: "Can see everything but can't change anything.",
@@ -100,3 +100,55 @@ export const WORKSPACE_ROLE_DESCRIPTION: Record<WorkspaceRole, string> = {
   ADMIN: 'Creates projects, manages workspace members and has admin rights in every project.',
   MEMBER: "Sees only the projects they're added to, with the role they have there.",
 };
+
+/**
+ * The five user types of the role ladder, top first. "Workspace admin" is the workspace role ADMIN; the
+ * other four are project roles, held together with the workspace role MEMBER (README, "Roles and who can see what").
+ */
+export const USER_TYPES = ['WORKSPACE_ADMIN', 'PROJECT_ADMIN', 'TESTER', 'AUTOMATION', 'VIEWER'] as const;
+export type UserType = (typeof USER_TYPES)[number];
+
+export const USER_TYPE_LABEL: Record<UserType, string> = {
+  WORKSPACE_ADMIN: 'Workspace admin',
+  PROJECT_ADMIN: PROJECT_ROLE_LABEL.ADMIN,
+  TESTER: PROJECT_ROLE_LABEL.TESTER,
+  AUTOMATION: PROJECT_ROLE_LABEL.AUTOMATION,
+  VIEWER: PROJECT_ROLE_LABEL.VIEWER,
+};
+
+export const USER_TYPE_DESCRIPTION: Record<UserType, string> = {
+  WORKSPACE_ADMIN: WORKSPACE_ROLE_DESCRIPTION.ADMIN,
+  PROJECT_ADMIN: PROJECT_ROLE_DESCRIPTION.ADMIN,
+  TESTER: PROJECT_ROLE_DESCRIPTION.TESTER,
+  AUTOMATION: PROJECT_ROLE_DESCRIPTION.AUTOMATION,
+  VIEWER: PROJECT_ROLE_DESCRIPTION.VIEWER,
+};
+
+const PROJECT_ROLE_OF_TYPE: Record<Exclude<UserType, 'WORKSPACE_ADMIN'>, ProjectRole> = {
+  PROJECT_ADMIN: 'ADMIN',
+  TESTER: 'TESTER',
+  AUTOMATION: 'AUTOMATION',
+  VIEWER: 'VIEWER',
+};
+
+/** The roles an invitation of this type carries: a workspace admin needs no project; the others join as members. */
+export function invitationRoles(
+  type: UserType,
+  projectId: string,
+): { role: WorkspaceRole; projectId?: string; projectRole?: ProjectRole } {
+  if (type === 'WORKSPACE_ADMIN') return { role: 'ADMIN' };
+  return { role: 'MEMBER', projectId, projectRole: PROJECT_ROLE_OF_TYPE[type] };
+}
+
+/** What an invitation gives, such as "Tester in Demo Project". Older invitations name only the workspace role. */
+export function invitationTypeLabel(invitation: {
+  role: string;
+  projectRole?: string | null;
+  project?: { name: string } | null;
+}): string {
+  if (invitation.role === 'ADMIN') return USER_TYPE_LABEL.WORKSPACE_ADMIN;
+  if (invitation.projectRole && invitation.project) {
+    return `${labelOf(PROJECT_ROLE_LABEL, invitation.projectRole)} in ${invitation.project.name}`;
+  }
+  return labelOf(WORKSPACE_ROLE_LABEL, invitation.role);
+}

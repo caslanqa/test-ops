@@ -95,6 +95,12 @@ jobs:
           bash tests/smoke/attachments.sh
           node tests/smoke/ratelimit.mjs
 
+      # Recreating the app resets the in-memory sign-up limit that the suites above have used up.
+      - name: Role ladder smoke test
+        run: |
+          docker compose up -d --force-recreate --wait --wait-timeout 120 app
+          node tests/smoke/roles.mjs
+
       # Every user's own DEMO workspace, then DEMO_WORKSPACE=false: no new ones, existing ones stay.
       # Recreating the app resets the in-memory sign-up limit that the suites above have used up.
       - name: Demo workspaces, and switched off

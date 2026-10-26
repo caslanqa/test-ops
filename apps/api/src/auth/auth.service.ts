@@ -91,6 +91,7 @@ export class AuthService {
         await tx.workspaceMember.create({
           data: { workspaceId: invitation.workspaceId, userId: created.id, role: invitation.role },
         });
+        await this.invitations.joinProject(tx, invitation, created.id);
       }
       return created;
     });
