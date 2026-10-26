@@ -11,6 +11,7 @@
     "seed": "node testops/seed.mjs"
   },
   "devDependencies": {
+    "@testops/reporter": "file:../../packages/reporter",
     "@playwright/test": "1.63.0",
     "@types/node": "22.18.8",
     "typescript": "5.9.3"

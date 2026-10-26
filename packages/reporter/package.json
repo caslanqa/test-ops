@@ -1,0 +1,84 @@
+{
+  "name": "@testops/reporter",
+  "version": "0.1.0",
+  "description": "Playwright result reporting and test metadata sync for TestOps",
+  "keywords": [
+    "testops",
+    "playwright",
+    "test-reporter",
+    "test-results"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/caslanqa/test-ops.git",
+    "directory": "packages/reporter"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "bin": {
+    "testops-sync": "./sync-cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      },
+      "require": {
+        "types": "./index.d.cts",
+        "default": "./index.cjs"
+      },
+      "default": "./index.js"
+    },
+    "./core": {
+      "import": {
+        "types": "./core.d.ts",
+        "default": "./core.js"
+      },
+      "require": {
+        "types": "./core.d.cts",
+        "default": "./core.cjs"
+      },
+      "default": "./core.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "index.d.cts",
+    "reporter.js",
+    "sync-cli.js",
+    "sync-reporter.js",
+    "core.js",
+    "annotation.cjs",
+    "core.cjs",
+    "index.cjs",
+    "match.js",
+    "artifacts.js",
+    "link.js",
+    "core.d.ts",
+    "core.d.cts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.40"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --test",
+    "build": "node --check index.js && node --check reporter.js && node --check core.js && node --check sync-reporter.js && node --check sync-cli.js && node --check match.js && node --check artifacts.js && node --check link.js && node --check index.cjs && node --check core.cjs && node --check annotation.cjs"
+  }
+}

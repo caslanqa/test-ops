@@ -165,7 +165,7 @@ export class DemoService implements OnApplicationBootstrap {
   private async fill(userId: string, workspaceId: string) {
     const { id: projectId } = await this.projects.create(userId, workspaceId, data.project);
 
-    // Suites and cases. Automated cases carry the tag e2e:<key> that the Playwright reporter looks for.
+    // The demo-ref tag maps fixture tests to each user's freshly generated TestOps case IDs in demo CI.
     const caseIds = new Map<string, string>();
     for (const suite of data.suites) {
       const { id: suiteId } = await this.suites.create(userId, projectId, { name: suite.name, description: suite.description });
@@ -179,7 +179,7 @@ export class DemoService implements OnApplicationBootstrap {
           priority: ("priority" in c ? c.priority : "MEDIUM") as CasePriority,
           type: ("type" in c ? c.type : "FUNCTIONAL") as CaseType,
           automationStatus: ("automationStatus" in c ? c.automationStatus : "AUTOMATED") as AutomationStatus,
-          tags: key ? [`e2e:${key}`, suite.name.toLowerCase()] : [suite.name.toLowerCase()],
+          tags: key ? [`demo-ref:${key}`, `e2e:${key}`, suite.name.toLowerCase()] : [suite.name.toLowerCase()],
           steps: c.steps,
         });
         caseIds.set(key ?? c.title, testCase.id);

@@ -53,6 +53,34 @@ export function IntegrationsPage() {
   const { data: info } = useProjectInfo(projectId);
   const { manageMembers: isAdmin } = useProjectPermissions(projectId);
   usePageTitle(info ? `Integrations (${info.project.name})` : 'Integrations');
+  const playwrightInstallId = useId();
+  const playwrightConfigId = useId();
+  const playwrightTestId = useId();
+  const playwrightEnvId = useId();
+  const apiUrl = `${window.location.origin}/api/v1`;
+  const installCommand = 'npm install --save-dev @testops/reporter';
+  const playwrightConfig = `import { defineConfig } from '@playwright/test';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
+export default defineConfig({
+  reporter: [['list'], ['html', { open: 'never' }], [require.resolve('@testops/reporter')]],
+});`;
+  const playwrightTest = `import { test } from '@playwright/test';
+import { testops } from '@testops/reporter';
+
+test('checkout works', testops('550e8400-e29b-41d4-a716-446655440000'), async ({ page }) => {
+  // ...
+});`;
+  const playwrightEnv = `TESTOPS_URL=${apiUrl}
+TESTOPS_TOKEN=<CI secret>
+TESTOPS_PROJECT_ID=${projectId}
+# Optional: use a Tester/Admin token to apply title and automation status syncs
+# TESTOPS_SYNC_TOKEN=<CI secret>
+# Optional: report into a run started in TestOps
+# TESTOPS_RUN_ID=<run-id>`;
+  const playwrightSync = 'npx testops-sync --apply';
   const settings = useResource(
     () => api.get<{ webhook: WebhookSettings | null }>(`/projects/${projectId}/webhook`),
     [projectId],
@@ -129,8 +157,105 @@ export function IntegrationsPage() {
     <>
       <PageHeader
         title="Integrations"
-        description="Start CI when a run has cases set to run by automation."
+        description="Connect CI to TestOps and report automated test results."
       />
+      <section className="surface integrations-section" aria-labelledby="playwright-heading">
+        <h2 id="playwright-heading" className="section-title">Playwright test reporter</h2>
+        <p className="muted">
+          Install the reporter in your Playwright project to send test results, failure details and screenshots to this project.
+          Create an API token on the <Link to="/account">Account → API tokens</Link> page and store it as a CI secret
+          with the <strong>Automation</strong> role. Do not commit the token to your repository.
+        </p>
+        <ol className="prose-list">
+          <li>
+            Install the package. <span className="muted">Playwright must already be installed in your project.</span>
+            <div className="code-header">
+              <span id={`${playwrightInstallId}-label`} className="field-label">Install command</span>
+              <CopyButton text={installCommand} what="install command" targetId={playwrightInstallId} />
+            </div>
+            <pre
+              id={playwrightInstallId}
+              className="code-block"
+              tabIndex={0}
+              role="region"
+              aria-labelledby={`${playwrightInstallId}-label`}
+            >
+              {installCommand}
+            </pre>
+          </li>
+          <li>
+            Add the reporter to <code>playwright.config.ts</code>:
+            <div className="code-header">
+              <span id={`${playwrightConfigId}-label`} className="field-label">playwright.config.ts</span>
+              <CopyButton text={playwrightConfig} what="Playwright reporter configuration" targetId={playwrightConfigId} />
+            </div>
+            <pre
+              id={playwrightConfigId}
+              className="code-block"
+              tabIndex={0}
+              role="region"
+              aria-labelledby={`${playwrightConfigId}-label`}
+            >
+              {playwrightConfig}
+            </pre>
+          </li>
+          <li>
+            Open the TestOps case, copy its Test ID from the details panel, and pass that ID to <code>testops()</code>:
+            <div className="code-header">
+              <span id={`${playwrightTestId}-label`} className="field-label">Linked Playwright test</span>
+              <CopyButton text={playwrightTest} what="linked Playwright test example" targetId={playwrightTestId} />
+            </div>
+            <pre
+              id={playwrightTestId}
+              className="code-block"
+              tabIndex={0}
+              role="region"
+              aria-labelledby={`${playwrightTestId}-label`}
+            >
+              {playwrightTest}
+            </pre>
+          </li>
+          <li>
+            Set these environment variables in your CI job. The URL and project ID are prefilled for this TestOps project;
+            keep the result token in your CI secret store. The optional sync token needs a Tester or Admin role:
+            <div className="code-header">
+              <span id={`${playwrightEnvId}-label`} className="field-label">CI environment</span>
+              <CopyButton text={playwrightEnv} what="CI environment variables" targetId={playwrightEnvId} />
+            </div>
+            <pre
+              id={playwrightEnvId}
+              className="code-block"
+              tabIndex={0}
+              role="region"
+              aria-labelledby={`${playwrightEnvId}-label`}
+            >
+              {playwrightEnv}
+            </pre>
+          </li>
+          <li>
+            Run this before Playwright in CI to update linked case titles and mark them as automated when the tests change:
+            <div className="code-header">
+              <span id={`${playwrightEnvId}-sync-label`} className="field-label">Sync command</span>
+              <CopyButton text={playwrightSync} what="TestOps sync command" targetId={`${playwrightEnvId}-sync`} />
+            </div>
+            <pre
+              id={`${playwrightEnvId}-sync`}
+              className="code-block"
+              tabIndex={0}
+              role="region"
+              aria-labelledby={`${playwrightEnvId}-sync-label`}
+            >
+              {playwrightSync}
+            </pre>
+          </li>
+        </ol>
+        <p className="field-hint">
+          The sync command defaults to a dry run; add <code>--apply</code> to update TestOps. It changes only case
+          titles and automation status by Test ID. Without <code>TESTOPS_RUN_ID</code>, each CI execution creates and
+          completes a run. Set it when a job is triggered by the webhook below to report into that existing run; the
+          reporter leaves it open for manual cases.
+        </p>
+      </section>
       {secret && <SecretOnce secret={secret} />}
 
       <section className="surface integrations-section" aria-labelledby="webhook-heading">
@@ -310,7 +435,7 @@ export function IntegrationsPage() {
     types: [testops.run.started]
 # github.event.client_payload.run.id        the run to report to
 # github.event.client_payload.api_url       the TestOps API
-# github.event.client_payload.automation_keys  e2e:<key> tags of its automated cases`}</pre>
+# github.event.client_payload.automation_case_ids  TestOps IDs of its automated cases`}</pre>
           </li>
         </ol>
       </section>

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { addToCart, summary, testops } from './shop';
+import { addToCart, demoTestops, summary } from './shop';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
@@ -12,14 +12,14 @@ async function applyCode(page: import('@playwright/test').Page, code: string) {
   await page.getByRole('button', { name: 'Apply' }).click();
 }
 
-test('a valid code takes 10% off', testops('discount-valid'), async ({ page }) => {
+test('a valid code takes 10% off', demoTestops('discount-valid'), async ({ page }) => {
   await applyCode(page, 'WELCOME10');
   await expect(page.getByRole('status').filter({ hasText: 'applied' })).toHaveText('Code WELCOME10 applied: 10% off.');
   await expect(summary(page, 'discount')).toHaveText('−€1.45');
   await expect(summary(page, 'total')).toHaveText('€17.95');
 });
 
-test('an unknown code is rejected', testops('discount-invalid'), async ({ page }) => {
+test('an unknown code is rejected', demoTestops('discount-invalid'), async ({ page }) => {
   await applyCode(page, 'SAVE50');
   await expect(page.getByRole('alert')).toHaveText("This discount code isn't valid.");
   await expect(summary(page, 'discount')).toHaveCount(0);
@@ -30,7 +30,7 @@ test('an unknown code is rejected', testops('discount-invalid'), async ({ page }
 // result as Failed in TestOps and links it to the open defect.
 test(
   'a discount code applies only once',
-  testops('discount-once', 'A discount code can be applied more than once'),
+  demoTestops('discount-once', 'A discount code can be applied more than once'),
   async ({ page }) => {
     test.fail(true, 'the same code can be applied twice');
     await applyCode(page, 'WELCOME10');

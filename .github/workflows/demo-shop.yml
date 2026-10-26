@@ -6,8 +6,8 @@ name: Demo shop
 #
 # It is also an example of CI started by TestOps: a project's CI webhook (Integrations) pointed at
 # this repository's dispatches endpoint sends "testops.run.started". The job then runs only the
-# run's automated cases (their e2e keys) and reports into that run. That needs the TESTOPS_TOKEN
-# secret, an API token of someone who can record results in the project.
+# run's automated cases by their TestOps IDs and reports into that run. Result reporting uses an
+# Automation token; metadata sync uses a Tester/Admin token.
 on:
   repository_dispatch:
     types: [testops.run.started]
@@ -15,10 +15,12 @@ on:
     branches: [master]
     paths:
       - "examples/demo-shop/**"
+      - "packages/reporter/**"
       - ".github/workflows/demo-shop.yml"
   pull_request:
     paths:
       - "examples/demo-shop/**"
+      - "packages/reporter/**"
       - ".github/workflows/demo-shop.yml"
   workflow_dispatch: {}
 
@@ -56,14 +58,36 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # Only the cases the run wants: @<key> tags from the payload's automation_keys. Keys are
-      # limited to safe characters, since case tags are free text.
+      # The personal demo project has fresh case UUIDs; map its fixture refs to those IDs from the
+      # webhook payload. The Playwright reporter and sync command receive the actual TestOps IDs.
+      - name: Map demo cases to TestOps IDs
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          jq -r '.client_payload.automated_cases[]? as $case | ($case.tags // [])[]? | select(startswith("demo-ref:")) | [$case.test_case_id, .[9:]] | @tsv' "$GITHUB_EVENT_PATH" |
+          while IFS=$'\t' read -r case_id ref; do
+            name=$(printf '%s' "$ref" | tr '[:lower:]' '[:upper:]' | tr '-.' '__')
+            printf 'TESTOPS_CASE_%s=%s\n' "$name" "$case_id" >> "$GITHUB_ENV"
+          done
+
+      # Only the cases the run wants: the reporter tags each test with its TestOps case ID.
       - name: Choose the tests TestOps asked for
         id: pick
         if: github.event_name == 'repository_dispatch'
         run: |
-          keys=$(jq -r '[.client_payload.automation_keys // [] | .[] | select(test("^[A-Za-z0-9._-]+$"))] | join("|")' "$GITHUB_EVENT_PATH")
-          if [ -n "$keys" ]; then echo "grep=@($keys)(\\s|\$)" >> "$GITHUB_OUTPUT"; fi
+          ids=$(jq -r '[.client_payload.automation_case_ids // [] | .[] | select(test("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"))] | join("|")' "$GITHUB_EVENT_PATH")
+          if [ -n "$ids" ]; then
+            echo "grep=@testops-($ids)(\\s|\$)" >> "$GITHUB_OUTPUT"
+          else
+            echo 'grep=(?!)' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync Playwright test metadata to TestOps
+        if: github.event_name == 'repository_dispatch'
+        env:
+          TESTOPS_URL: ${{ github.event.client_payload.api_url }}
+          TESTOPS_PROJECT_ID: ${{ github.event.client_payload.project.id }}
+          TESTOPS_SYNC_TOKEN: ${{ secrets.TESTOPS_SYNC_TOKEN }}
+        run: npx testops-sync --apply
 
       - name: Run the tests
         env:

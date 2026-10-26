@@ -1,0 +1,469 @@
+import { randomUUID } from 'node:crypto';
+import { openAsBlob } from 'node:fs';
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { basename, relative } from 'node:path';
+import { groupFiles, parseAttachmentPolicy, shouldAttach, skipReason } from './artifacts.js';
+import { linkTestsInSource } from './link.js';
+import { dedupeByLocation, matchSteps, matchTestsToCases } from './match.js';
+
+const COMMENT_MAX = 10_000;
+const BULK_MAX = 500;
+const REQUEST_TIMEOUT_MS = 30_000;
+// A grouped upload can carry up to 128 MB, which the usual request timeout would cut short.
+const UPLOAD_TIMEOUT_MS = 300_000;
+
+function clean(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function ciUrlFromEnvironment(env) {
+  if (clean(env.TESTOPS_CI_URL)) return clean(env.TESTOPS_CI_URL);
+  if (env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY && env.GITHUB_RUN_ID) {
+    return `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`;
+  }
+  return clean(env.CI_JOB_URL) || clean(env.CI_PIPELINE_URL) || clean(env.BUILDKITE_BUILD_URL) || clean(env.CIRCLE_BUILD_URL) || undefined;
+}
+
+function settingsFrom(options, env) {
+  const settings = {
+    apiUrl: clean(options.apiUrl ?? env.TESTOPS_URL).replace(/\/+$/, ''),
+    token: clean(options.token ?? env.TESTOPS_TOKEN),
+    projectId: clean(options.projectId ?? env.TESTOPS_PROJECT_ID),
+    runId: clean(options.runId ?? env.TESTOPS_RUN_ID) || null,
+    runTitle: clean(options.runTitle ?? env.TESTOPS_RUN_TITLE) || undefined,
+    environment: clean(options.environment ?? env.TESTOPS_ENVIRONMENT) || (env.CI ? 'CI' : 'local'),
+    ciUrl: clean(options.ciUrl ?? env.TESTOPS_CI_URL) || ciUrlFromEnvironment(env),
+  };
+  const required = [settings.apiUrl, settings.token, settings.projectId];
+  if (required.every((value) => !value)) return null;
+  if (required.some((value) => !value)) {
+    throw new Error('Configure TESTOPS_URL, TESTOPS_TOKEN and TESTOPS_PROJECT_ID together.');
+  }
+  let parsed;
+  try {
+    parsed = new URL(settings.apiUrl);
+  } catch {
+    throw new Error('TESTOPS_URL must be a full URL ending in /api/v1.');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('TESTOPS_URL must use HTTP or HTTPS.');
+  }
+  if (!/\/api\/v\d+$/.test(parsed.pathname.replace(/\/+$/, '')) || parsed.search || parsed.hash) {
+    throw new Error('TESTOPS_URL must be the versioned API base, e.g. https://testops.example.com/api/v1.');
+  }
+  settings.attachments = parseAttachmentPolicy(options.attachments ?? env.TESTOPS_ATTACHMENTS);
+  return settings;
+}
+
+function shortList(items, limit = 10) {
+  const shown = items.slice(0, limit);
+  return `${shown.join('; ')}${items.length > limit ? `; and ${items.length - limit} more` : ''}`;
+}
+
+/**
+ * The steps of each case as the run holds them, by case ID. TestOps shows step results against this
+ * snapshot, taken when the run started, so positions must come from it and not from the live case.
+ */
+function stepsByCase(run) {
+  return new Map((run.runCases ?? []).map((runCase) => [runCase.testCaseId, runCase.caseSnapshot?.steps ?? []]));
+}
+
+function chunks(items, size) {
+  const result = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
+
+class TestOpsClient {
+  constructor(settings, fetchImpl = globalThis.fetch, env = process.env) {
+    this.settings = settings;
+    this.fetch = fetchImpl;
+    this.env = env;
+    this.projectPath = `/projects/${encodeURIComponent(settings.projectId)}`;
+    // One id per execution: results sent by a later execution into the same run become new attempts
+    // instead of replacing earlier ones, while a retried request of this execution stays idempotent.
+    this.executionId = randomUUID();
+    // Set when an upload fails because TestOps cannot be reached; the rest of the uploads are then skipped.
+    this.uploadsStopped = false;
+  }
+
+  async request(method, path, body, { form, retryable = false } = {}) {
+    const maxAttempts = retryable ? 3 : 1;
+    let lastError;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const response = await this.fetch(`${this.settings.apiUrl}${path}`, {
+          method,
+          headers: {
+            authorization: `Bearer ${this.settings.token}`,
+            ...(!form && body !== undefined ? { 'content-type': 'application/json' } : {}),
+          },
+          body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
+          signal: AbortSignal.timeout(form ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
+        });
+        const text = await response.text();
+        if (!response.ok) {
+          const error = new Error(`${method} ${path} answered ${response.status}: ${text.slice(0, 500)}`);
+          error.status = response.status;
+          error.retryAfter = response.headers.get('retry-after');
+          throw error;
+        }
+        return text ? JSON.parse(text) : undefined;
+      } catch (error) {
+        lastError = error;
+        // No status means the request never got an answer: the server could not be reached, or timed out.
+        if (error && error.status === undefined) error.network = true;
+        const retryableStatus = error?.status === 429 || error?.status >= 500;
+        const retryableNetwork = error?.status === undefined;
+        if (!retryable || (!retryableStatus && !retryableNetwork) || attempt + 1 >= maxAttempts) throw error;
+        const retryAfterMs = Number(error.retryAfter) * 1_000;
+        const delay = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+          ? Math.min(retryAfterMs, 10_000)
+          : 500 * (2 ** attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError;
+  }
+
+  async report(inputResults, integrationName = 'Test automation') {
+    const existingRun = this.settings.runId
+      ? await this.request('GET', `${this.projectPath}/runs/${encodeURIComponent(this.settings.runId)}`)
+      : null;
+    const automationCaseIds = existingRun
+      ? new Set(existingRun.runCases.filter((runCase) => runCase.executionMode === 'AUTOMATED').map((runCase) => runCase.testCaseId))
+      : null;
+
+    const linked = [];
+    const unlinked = [];
+    const outsideRun = [];
+    for (const result of inputResults) {
+      const caseId = clean(result.testCaseId);
+      if (!caseId) {
+        unlinked.push(result.title);
+        continue;
+      }
+      if (automationCaseIds && !automationCaseIds.has(caseId)) {
+        outsideRun.push(result.title);
+        continue;
+      }
+      if (!clean(result.externalTestId)) {
+        throw new Error(`The result for "${result.title}" has no stable externalTestId; it cannot be safely retried.`);
+      }
+      linked.push({ ...result, testCaseId: caseId });
+    }
+
+    if (linked.length === 0) {
+      console.log(existingRun
+        ? "TestOps: no result belongs to this run's automated cases; nothing was sent."
+        : 'TestOps: no result is linked to a TestOps case; no run was created.');
+      this.logUnlinked(unlinked, outsideRun);
+      return;
+    }
+
+    const run = existingRun ?? await this.request('POST', `${this.projectPath}/runs`, {
+      title: this.settings.runTitle ?? this.defaultRunTitle(integrationName),
+      description: this.settings.ciUrl ? `${integrationName} run: ${this.settings.ciUrl}` : undefined,
+      source: 'CI',
+      environment: this.settings.environment,
+      build: (clean(this.env.GITHUB_SHA) || clean(this.env.CI_COMMIT_SHA) || clean(this.env.CIRCLE_SHA1) || clean(this.env.BUILDKITE_COMMIT)).slice(0, 12) || undefined,
+      testCaseIds: [...new Set(linked.map((result) => result.testCaseId))],
+    });
+
+    if (this.settings.ciUrl) {
+      await this.request('PATCH', `${this.projectPath}/runs/${encodeURIComponent(run.id)}`, {
+        externalLinkType: this.ciLinkType(),
+        externalLinkRef: this.settings.ciUrl,
+      });
+    }
+
+    const caseSteps = stepsByCase(run);
+    let openDefects;
+    for (const batch of chunks(linked, BULK_MAX)) {
+      const submitted = await this.request('POST', `${this.projectPath}/runs/${encodeURIComponent(run.id)}/results/bulk`, {
+        results: batch.map((result) => ({
+          testCaseId: result.testCaseId,
+          status: result.status,
+          source: 'AUTOMATION',
+          automationSourceLabel: integrationName,
+          externalTestId: `${result.externalTestId}:${this.executionId}`,
+          comment: result.comment?.slice(0, COMMENT_MAX),
+          startedAt: result.startedAt,
+          endedAt: result.endedAt,
+          durationMs: result.durationMs,
+          stepResults: this.stepResultsFor(result, caseSteps),
+        })),
+      }, { retryable: true });
+
+      for (const [index, result] of batch.entries()) {
+        const resultId = submitted.results[index].id;
+        if (this.wantsAttachments(result.status)) {
+          await this.uploadAttachments(resultId, result.attachments ?? [], result.title);
+        }
+        if (result.status === 'FAILED' && result.defectTitle) {
+          openDefects ??= await this.listOpenDefects();
+          const defect = openDefects.find((item) => item.title === result.defectTitle);
+          if (defect) {
+            await this.request('POST', `${this.projectPath}/defects/${encodeURIComponent(defect.id)}/results`, { resultIds: [resultId] });
+          } else {
+            console.log(`TestOps: no open defect is titled "${result.defectTitle}"; "${result.title}" was not linked.`);
+          }
+        }
+      }
+    }
+
+    if (!existingRun) await this.request('POST', `${this.projectPath}/runs/${encodeURIComponent(run.id)}/complete`);
+    const webBase = this.settings.apiUrl.replace(/\/api\/v\d+$/, '');
+    console.log(`TestOps: ${linked.length} ${linked.length === 1 ? 'result' : 'results'} sent to ${webBase}/projects/${this.settings.projectId}/runs/${run.id}`);
+    this.logUnlinked(unlinked, outsideRun);
+  }
+
+  async syncTests(inputTests, { apply = false, link = false, partial = false } = {}) {
+    if (link && apply && partial) {
+      throw new Error('TestOps link: --link --apply needs every test, so run it without Playwright arguments (a file path, --grep or --project).');
+    }
+    const cases = await this.request('GET', `${this.projectPath}/cases`);
+    const casesById = new Map(cases.map((testCase) => [testCase.id, testCase]));
+    const testsById = new Map();
+    const conflicts = new Set();
+    let unlinked = 0;
+
+    for (const test of inputTests) {
+      const testCaseId = clean(test.testCaseId);
+      const title = clean(test.title);
+      if (!testCaseId || !title) {
+        unlinked += 1;
+        continue;
+      }
+      const existing = testsById.get(testCaseId);
+      if (existing && existing.title !== title) conflicts.add(testCaseId);
+      else testsById.set(testCaseId, { testCaseId, title });
+    }
+
+    console.log(`TestOps sync: discovered ${inputTests.length} Playwright tests; ${testsById.size} linked by TestOps ID; ${unlinked} left unchanged without an ID.`);
+
+    const missing = [];
+    const changes = [];
+    for (const test of testsById.values()) {
+      if (conflicts.has(test.testCaseId)) continue;
+      const testCase = casesById.get(test.testCaseId);
+      if (!testCase) {
+        missing.push(test.testCaseId);
+        continue;
+      }
+      const update = {};
+      if (testCase.title !== test.title) update.title = test.title;
+      if (testCase.automationStatus !== 'AUTOMATED') update.automationStatus = 'AUTOMATED';
+      if (Object.keys(update).length) changes.push({ ...test, currentTitle: testCase.title, update });
+    }
+
+    if (conflicts.size || missing.length) {
+      const problems = [];
+      if (conflicts.size) problems.push(`multiple Playwright tests use the same TestOps ID with different titles: ${shortList([...conflicts])}`);
+      if (missing.length) problems.push(`TestOps IDs not found in project ${this.settings.projectId}: ${shortList(missing)}`);
+      throw new Error(`TestOps sync stopped: ${problems.join('; ')}.`);
+    }
+
+    if (changes.length === 0) {
+      console.log(`TestOps sync: ${testsById.size} linked ${testsById.size === 1 ? 'test is' : 'tests are'} already in sync.`);
+    } else {
+      for (const change of changes) {
+        const summary = [
+          change.update.title ? `title: "${change.currentTitle}" → "${change.update.title}"` : undefined,
+          change.update.automationStatus ? 'automation status: AUTOMATED' : undefined,
+        ].filter(Boolean).join(', ');
+        console.log(`TestOps sync: ${apply ? 'updating' : 'would update'} ${change.testCaseId} (${summary}).`);
+        if (apply) {
+          await this.request('PATCH', `${this.projectPath}/cases/${encodeURIComponent(change.testCaseId)}`, change.update, { retryable: true });
+        }
+      }
+      if (!apply) console.log('TestOps sync: dry run only. Pass --apply to update case titles and automation status.');
+      else console.log(`TestOps sync: ${changes.length} ${changes.length === 1 ? 'case' : 'cases'} updated.`);
+    }
+
+    if (link) await this.linkTests(inputTests, cases, new Set(testsById.keys()), { apply, partial });
+  }
+
+  /**
+   * Pairs tests that have no case ID with cases by title and, with `apply`, writes the ID of each exact
+   * match into the test source. Cases that a test already links to are not offered again.
+   */
+  async linkTests(inputTests, cases, linkedCaseIds, { apply, partial }) {
+    if (partial) {
+      console.warn('TestOps link: Playwright arguments narrowed the tests, so this list may be incomplete: a case that another test links, or a title that repeats elsewhere, can be missed.');
+    }
+    const unlinkedTests = dedupeByLocation(inputTests.filter((test) => !clean(test.testCaseId) && clean(test.title)));
+    const candidates = cases.filter((testCase) => !linkedCaseIds.has(testCase.id));
+    const { exact, suggestions, ambiguous, unmatched } = matchTestsToCases(unlinkedTests, candidates);
+    const where = (test) => (test.location ? `${relative(process.cwd(), test.location.file)}:${test.location.line}` : 'an unknown location');
+
+    console.log(`TestOps link: ${unlinkedTests.length} ${unlinkedTests.length === 1 ? 'test has' : 'tests have'} no TestOps ID: ${exact.length} match a case by title, ${suggestions.length} ${suggestions.length === 1 ? 'is a suggestion' : 'are suggestions'}, ${ambiguous.length} ${ambiguous.length === 1 ? 'is ambiguous' : 'are ambiguous'}, ${unmatched.length} ${unmatched.length === 1 ? 'has' : 'have'} no match.`);
+    if (!apply) {
+      for (const item of exact) console.log(`TestOps link: would link ${where(item.test)} "${item.test.title}" to case ${item.caseId}.`);
+    }
+    for (const item of suggestions) {
+      console.log(`TestOps link: suggestion for ${where(item.test)} "${item.test.title}": case ${item.caseId} "${item.caseTitle}" (similarity ${item.score.toFixed(2)}). Add testops('${item.caseId}') by hand if it is the right case.`);
+    }
+    for (const item of ambiguous) console.log(`TestOps link: skipped ${where(item.test)} "${item.test.title}": ${item.reason}.`);
+    if (unmatched.length) console.log(`TestOps link: no case matches ${shortList(unmatched.map((test) => `${where(test)} "${test.title}"`))}.`);
+
+    if (exact.length === 0) return;
+    if (!apply) {
+      console.log('TestOps link: dry run only. Pass --link --apply to write the IDs into the test files.');
+      return;
+    }
+    await this.writeLinks(exact);
+  }
+
+  /** Writes the matched case IDs into each test file, one write per file; refused tests are listed, never edited. */
+  async writeLinks(exact) {
+    const byFile = new Map();
+    for (const item of exact) {
+      if (!item.test.location) {
+        console.warn(`TestOps link: could not link "${item.test.title}": Playwright reported no source location.`);
+        continue;
+      }
+      byFile.set(item.test.location.file, [...(byFile.get(item.test.location.file) ?? []), item]);
+    }
+    for (const [file, items] of byFile) {
+      const shown = relative(process.cwd(), file);
+      const { source, linked, skipped } = linkTestsInSource(
+        await readFile(file, 'utf8'),
+        items.map(({ test, caseId }) => ({ line: test.location.line, column: test.location.column, testCaseId: caseId, title: test.title })),
+      );
+      for (const item of skipped) console.warn(`TestOps link: could not link ${shown}:${item.line}: ${item.reason}.`);
+      if (linked > 0) {
+        await writeFile(file, source, 'utf8');
+        console.log(`TestOps link: linked ${linked} ${linked === 1 ? 'test' : 'tests'} in ${shown}.`);
+      }
+    }
+  }
+
+  /** The stepResults of one result, or undefined when it has none to send. */
+  stepResultsFor(result, caseSteps) {
+    if (!result.steps?.length) return undefined;
+    const { stepResults, unmatched } = matchSteps(result.steps, caseSteps.get(result.testCaseId) ?? []);
+    if (unmatched.length) {
+      console.warn(`TestOps: steps of "${result.title}" without a matching case step: ${shortList(unmatched)}.`);
+    }
+    return stepResults.length ? stepResults : undefined;
+  }
+
+  /** Whether results with this status get their artifacts uploaded (TESTOPS_ATTACHMENTS). */
+  wantsAttachments(status) {
+    return shouldAttach(this.settings.attachments, status);
+  }
+
+  /**
+   * Uploads a result's files in as few requests as the server limits allow. A file the server would
+   * refuse, an unreadable file and a failed upload each warn; none of them loses the result.
+   */
+  async uploadAttachments(resultId, attachments, title) {
+    if (this.uploadsStopped) return;
+    const files = [];
+    for (const attachment of attachments) {
+      const name = attachment.name ?? basename(attachment.path);
+      let size;
+      try {
+        size = (await stat(attachment.path)).size;
+      } catch (error) {
+        console.warn(`TestOps: skipped attachment "${name}": it cannot be read (${error instanceof Error ? error.message : error}).`);
+        continue;
+      }
+      const reason = skipReason({ name, size });
+      if (reason) {
+        console.warn(`TestOps: skipped attachment "${name}": ${reason}.`);
+        continue;
+      }
+      files.push({ ...attachment, name, size });
+    }
+
+    for (const group of groupFiles(files)) {
+      try {
+        await this.sendFiles(resultId, group);
+      } catch (error) {
+        // The server (or a proxy in front of it) refuses an upload as a whole when one file breaks a limit
+        // it has configured, so send the files one by one: only those it still refuses are lost.
+        if (group.length > 1 && [400, 413, 415].includes(error?.status)) {
+          for (const file of group) {
+            try {
+              await this.sendFiles(resultId, [file]);
+            } catch (single) {
+              console.warn(`TestOps: attachment "${file.name}" for "${title}" could not be uploaded. ${single instanceof Error ? single.message : single}`);
+              if (single?.network) return this.stopUploads();
+            }
+          }
+        } else {
+          console.warn(`TestOps: attachments for "${title}" could not be uploaded. ${error instanceof Error ? error.message : error}`);
+          if (error?.network) return this.stopUploads();
+        }
+      }
+    }
+  }
+
+  /** After the server cannot be reached, every further upload would wait for its own timeout: skip them. */
+  stopUploads() {
+    this.uploadsStopped = true;
+    console.warn('TestOps: attachment uploads are skipped from here on: the TestOps server could not be reached.');
+  }
+
+  /** One multipart request carrying the given files of a result. */
+  async sendFiles(resultId, files) {
+    const form = new FormData();
+    // A Blob backed by the file: it is read while it is sent, so a large group is never held in memory.
+    for (const file of files) form.append('files', await openAsBlob(file.path, { type: file.contentType }), file.name);
+    await this.request('POST', `${this.projectPath}/results/${encodeURIComponent(resultId)}/attachments`, undefined, { form });
+  }
+
+  async listOpenDefects() {
+    const [open, inProgress] = await Promise.all([
+      this.request('GET', `${this.projectPath}/defects?status=OPEN`),
+      this.request('GET', `${this.projectPath}/defects?status=IN_PROGRESS`),
+    ]);
+    return [...open, ...inProgress];
+  }
+
+  defaultRunTitle(integrationName) {
+    const branch = clean(this.env.GITHUB_REF_NAME) || clean(this.env.CI_COMMIT_REF_NAME);
+    const sha = clean(this.env.GITHUB_SHA) || clean(this.env.CI_COMMIT_SHA) || clean(this.env.CIRCLE_SHA1) || clean(this.env.BUILDKITE_COMMIT);
+    if (branch && sha) return `${integrationName} – ${branch} @ ${sha.slice(0, 7)}`;
+    return `${integrationName} – ${this.settings.environment}`;
+  }
+
+  ciLinkType() {
+    if (this.settings.ciUrl?.includes('github.com')) return 'GitHub Actions';
+    if (this.settings.ciUrl?.includes('gitlab')) return 'GitLab CI';
+    if (this.settings.ciUrl?.includes('circleci')) return 'CircleCI';
+    if (this.settings.ciUrl?.includes('buildkite')) return 'Buildkite';
+    return 'CI';
+  }
+
+  logUnlinked(unlinked, outsideRun) {
+    if (unlinked.length) console.log(`TestOps: not linked to a case (missing TestOps test ID): ${shortList(unlinked)}.`);
+    if (outsideRun.length) console.log(`TestOps: not among this run's automated cases: ${shortList(outsideRun)}.`);
+  }
+}
+
+/** Creates the API client when configured, or returns null when all TestOps settings are absent. */
+export function createReporterClient(options = {}, env = process.env, fetchImpl = globalThis.fetch) {
+  const settings = settingsFrom(options, env);
+  return settings ? new TestOpsClient(settings, fetchImpl, env) : null;
+}
+
+/** Framework-neutral entry point for framework adapters. */
+export async function reportResults(results, options = {}, env = process.env) {
+  const client = createReporterClient(options, env);
+  if (!client) return;
+  await client.report(results, options.integrationName ?? 'Test automation');
+}
+
+/** Syncs Playwright case titles and automation status to TestOps using explicit TestOps IDs. */
+export async function syncTestCases(tests, options = {}, env = process.env) {
+  const { apply = false, link = false, partial = false, ...reporterOptions } = options;
+  const client = createReporterClient({
+    ...reporterOptions,
+    token: reporterOptions.token ?? env.TESTOPS_SYNC_TOKEN ?? env.TESTOPS_TOKEN,
+  }, env);
+  if (!client) throw new Error('Configure TESTOPS_URL, TESTOPS_PROJECT_ID and TESTOPS_SYNC_TOKEN (or TESTOPS_TOKEN).');
+  await client.syncTests(tests, { apply, link, partial });
+}

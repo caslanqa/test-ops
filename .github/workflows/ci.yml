@@ -53,6 +53,13 @@ jobs:
       - name: Web build (includes tsc -b)
         run: pnpm --filter @testops/web run build
 
+      # The npm package includes the shared reporting client and Playwright adapter.
+      - name: Build TestOps reporter package
+        run: pnpm --filter @testops/reporter run build
+
+      - name: Test TestOps reporter package
+        run: pnpm --filter @testops/reporter run test
+
   smoke:
     name: Docker smoke tests
     needs: verify
