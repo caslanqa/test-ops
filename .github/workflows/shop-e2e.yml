@@ -6,9 +6,9 @@ name: Shop E2E
 #
 # It is also a CI that TestOps can start. A project's CI webhook (Integrations) pointed at this
 # repository's dispatches endpoint sends "testops.run.started"; the job then links the tests to the
-# project's cases by title, runs only the run's cases and reports into that run. Result reporting uses
-# an Automation token (TESTOPS_TOKEN); linking and metadata sync use a Tester or Admin token
-# (TESTOPS_SYNC_TOKEN).
+# project's cases by title, runs only the run's cases and reports into that run. One API token does it
+# all (the secret TESTOPS_TOKEN): it reports the results and links and syncs the cases, so it has to be
+# a token of a user who is Tester or Admin in the project; a project or workspace admin already is.
 #
 # The server sends the same event type for every project, so the repository variable
 # SHOP_E2E_PROJECT_ID names the one project this workflow serves; demo-shop.yml ignores that project.
@@ -78,7 +78,7 @@ jobs:
         env:
           TESTOPS_URL: ${{ github.event.client_payload.api_url }}
           TESTOPS_PROJECT_ID: ${{ github.event.client_payload.project.id }}
-          TESTOPS_SYNC_TOKEN: ${{ secrets.TESTOPS_SYNC_TOKEN }}
+          TESTOPS_TOKEN: ${{ secrets.TESTOPS_TOKEN }}
         run: npx testops-sync --link --apply
 
       - name: Sync Playwright test metadata to TestOps
@@ -86,7 +86,7 @@ jobs:
         env:
           TESTOPS_URL: ${{ github.event.client_payload.api_url }}
           TESTOPS_PROJECT_ID: ${{ github.event.client_payload.project.id }}
-          TESTOPS_SYNC_TOKEN: ${{ secrets.TESTOPS_SYNC_TOKEN }}
+          TESTOPS_TOKEN: ${{ secrets.TESTOPS_TOKEN }}
         run: npx testops-sync --apply
 
       # Only the cases the run wants: the reporter tags each linked test with its TestOps case ID.
