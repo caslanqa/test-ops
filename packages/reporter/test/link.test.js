@@ -197,3 +197,40 @@ test('the title is compared after the escapes in the literal are resolved', () =
   assert.equal(result.linked, 1);
   assert.deepEqual(result.skipped, []);
 });
+
+// Playwright 1.63 reports a plain test at the start of its callee name, not at the `(` that 1.64 reports.
+test('a location at the start of the test name is linked, as Playwright 1.63 reports it', () => {
+  const source = [
+    PLAYWRIGHT_IMPORT,
+    "test.describe('group', () => {",
+    "  test('indented', async () => {});",
+    '});',
+    "test('plain', async () => {});",
+    'test(',
+    "  'multi line',",
+    '  async () => {},',
+    ');',
+    "fixture('alias', async () => {});",
+    '',
+  ].join('\n');
+  const result = linkTestsInSource(source, [
+    { ...locationOf(source, "test('plain'"), testCaseId: ID1, title: 'plain' },
+    { ...locationOf(source, "test('indented'"), testCaseId: ID2, title: 'indented' },
+    { ...locationOf(source, 'test(\n'), testCaseId: ID3, title: 'multi line' },
+    { ...locationOf(source, "fixture('alias'"), testCaseId: ID1, title: 'alias' },
+  ]);
+  assert.equal(result.linked, 4);
+  assert.deepEqual(result.skipped, []);
+  assert.ok(result.source.includes(`test('plain'${linked(ID1)}, async`));
+  assert.ok(result.source.includes(`test('indented'${linked(ID2)}, async`));
+  assert.ok(result.source.includes(`'multi line'${linked(ID3)},\n  async`));
+  assert.ok(result.source.includes(`fixture('alias'${linked(ID1)}, async`));
+});
+
+test('a location at the start of another call is not linked when its first argument is not the title', () => {
+  const source = [PLAYWRIGHT_IMPORT, "test('plain', async () => {});", "expect('plain').toBe('plain');"].join('\n');
+  const result = linkTestsInSource(source, [{ ...locationOf(source, "expect('plain')"), testCaseId: ID1, title: 'other' }]);
+  assert.equal(result.source, source);
+  assert.equal(result.linked, 0);
+  assert.match(result.skipped[0].reason, /"plain".*"other"/);
+});

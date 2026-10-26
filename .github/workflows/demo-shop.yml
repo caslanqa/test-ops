@@ -24,8 +24,10 @@ on:
       - ".github/workflows/demo-shop.yml"
   workflow_dispatch: {}
 
+# Every dispatch is its own TestOps run, so a newer one must not cancel an older one, and a dispatch
+# that this workflow skips (see the job's if) must not cancel a run of this one.
 concurrency:
-  group: demo-shop-${{ github.ref }}
+  group: demo-shop-${{ github.event_name == 'repository_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -34,6 +36,8 @@ permissions:
 jobs:
   playwright:
     name: Playwright
+    # shop-e2e.yml serves the project named by SHOP_E2E_PROJECT_ID; the server sends the same event for every project.
+    if: github.event_name != 'repository_dispatch' || github.event.client_payload.project.id != vars.SHOP_E2E_PROJECT_ID
     runs-on: ubuntu-latest
     defaults:
       run:

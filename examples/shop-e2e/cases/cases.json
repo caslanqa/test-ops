@@ -1,0 +1,146 @@
+{
+  "suites": [
+    {
+      "name": "Catalog",
+      "description": "Browsing and searching the products",
+      "cases": [
+        {
+          "key": "catalog-list",
+          "title": "The catalog lists every product with its price",
+          "priority": "HIGH",
+          "type": "SMOKE",
+          "steps": [
+            { "action": "Open the shop", "expectedResult": "Espresso beans, Filter coffee, Green tea and Ceramic mug are listed" },
+            { "action": "Look at the espresso beans", "expectedResult": "They cost €9.90" }
+          ]
+        },
+        {
+          "key": "catalog-search",
+          "title": "Searching narrows the catalog",
+          "steps": [
+            { "action": "Search for tea", "expectedResult": "Only Green tea is listed" },
+            { "action": "Search for chocolate", "expectedResult": "The shop says no products match the search" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cart",
+      "description": "Adding, changing and removing products, and the totals",
+      "cases": [
+        {
+          "key": "cart-add",
+          "title": "Adding products updates the cart badge and the totals",
+          "priority": "HIGH",
+          "steps": [
+            { "action": "Add Espresso beans twice and a Ceramic mug", "expectedResult": "The cart badge shows 3" },
+            { "action": "Open the cart", "expectedResult": "The subtotal is €31.80, shipping €4.90 and the total €36.70" }
+          ]
+        },
+        {
+          "key": "cart-quantity",
+          "title": "Changing the quantity updates the totals",
+          "steps": [
+            { "action": "Add a Filter coffee and open the cart", "expectedResult": "The cart lists one Filter coffee" },
+            { "action": "Set its quantity to 2 and leave the field", "expectedResult": "The subtotal is €29.00 and the total €33.90" }
+          ]
+        },
+        {
+          "key": "cart-remove",
+          "title": "Removing the last product empties the cart",
+          "steps": [
+            { "action": "Add a Ceramic mug and open the cart", "expectedResult": "The cart lists the mug" },
+            { "action": "Remove the mug", "expectedResult": "The cart says it is empty and the badge shows 0" }
+          ]
+        },
+        {
+          "key": "cart-free-shipping",
+          "title": "Orders from €40 ship for free",
+          "steps": [
+            { "action": "Add three Filter coffees and open the cart", "expectedResult": "Shipping is free and the total is €43.50" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Discounts",
+      "description": "Discount codes in the cart",
+      "cases": [
+        {
+          "key": "discount-valid",
+          "title": "A valid code takes 10% off",
+          "steps": [
+            { "action": "Apply the code WELCOME10", "expectedResult": "The shop confirms it and the discount is €1.45, the total €17.95" }
+          ]
+        },
+        {
+          "key": "discount-invalid",
+          "title": "An unknown code is rejected",
+          "steps": [
+            { "action": "Apply the code SAVE50", "expectedResult": "The shop says the code isn't valid and shows no discount" }
+          ]
+        },
+        {
+          "key": "discount-once",
+          "title": "A discount code applies only once",
+          "priority": "HIGH",
+          "steps": [
+            { "action": "Apply the code WELCOME10 twice", "expectedResult": "The discount stays €1.45" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Checkout",
+      "description": "Paying for an order",
+      "cases": [
+        {
+          "key": "checkout-card",
+          "title": "Customer pays by card",
+          "priority": "CRITICAL",
+          "type": "SMOKE",
+          "steps": [
+            { "action": "Fill in the card details", "expectedResult": "The form accepts a valid test card" },
+            { "action": "Pay by card", "expectedResult": "The shop thanks the customer and shows the order number" }
+          ]
+        },
+        {
+          "key": "checkout-declined",
+          "title": "A declined card shows an error and keeps the cart",
+          "steps": [
+            { "action": "Pay with the card 4000 0000 0000 0002", "expectedResult": "The shop says the card was declined and the cart keeps its product" }
+          ]
+        },
+        {
+          "key": "checkout-paypal",
+          "title": "Pays with PayPal",
+          "priority": "LOW",
+          "steps": [
+            { "action": "Choose PayPal at the checkout", "expectedResult": "The customer can pay with PayPal" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Regression",
+      "description": "Cases kept for every release",
+      "cases": [
+        {
+          "key": "regression-discount-invalid",
+          "title": "An unknown code is rejected",
+          "steps": [
+            { "action": "Apply the code SAVE50", "expectedResult": "The shop says the code isn't valid" }
+          ]
+        }
+      ]
+    }
+  ],
+  "defects": [
+    {
+      "title": "A discount code can be applied more than once",
+      "description": "Applying WELCOME10 twice takes 20% off instead of 10%, so \"a discount code applies only once\" fails when it runs in strict mode.",
+      "severity": "HIGH",
+      "tags": ["discounts"]
+    }
+  ]
+}
