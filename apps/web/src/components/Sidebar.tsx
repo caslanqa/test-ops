@@ -81,7 +81,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
           <nav aria-label="Project sections">
             <ul className="side-nav">
-              {PROJECT_SECTIONS.filter((s) => !('adminOnly' in s) || info?.project.currentUserRole === 'ADMIN').map(({ path, label, icon: Icon }) => (
+              {PROJECT_SECTIONS.filter((s) => {
+                if (!('roles' in s)) return true;
+                const role = info?.project.currentUserRole;
+                return role !== undefined && (s.roles as readonly string[]).includes(role);
+              }).map(({ path, label, icon: Icon }) => (
                 <li key={path}>
                   <NavLink to={`/projects/${projectId}/${path}`} onClick={onNavigate}>
                     <Icon size={18} aria-hidden="true" />

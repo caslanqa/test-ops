@@ -50,16 +50,15 @@ const TYPE_OPTIONS = USER_TYPES.map((type) => ({
   description: USER_TYPE_DESCRIPTION[type],
 }));
 
-/** Sections of the workspace page: projects and members, and for admins permissions and settings. */
+/** Sections of the workspace page: projects and members, and for admins settings. */
 export function WorkspaceTabs({ workspaceId }: { workspaceId: string }) {
   const { data: workspace } = useWorkspace(workspaceId);
-  // The server allows the last two to workspace admins only.
+  // The server allows the settings to workspace admins only.
   const isAdmin = workspace?.currentUserRole === 'ADMIN';
   return (
     <nav className="tabs" aria-label="Workspace sections">
       <NavLink to={`/workspaces/${workspaceId}`} end>Projects</NavLink>
       <NavLink to={`/workspaces/${workspaceId}/members`}>Members</NavLink>
-      {isAdmin && <NavLink to={`/workspaces/${workspaceId}/permissions`}>Permissions</NavLink>}
       {isAdmin && <NavLink to={`/workspaces/${workspaceId}/settings`}>Settings</NavLink>}
     </nav>
   );
