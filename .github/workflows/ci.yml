@@ -105,6 +105,19 @@ jobs:
           docker compose up -d --force-recreate --wait --wait-timeout 120 app
           node tests/smoke/roles.mjs
 
+      # A fake AI provider runs inside the app container; the suite also stops the app mid-run to see it resume.
+      - name: AI assistant smoke test
+        run: |
+          docker compose up -d --force-recreate --wait --wait-timeout 120 app
+          node tests/smoke/ai.mjs
+
+      # Without an AI_ENCRYPTION_KEY a provider key can't be saved. The steps below recreate the app, which
+      # brings the key from .env back.
+      - name: AI assistant without an encryption key
+        run: |
+          AI_ENCRYPTION_KEY= docker compose up -d --wait --wait-timeout 120 app
+          node tests/smoke/ai.mjs --no-key
+
       # Every user's own DEMO workspace, then DEMO_WORKSPACE=false: no new ones, existing ones stay.
       # Recreating the app resets the in-memory sign-up limit that the suites above have used up.
       - name: Demo workspaces, and switched off

@@ -1,8 +1,6 @@
 # Embedded AI assistant: foundation and requirement-to-cases workflow
 
-Status: draft for owner review, reworked on 2026-10-26 for the role ladder (the provider is defined by workspace
-admins and project admins, not by an Installation Admin). Branch: `feat/ai-assistant-foundation`, to be recreated
-from `master` once the role ladder (PR #36) has merged.
+Status: implemented on branch `feat/ai-assistant-foundation` (plan: `docs/superpowers/plans/2026-10-26-ai-assistant-foundation.md`). Reworked on 2026-10-26 for the role ladder: the provider is defined by workspace admins and project admins, not by an Installation Admin.
 
 ## Goal
 
