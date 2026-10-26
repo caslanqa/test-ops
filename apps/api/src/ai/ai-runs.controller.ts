@@ -4,6 +4,7 @@ import type { Response } from "express";
 import { AuthenticatedUser, CurrentUser } from "../common/decorators/current-user.decorator";
 import { PagedResponse, sendPage } from "../common/pagination";
 import { AiRunsService } from "./ai-runs.service";
+import { ApproveRunDto } from "./dto/approve-run.dto";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
 import { StartRunDto } from "./dto/start-run.dto";
 
@@ -42,5 +43,17 @@ export class AiRunsController {
   @HttpCode(200)
   cancel(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string, @Param("runId") runId: string) {
     return this.runs.cancel(user.id, projectId, runId);
+  }
+
+  /** Writes the approved drafts as test cases of the project; the drafts sent are the drafts written. */
+  @Post(":runId/approve")
+  @HttpCode(200)
+  approve(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("runId") runId: string,
+    @Body() dto: ApproveRunDto,
+  ) {
+    return this.runs.approve(user.id, projectId, runId, dto);
   }
 }

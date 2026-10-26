@@ -482,7 +482,13 @@ setting('"maxRunsPerUserPerDay" = 2');
 await expectStatus('a user may start a run within the daily limit', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
 await expectStatus('...and a second one', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
 await expectStatus('...but not a third', 429, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
-setting('"maxRunsPerUserPerDay" = 20');
+// Starts that arrive together must not slip past the limit by being counted before any of them is saved.
+const racer = await makeUser('racer', 'TESTER');
+setting('"maxRunsPerUserPerDay" = 2');
+const racing = await Promise.all(Array.from({ length: 6 }, () => call(racer.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id })));
+check('six starts at once with a limit of two: two are accepted', racing.filter((r) => r.status === 202).length === 2, racing.map((r) => r.status).join());
+check('...and the rest are refused', racing.filter((r) => r.status === 429).length === 4, racing.map((r) => r.status).join());
+setting('"maxRunsPerUserPerDay" = 100');
 const listed = await call(viewer.token, 'GET', `${RUNS}?requirementId=${requirement.id}`);
 check(`[${listed.status}] a Viewer can list the runs of a requirement`, listed.status === 200 && Array.isArray(listed.json) && listed.json.length >= 8, listed.text.slice(0, 200));
 const stamps = listed.json.map((run) => Date.parse(run.createdAt));
@@ -492,6 +498,75 @@ const paged = await call(viewer.token, 'GET', `${RUNS}?requirementId=${requireme
 check('...and in pages, with the total in the header', paged.json.length === 2, paged.text.slice(0, 100));
 const other = await call(viewer.token, 'GET', `${RUNS}?requirementId=${otherRequirement.id}`);
 check('runs of another requirement are not listed', other.status === 200 && other.json.length === 0, other.text.slice(0, 100));
+
+console.log('--- Approving drafts ---');
+useModel('ok');
+const newRun = async (body = {}) => waitForRun((await start(tester.token, body)).json.runId, ['AWAITING_APPROVAL']);
+const approve = (token, runId, body, projectPath = P) => call(token, 'POST', `${projectPath}/ai/runs/${runId}/approve`, body);
+const suite = await ok(admin, 'POST', `${P}/suites`, { name: 'AI drafts' });
+const otherSuite = await ok(admin, 'POST', `/projects/${otherProject.id}/suites`, { name: 'Other suite' });
+
+const run1 = await newRun();
+const edited = run1.result.drafts.map((draft, index) => (index === 0 ? { ...draft, title: 'Edited by a person' } : draft));
+const before1 = await caseCount();
+const approved = await approve(tester.token, run1.id, { suiteId: suite.id, cases: edited });
+check(`[${approved.status}] approving writes the drafts as cases`, approved.status === 200 && approved.json?.createdCaseIds?.length === 2, approved.text);
+check('...which are new cases', (await caseCount()) === before1 + 2);
+const created = await Promise.all(approved.json.createdCaseIds.map((id) => ok(admin, 'GET', `${P}/cases/${id}`)));
+check('...with the edited title and the steps', created.some((c) => c.title === 'Edited by a person') && created.every((c) => c.steps.length >= 1), JSON.stringify(created.map((c) => c.title)));
+check('...tagged as made by AI and with their kind', created.every((c) => c.tags.includes('ai-generated') && ['positive', 'negative', 'boundary', 'error'].some((kind) => c.tags.includes(kind))), JSON.stringify(created.map((c) => c.tags)));
+check('...in the chosen suite', created.every((c) => c.suiteId === suite.id));
+const linked = await ok(admin, 'GET', `${P}/requirements/${requirement.id}`);
+check('...linked to the requirement', approved.json.createdCaseIds.every((id) => linked.cases.some((link) => link.testCaseId === id || link.testCase?.id === id)), JSON.stringify(linked.cases.map((l) => l.testCaseId)));
+const completed = await ok(admin, 'GET', `${RUNS}/${run1.id}`);
+check('the run is completed and remembers the cases', completed.status === 'COMPLETED' && completed.result?.createdCaseIds?.join() === approved.json.createdCaseIds.join() && completed.result?.drafts?.length === 2, JSON.stringify(completed.result?.createdCaseIds));
+check('...and the approval is audited', Number(psql(`select count(*) from audit_log where action = 'ai.run.approved' and "projectId" = '${project.id}' and "entityId" = '${run1.id}'`)) === 1);
+await expectStatus('approving again is refused', 409, tester.token, 'POST', `${RUNS}/${run1.id}/approve`, { cases: edited });
+check('...and writes nothing', (await caseCount()) === before1 + 2);
+
+const run2 = await newRun();
+const before2 = await caseCount();
+const bothApprovals = await Promise.all([approve(tester.token, run2.id, { cases: run2.result.drafts }), approve(tester.token, run2.id, { cases: run2.result.drafts })]);
+check('two approvals at once: one wins, one is refused', bothApprovals.map((r) => r.status).sort().join() === '200,409', bothApprovals.map((r) => r.status).join());
+check('...and the drafts are written once', (await caseCount()) === before2 + 2);
+
+const run3 = await newRun();
+const before3 = await caseCount();
+const tooMany = Array.from({ length: 26 }, () => run3.result.drafts[0]);
+await expectStatus('more than 25 drafts are refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: tooMany });
+await expectStatus('no drafts are refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [] });
+await expectStatus('a draft without a title is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ ...run3.result.drafts[0], title: '' }] });
+await expectStatus('a draft with an unknown priority is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ ...run3.result.drafts[0], priority: 'URGENT' }] });
+await expectStatus('a draft without a kind is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ title: 'x' }] });
+await expectStatus('a suite of another project is not found', 404, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { suiteId: otherSuite.id, cases: run3.result.drafts });
+check('...nothing was written', (await caseCount()) === before3);
+check('...and the run still waits for approval', (await ok(admin, 'GET', `${RUNS}/${run3.id}`)).status === 'AWAITING_APPROVAL');
+
+const run4 = await newRun();
+await expectStatus('a Viewer cannot approve', 403, viewer.token, 'POST', `${RUNS}/${run4.id}/approve`, { cases: run4.result.drafts });
+await ok(admin, 'PUT', `/workspaces/${ws.id}/permissions/projects/${project.id}/users/${tester.id}`, { role: 'VIEWER' });
+await expectStatus('someone who was demoted to Viewer since cannot approve', 403, tester.token, 'POST', `${RUNS}/${run4.id}/approve`, { cases: run4.result.drafts });
+await ok(admin, 'PUT', `/workspaces/${ws.id}/permissions/projects/${project.id}/users/${tester.id}`, { role: 'TESTER' });
+await expectStatus('a run of another project is not found through that project', 404, admin, 'POST', `/projects/${otherProject.id}/ai/runs/${run4.id}/approve`, { cases: run4.result.drafts });
+await ok(admin, 'DELETE', `/projects/${project.id}`);
+await expectStatus('an archived project is read-only', 409, tester.token, 'POST', `${RUNS}/${run4.id}/approve`, { cases: run4.result.drafts });
+await ok(admin, 'POST', `/projects/${project.id}/restore`);
+check('...and the run still waits for approval', (await ok(admin, 'GET', `${RUNS}/${run4.id}`)).status === 'AWAITING_APPROVAL');
+await expectStatus('approving after all of that works', 200, tester.token, 'POST', `${RUNS}/${run4.id}/approve`, { cases: run4.result.drafts });
+
+const archivable = await ok(admin, 'POST', `${P}/requirements`, { title: 'Archived while waiting' });
+const run5 = await newRun({ requirementId: archivable.id });
+await ok(admin, 'DELETE', `${P}/requirements/${archivable.id}`);
+await expectStatus('drafts for a requirement archived meanwhile are refused', 409, tester.token, 'POST', `${RUNS}/${run5.id}/approve`, { cases: run5.result.drafts });
+await ok(admin, 'POST', `${P}/requirements/${archivable.id}/restore`);
+await expectStatus('...and can be approved once it is restored', 200, tester.token, 'POST', `${RUNS}/${run5.id}/approve`, { cases: run5.result.drafts });
+
+const vanishing = await ok(admin, 'POST', `${P}/requirements`, { title: 'Gone while waiting' });
+const run6 = await newRun({ requirementId: vanishing.id });
+psql(`delete from requirements where id = '${vanishing.id}'`);
+const before6 = await caseCount();
+await expectStatus('drafts for a requirement that is gone are not found', 404, tester.token, 'POST', `${RUNS}/${run6.id}/approve`, { cases: run6.result.drafts });
+check('...nothing was written and the run still waits', (await caseCount()) === before6 && (await ok(admin, 'GET', `${RUNS}/${run6.id}`)).status === 'AWAITING_APPROVAL');
 
 console.log('--- A run whose setting changes ---');
 const copied = psql(`insert into ai_workflow_runs (id, type, "projectId", "createdById", status, input, "providerSnapshot", "availableAt", "createdAt")

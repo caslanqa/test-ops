@@ -4,7 +4,9 @@ import { AuditService } from "../audit/audit.service";
 import { AccessControlService } from "../common/access-control.service";
 import { pageArgs } from "../common/pagination";
 import { PrismaService } from "../prisma/prisma.service";
+import { TestCasesService } from "../test-cases/test-cases.service";
 import { AiSettingsService } from "./ai-settings.service";
+import { ApproveRunDto } from "./dto/approve-run.dto";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
 import { StartRunDto } from "./dto/start-run.dto";
 
@@ -51,6 +53,7 @@ export class AiRunsService {
     private readonly accessControl: AccessControlService,
     private readonly settings: AiSettingsService,
     private readonly audit: AuditService,
+    private readonly testCases: TestCasesService,
   ) {}
 
   async start(userId: string, projectId: string, dto: StartRunDto) {
@@ -69,30 +72,35 @@ export class AiRunsService {
     if (!requirement || requirement.projectId !== projectId || requirement.archivedAt) {
       throw new NotFoundException("Requirement not found");
     }
-    // The limit is the person's, across projects: what they started in the last 24 hours.
-    const recent = await this.prisma.aiWorkflowRun.count({
-      where: { createdById: userId, createdAt: { gte: new Date(Date.now() - DAY_MS) } },
-    });
-    if (recent >= settings.maxRunsPerUserPerDay) {
-      throw new HttpException(
-        `You have started ${recent} AI runs in the last 24 hours, which is the most this setting allows`,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-    const run = await this.prisma.aiWorkflowRun.create({
-      data: {
-        type: dto.type,
-        projectId,
-        createdById: userId,
-        input: { requirementId: dto.requirementId, extraContext: dto.extraContext ?? null },
-        providerSnapshot: {
-          provider: settings.provider,
-          model: settings.model,
-          endpointHost: settings.endpoint ? new URL(settings.endpoint).hostname : "api.anthropic.com",
-          source,
-          settingsId: settings.id,
+    const run = await this.prisma.$transaction(async (tx) => {
+      // One start at a time per person: without this, starts that arrive together are all counted before any
+      // of them is saved, and the limit lets them all through.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ai-run-start:${userId}`}))`;
+      // The limit is the person's, across projects: what they started in the last 24 hours.
+      const recent = await tx.aiWorkflowRun.count({
+        where: { createdById: userId, createdAt: { gte: new Date(Date.now() - DAY_MS) } },
+      });
+      if (recent >= settings.maxRunsPerUserPerDay) {
+        throw new HttpException(
+          `You have started ${recent} AI runs in the last 24 hours, which is the most this setting allows`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      return tx.aiWorkflowRun.create({
+        data: {
+          type: dto.type,
+          projectId,
+          createdById: userId,
+          input: { requirementId: dto.requirementId, extraContext: dto.extraContext ?? null },
+          providerSnapshot: {
+            provider: settings.provider,
+            model: settings.model,
+            endpointHost: settings.endpoint ? new URL(settings.endpoint).hostname : "api.anthropic.com",
+            source,
+            settingsId: settings.id,
+          },
         },
-      },
+      });
     });
     await this.audit.record({
       userId,
@@ -145,5 +153,71 @@ export class AiRunsService {
     if (cancelled.count === 0) throw new ConflictException("This run has already finished");
     await this.audit.record({ userId, projectId, action: "ai.run.cancelled", entityType: ENTITY, entityId: runId });
     return { runId, status: "CANCELLED" as const };
+  }
+
+  /**
+   * Writes the drafts a person approved as test cases, linked to the requirement and tagged `ai-generated`
+   * and with their kind, through the same service and permission checks as any other new case. The run is
+   * claimed first with a compare-and-set, so two approvals at once write the drafts once; if writing fails the
+   * claim is given back and the run can be approved again.
+   */
+  async approve(userId: string, projectId: string, runId: string, dto: ApproveRunDto) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
+    const run = await this.prisma.aiWorkflowRun.findUnique({ where: { id: runId } });
+    if (!run || run.projectId !== projectId) throw new NotFoundException("Run not found");
+    if (run.status !== "AWAITING_APPROVAL") throw new ConflictException("This run isn't waiting for approval");
+    const requirementId = (run.input as { requirementId: string }).requirementId;
+    const requirement = await this.prisma.requirement.findUnique({
+      where: { id: requirementId },
+      select: { projectId: true, archivedAt: true },
+    });
+    if (!requirement || requirement.projectId !== projectId) throw new NotFoundException("Requirement not found");
+    if (requirement.archivedAt) {
+      throw new ConflictException("The requirement is archived; restore it to approve these drafts");
+    }
+    await this.accessControl.assertSuiteInProject(projectId, dto.suiteId);
+
+    const claimed = await this.prisma.aiWorkflowRun.updateMany({
+      where: { id: runId, status: "AWAITING_APPROVAL" },
+      data: { status: "COMPLETED", finishedAt: new Date() },
+    });
+    if (claimed.count === 0) throw new ConflictException("This run isn't waiting for approval");
+
+    let created: { id: string }[];
+    try {
+      ({ cases: created } = await this.testCases.createMany(userId, projectId, {
+        cases: dto.cases.map((draft) => ({
+          suiteId: dto.suiteId,
+          title: draft.title.trim(),
+          preconditions: draft.preconditions,
+          steps: draft.steps,
+          priority: draft.priority,
+          type: draft.type,
+          tags: ["ai-generated", draft.kind],
+          requirementIds: [requirementId],
+        })),
+      }));
+    } catch (error) {
+      await this.prisma.aiWorkflowRun.updateMany({
+        where: { id: runId, status: "COMPLETED" },
+        data: { status: "AWAITING_APPROVAL", finishedAt: null },
+      });
+      throw error;
+    }
+    // The cases exist now; from here on a failure must not give the run back, or they would be written twice.
+    const createdCaseIds = created.map((testCase) => testCase.id);
+    await this.prisma.aiWorkflowRun.update({
+      where: { id: runId },
+      data: { result: { ...(run.result as object), createdCaseIds } },
+    });
+    await this.audit.record({
+      userId,
+      projectId,
+      action: "ai.run.approved",
+      entityType: ENTITY,
+      entityId: runId,
+      metadata: { createdCaseIds },
+    });
+    return { runId, createdCaseIds };
   }
 }
