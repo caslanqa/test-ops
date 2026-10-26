@@ -61,6 +61,8 @@ export function MemberTable({
   members,
   roleOptions,
   canManage,
+  assignableRoles,
+  canManageMember,
   currentUserId,
   onRoleChange,
   onRemove,
@@ -69,6 +71,10 @@ export function MemberTable({
   members: MemberRow[];
   roleOptions: RoleOption[];
   canManage: boolean;
+  /** The role values a member's select offers; default: every role in `roleOptions`. */
+  assignableRoles?: string[];
+  /** Whether the user may change or remove this member; default: `canManage`. The others show their role as text. */
+  canManageMember?: (member: MemberRow) => boolean;
   currentUserId: string | undefined;
   onRoleChange: (member: MemberRow, role: string) => Promise<void>;
   onRemove: (member: MemberRow) => void;
@@ -108,6 +114,7 @@ export function MemberTable({
           <tbody>
             {members.map((member) => {
               const isSelf = member.user.id === currentUserId;
+              const manageable = canManage && (canManageMember?.(member) ?? true);
               return (
                 <tr key={member.id}>
                   <td>
@@ -125,7 +132,7 @@ export function MemberTable({
                     </span>
                   </td>
                   <td>
-                    {canManage ? (
+                    {manageable ? (
                       <Select
                         className="inline-select"
                         aria-label={`Role for ${member.user.displayName}`}
@@ -133,9 +140,11 @@ export function MemberTable({
                         disabled={pendingId === member.id}
                         onChange={(e) => changeRole(member, e.target.value)}
                       >
-                        {roleOptions.map((o) => (
-                          <option key={o.value} value={o.value}>{o.label}</option>
-                        ))}
+                        {roleOptions
+                          .filter((o) => !assignableRoles || assignableRoles.includes(o.value))
+                          .map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
                       </Select>
                     ) : (
                       labelOfRole(member.role)
@@ -143,15 +152,17 @@ export function MemberTable({
                   </td>
                   {canManage && (
                     <td className="cell-actions">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => onRemove(member)}
-                        aria-label={`Remove ${member.user.displayName}`}
-                      >
-                        <UserMinus size={14} aria-hidden="true" />
-                        Remove
-                      </button>
+                      {manageable && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => onRemove(member)}
+                          aria-label={`Remove ${member.user.displayName}`}
+                        >
+                          <UserMinus size={14} aria-hidden="true" />
+                          Remove
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>

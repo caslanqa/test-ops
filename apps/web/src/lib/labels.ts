@@ -75,7 +75,7 @@ export function labelOf<T extends Record<string, string>>(
 }
 
 export const PROJECT_ROLE_LABEL = {
-  ADMIN: 'Admin',
+  ADMIN: 'Project admin',
   TESTER: 'Tester',
   AUTOMATION: 'Automation',
   VIEWER: 'Viewer',
