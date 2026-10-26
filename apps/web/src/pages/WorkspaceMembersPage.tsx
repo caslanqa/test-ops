@@ -59,6 +59,7 @@ export function WorkspaceTabs({ workspaceId }: { workspaceId: string }) {
     <nav className="tabs" aria-label="Workspace sections">
       <NavLink to={`/workspaces/${workspaceId}`} end>Projects</NavLink>
       <NavLink to={`/workspaces/${workspaceId}/members`}>Members</NavLink>
+      {isAdmin && <NavLink to={`/workspaces/${workspaceId}/ai`}>AI</NavLink>}
       {isAdmin && <NavLink to={`/workspaces/${workspaceId}/settings`}>Settings</NavLink>}
     </nav>
   );

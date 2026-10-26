@@ -3,7 +3,7 @@ import { AuthProvider } from './auth/AuthContext';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import { ProjectRoleRoute } from './components/ProjectRoleRoute';
-import { INTEGRATIONS_ROLES, MEMBERS_ROLES } from './lib/sections';
+import { AI_ROLES, INTEGRATIONS_ROLES, MEMBERS_ROLES } from './lib/sections';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { InvitePage } from './pages/InvitePage';
@@ -11,6 +11,8 @@ import { AccountPage } from './pages/AccountPage';
 import { SupportPage } from './pages/SupportPage';
 import { WorkspaceMembersPage } from './pages/WorkspaceMembersPage';
 import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
+import { WorkspaceAiPage } from './pages/WorkspaceAiPage';
+import { AiSettingsPage } from './pages/project/AiSettingsPage';
 import { ProjectMembersPage } from './pages/project/ProjectMembersPage';
 import { IntegrationsPage } from './pages/project/IntegrationsPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
@@ -37,6 +39,7 @@ export default function App() {
             <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
             <Route path="/workspaces/:workspaceId/members" element={<WorkspaceMembersPage />} />
             <Route path="/workspaces/:workspaceId/settings" element={<WorkspaceSettingsPage />} />
+            <Route path="/workspaces/:workspaceId/ai" element={<WorkspaceAiPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/support" element={<SupportPage />} />
             <Route path="/projects/:projectId">
@@ -52,6 +55,9 @@ export default function App() {
               </Route>
               <Route element={<ProjectRoleRoute roles={INTEGRATIONS_ROLES} />}>
                 <Route path="integrations" element={<IntegrationsPage />} />
+              </Route>
+              <Route element={<ProjectRoleRoute roles={AI_ROLES} />}>
+                <Route path="ai" element={<AiSettingsPage />} />
               </Route>
             </Route>
           </Route>
