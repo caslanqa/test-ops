@@ -1,7 +1,68 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ALLOWED_EXTENSIONS, extensionOf } from './artifacts.js';
 import { createReporterClient } from './core.js';
 
 const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*m/g, '');
 const COMMENT_MAX = 10_000;
+
+// Extension for an in-memory attachment whose own name has none the server accepts.
+const EXTENSION_BY_CONTENT_TYPE = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'video/webm': 'webm',
+  'application/zip': 'zip',
+  'text/plain': 'txt',
+  'text/html': 'html',
+  'application/json': 'json',
+};
+
+/** Temp files for artifacts Playwright holds only in memory; created on first use, removed by remove(). */
+class ArtifactFiles {
+  root;
+  count = 0;
+
+  async write(fileName, content) {
+    this.root ??= await mkdtemp(join(tmpdir(), 'testops-artifacts-'));
+    // One directory per file keeps equal names from overwriting each other.
+    const dir = join(this.root, String(this.count++));
+    await mkdir(dir);
+    const path = join(dir, fileName);
+    await writeFile(path, content);
+    return path;
+  }
+
+  async remove() {
+    if (this.root) await rm(this.root, { recursive: true, force: true });
+  }
+}
+
+/** File name for an in-memory attachment: its own name when that has an allowed extension, else one from its content type. */
+function bodyFileName(attachment) {
+  const name = (attachment.name || 'attachment').replace(/[^\w.\- ]+/g, '_');
+  if (ALLOWED_EXTENSIONS.has(extensionOf(name))) return name;
+  const extension = EXTENSION_BY_CONTENT_TYPE[attachment.contentType?.split(';')[0].trim()];
+  return extension ? `${name}.${extension}` : name;
+}
+
+/** Everything worth uploading for one attempt: its attachments (video, trace and screenshots included), stdout and stderr. */
+async function collectArtifacts(result, files) {
+  const artifacts = [];
+  for (const attachment of result.attachments ?? []) {
+    if (attachment.path) {
+      artifacts.push({ path: attachment.path, contentType: attachment.contentType });
+    } else if (attachment.body) {
+      const name = bodyFileName(attachment);
+      artifacts.push({ path: await files.write(name, attachment.body), contentType: attachment.contentType, name });
+    }
+  }
+  for (const [name, chunks] of [['stdout.log', result.stdout], ['stderr.log', result.stderr]]) {
+    const text = (chunks ?? []).map((chunk) => (typeof chunk === 'string' ? chunk : chunk.toString('utf8'))).join('');
+    if (text) artifacts.push({ path: await files.write(name, text), contentType: 'text/plain', name });
+  }
+  return artifacts;
+}
 
 function annotation(test, result, type) {
   return [...(test.annotations ?? []), ...(result.annotations ?? [])]
@@ -100,6 +161,7 @@ export default class TestOpsReporter {
     }
     if (!this.client || !this.suite) return;
 
+    const files = new ArtifactFiles();
     try {
       const results = [];
       for (const test of this.suite.allTests()) {
@@ -121,9 +183,7 @@ export default class TestOpsReporter {
             ? new Date(result.startTime.getTime() + result.duration).toISOString()
             : undefined,
           durationMs: Math.round(result.duration),
-          attachments: result.attachments
-            .filter((attachment) => attachment.path && attachment.contentType?.startsWith('image/'))
-            .map((attachment) => ({ path: attachment.path, contentType: attachment.contentType })),
+          attachments: this.client.wantsAttachments(mapped.status) ? await collectArtifacts(result, files) : [],
           steps: collectSteps(result.steps ?? []),
           defectTitle: annotation(test, result, 'testops-defect'),
         });
@@ -132,6 +192,8 @@ export default class TestOpsReporter {
     } catch (error) {
       console.error(`TestOps: the results could not be sent. ${error instanceof Error ? error.message : error}`);
       return { status: 'failed' };
+    } finally {
+      await files.remove();
     }
   }
 }

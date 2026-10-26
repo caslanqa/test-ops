@@ -24,11 +24,16 @@ export function shouldAttach(policy, status) {
   return policy === 'all' || (policy === 'failed' && status === 'FAILED');
 }
 
+/** The lowercase extension the server sees ("trace.tar.gz" gives "gz", no extension gives ""). */
+export function extensionOf(name) {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
 /** Why the server would refuse this file, or null when it can be uploaded. */
 export function skipReason({ name, size }) {
   if (size > MAX_FILE_BYTES) return `larger than ${MAX_FILE_BYTES / 1024 / 1024} MB`;
-  const dot = name.lastIndexOf('.');
-  const extension = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  const extension = extensionOf(name);
   if (!extension) return 'no extension';
   if (!ALLOWED_EXTENSIONS.has(extension)) return `file type .${extension} is not allowed`;
   return null;
