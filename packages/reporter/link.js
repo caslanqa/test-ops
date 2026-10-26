@@ -17,6 +17,7 @@ const FIRST_IMPORT = /^[ \t]*import(?=[\s{*'"])/m;
 const IMPORT_STATEMENT = /\bimport\s+([^;'"]*?)\s*from\s*(['"])([^'"]+)\2/g;
 // Sticky patterns, matched at an exact offset.
 const MODIFIER_CALL = /(?:only|skip|fixme|fail)\s*\(/y;
+const NAMED_CALL = /[A-Za-z_$][\w$]*\s*\(/y;
 // The argument after the title must be the test function. A details object or a helper call such as
 // demoTestops(...) would make a second details argument, which Playwright does not accept.
 const INLINE_FUNCTION = /(?:async\b|function\b|\(|[A-Za-z_$][\w$]*\s*=>)/y;
@@ -141,10 +142,11 @@ function unquote(body) {
 
 /**
  * Where `, testops('<id>')` goes for the test at a Playwright location: right after the title. Playwright
- * reports the `(` of `test(...)`, or the start of the modifier name in `test.only(...)`, `test.skip(...)`,
- * `test.fixme(...)` and `test.fail(...)` (1-based line and column, measured on Playwright 1.64). When the
- * discovered `title` is given, the literal has to be that title: a file that changed since discovery, or a
- * location that is off, never puts an ID on another test.
+ * reports the start of the modifier name in `test.only(...)`, `test.skip(...)`, `test.fixme(...)` and
+ * `test.fail(...)`, and for a plain `test(...)` the `(` (measured on Playwright 1.64) or the start of the
+ * callee name (measured on 1.63); lines and columns are 1-based. When the discovered `title` is given, the
+ * literal has to be that title: a file that changed since discovery, or a location that is off, never puts
+ * an ID on another test.
  */
 function insertionPoint(source, lineStarts, { line, column, title }) {
   const lineStart = lineStarts[line - 1];
@@ -157,7 +159,13 @@ function insertionPoint(source, lineStarts, { line, column, title }) {
   } else {
     MODIFIER_CALL.lastIndex = offset;
     const modifier = MODIFIER_CALL.exec(source);
-    if (modifier) argumentsStart = offset + modifier[0].length;
+    if (modifier) {
+      argumentsStart = offset + modifier[0].length;
+    } else {
+      NAMED_CALL.lastIndex = offset;
+      const call = NAMED_CALL.exec(source);
+      if (call) argumentsStart = offset + call[0].length;
+    }
   }
   if (argumentsStart === -1) return { reason: 'the location is not a test call' };
 
