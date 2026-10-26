@@ -7,8 +7,19 @@ import { CopyButton } from '../components/CopyButton';
 import { Dialog } from '../components/Dialog';
 import { ConfirmDialog, MemberTable, RoleRadioGroup, type MemberRow } from '../components/Members';
 import { FormError, LoadError, Loading, PageHeader } from '../components/Page';
+import { Select } from '../components/Select';
 import { formatDate } from '../lib/format';
-import { WORKSPACE_ROLE_DESCRIPTION, WORKSPACE_ROLE_LABEL, labelOf, type WorkspaceRole } from '../lib/labels';
+import {
+  USER_TYPES,
+  USER_TYPE_DESCRIPTION,
+  USER_TYPE_LABEL,
+  WORKSPACE_ROLE_DESCRIPTION,
+  WORKSPACE_ROLE_LABEL,
+  invitationRoles,
+  invitationTypeLabel,
+  type UserType,
+  type WorkspaceRole,
+} from '../lib/labels';
 import { useWorkspace } from '../lib/projectInfo';
 import { usePageTitle, useResource } from '../lib/useResource';
 
@@ -16,6 +27,9 @@ interface Invitation {
   id: string;
   email: string;
   role: string;
+  /** Set with `project`: the role the person gets in that project when they join. */
+  projectRole?: string | null;
+  project?: { id: string; key: string; name: string } | null;
   expiresAt: string;
 }
 
@@ -28,6 +42,12 @@ const ROLE_OPTIONS = (Object.keys(WORKSPACE_ROLE_LABEL) as WorkspaceRole[]).map(
   value: role,
   label: WORKSPACE_ROLE_LABEL[role],
   description: WORKSPACE_ROLE_DESCRIPTION[role],
+}));
+
+const TYPE_OPTIONS = USER_TYPES.map((type) => ({
+  value: type,
+  label: USER_TYPE_LABEL[type],
+  description: USER_TYPE_DESCRIPTION[type],
 }));
 
 /** Sections of the workspace page: projects and members, and for admins permissions and settings. */
@@ -59,18 +79,35 @@ function InviteMemberForm({
   onCreated: () => void;
 }) {
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<string>('MEMBER');
+  const [type, setType] = useState<UserType>('VIEWER');
+  const [projectId, setProjectId] = useState('');
   const [created, setCreated] = useState<CreatedInvitation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const ids = { email: useId(), link: useId() };
+  const ids = { email: useId(), link: useId(), project: useId() };
+  // Every type but Workspace admin is given for a project; archived projects can't be picked.
+  const projects = useResource(
+    () => api.get<{ id: string; key: string; name: string }[]>(`/workspaces/${workspaceId}/projects`),
+    [workspaceId],
+  );
+  const needsProject = type !== 'WORKSPACE_ADMIN';
+  const noProject = needsProject && projects.data !== undefined && projects.data.length === 0;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (needsProject && !projectId) {
+      setError('Choose the project the person joins.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      setCreated(await api.post<CreatedInvitation>(`/workspaces/${workspaceId}/invitations`, { email, role }));
+      setCreated(
+        await api.post<CreatedInvitation>(`/workspaces/${workspaceId}/invitations`, {
+          email,
+          ...invitationRoles(type, projectId),
+        }),
+      );
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't create the invitation");
@@ -107,11 +144,28 @@ function InviteMemberForm({
         <label htmlFor={ids.email} className="field-label">Email</label>
         <input id={ids.email} type="email" value={email} required onChange={(e) => setEmail(e.target.value)} />
       </div>
-      <RoleRadioGroup legend="Role" name="workspace-role" value={role} options={ROLE_OPTIONS} onChange={setRole} />
+      <RoleRadioGroup legend="Type" name="user-type" value={type} options={TYPE_OPTIONS} onChange={(value) => setType(value as UserType)} />
+      {needsProject && (
+        <div className="field">
+          <label htmlFor={ids.project} className="field-label">Project</label>
+          {noProject ? (
+            <p className="muted">
+              This workspace has no active project yet. Create one first, or invite a workspace admin.
+            </p>
+          ) : (
+            <Select id={ids.project} value={projectId} required onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">Choose a project</option>
+              {(projects.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.key})</option>
+              ))}
+            </Select>
+          )}
+        </div>
+      )}
       <FormError message={error} />
       <div className="dialog-footer">
         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={saving}>Create invitation link</button>
+        <button type="submit" className="btn btn-primary" disabled={saving || noProject}>Create invitation link</button>
       </div>
     </form>
   );
@@ -134,7 +188,7 @@ function PendingInvitations({
           <thead>
             <tr>
               <th scope="col" className="col-main">Email</th>
-              <th scope="col">Role</th>
+              <th scope="col">Type</th>
               <th scope="col" className="hide-sm">Expires</th>
               <th scope="col"><span className="visually-hidden">Actions</span></th>
             </tr>
@@ -143,7 +197,7 @@ function PendingInvitations({
             {invitations.map((invitation) => (
               <tr key={invitation.id}>
                 <td><span className="cell-title">{invitation.email}</span></td>
-                <td>{labelOf(WORKSPACE_ROLE_LABEL, invitation.role)}</td>
+                <td>{invitationTypeLabel(invitation)}</td>
                 <td className="muted num hide-sm">{formatDate(invitation.expiresAt)}</td>
                 <td className="cell-actions">
                   <button
