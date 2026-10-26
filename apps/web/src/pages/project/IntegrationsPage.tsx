@@ -1,155 +1,35 @@
-import { useId, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Plus, Send, Trash2 } from 'lucide-react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client';
-import { CopyButton } from '../../components/CopyButton';
-import { ClickableRow } from '../../components/ClickableRow';
-import { ConfirmDialog } from '../../components/Members';
-import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
+import { LoadError, Loading, PageHeader } from '../../components/Page';
 import { Tag } from '../../components/StatusChip';
-import { formatDateTime } from '../../lib/format';
-import { useNotice } from '../../lib/notice';
-import { useProjectPermissions } from '../../lib/permissions';
+import { Tabs } from '../../components/Tabs';
 import { useProjectInfo } from '../../lib/projectInfo';
 import { usePageTitle, useResource } from '../../lib/useResource';
-import { describeDelivery, type WebhookDelivery } from '../../lib/webhooks';
+import { GithubActionsGuide } from './integrations/GithubActionsGuide';
+import { PlaywrightGuide } from './integrations/PlaywrightGuide';
+import { WebhookPanel, type WebhookSettings } from './integrations/WebhookPanel';
 
-interface WebhookSettings {
-  url: string;
-  headerNames: string[];
-  enabled: boolean;
-  deliveries: (WebhookDelivery & { run: { id: string; title: string } | null })[];
-}
-
-interface HeaderDraft {
-  key: number;
-  name: string;
-  value: string;
-}
-
-const DELIVERY_LABEL = { PENDING: 'Retrying', SUCCEEDED: 'Delivered', FAILED: 'Failed' } as const;
-
-/** The signing secret, shown once after it is made; it can't be read again later. */
-function SecretOnce({ secret }: { secret: string }) {
-  const id = useId();
-  return (
-    <div className="secret-once" role="status">
-      <p>
-        <strong>Signing secret.</strong> Copy it now; it isn't shown again. Your CI can use it to check
-        the <code>X-TestOps-Signature-256</code> header.
-      </p>
-      <code id={id} className="secret-value">{secret}</code>
-      <CopyButton text={secret} what="the signing secret" targetId={id} />
-    </div>
-  );
-}
+const TABS = ['reporter', 'webhook', 'github'] as const;
+type TabId = (typeof TABS)[number];
 
 /**
- * The project's CI webhook: when a run starts with cases set to run by automation, TestOps calls
- * this URL, so CI can run them. Project admins set it up here.
+ * How a project connects to CI, in two directions: the Playwright reporter sends results to TestOps, and the
+ * CI webhook lets TestOps start CI. Each has its own tab; the selected tab is `?tab=` in the address, so a
+ * link can point at one. Only project admins reach this page (see ProjectAdminOnly).
  */
 export function IntegrationsPage() {
   const { projectId = '' } = useParams();
   const { data: info } = useProjectInfo(projectId);
-  const { manageMembers: isAdmin } = useProjectPermissions(projectId);
   usePageTitle(info ? `Integrations (${info.project.name})` : 'Integrations');
-  const playwrightInstallId = useId();
-  const playwrightConfigId = useId();
-  const playwrightTestId = useId();
-  const playwrightEnvId = useId();
-  const apiUrl = `${window.location.origin}/api/v1`;
-  const installCommand = 'npm install --save-dev @testops/reporter';
-  const playwrightConfig = `import { defineConfig } from '@playwright/test';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-
-export default defineConfig({
-  reporter: [['list'], ['html', { open: 'never' }], [require.resolve('@testops/reporter')]],
-});`;
-  const playwrightTest = `import { test } from '@playwright/test';
-import { testops } from '@testops/reporter';
-
-test('checkout works', testops('550e8400-e29b-41d4-a716-446655440000'), async ({ page }) => {
-  // ...
-});`;
-  const playwrightEnv = `TESTOPS_URL=${apiUrl}
-TESTOPS_TOKEN=<CI secret>
-TESTOPS_PROJECT_ID=${projectId}
-# Optional: use a Tester/Admin token to apply title and automation status syncs
-# TESTOPS_SYNC_TOKEN=<CI secret>
-# Optional: report into a run started in TestOps
-# TESTOPS_RUN_ID=<run-id>`;
-  const playwrightSync = 'npx testops-sync --apply';
+  const [params, setParams] = useSearchParams();
   const settings = useResource(
     () => api.get<{ webhook: WebhookSettings | null }>(`/projects/${projectId}/webhook`),
     [projectId],
   );
-  const { notify } = useNotice();
   const webhook = settings.data?.webhook ?? null;
+  // An unknown value in the address falls back to the first tab.
+  const active: TabId = TABS.find((id) => id === params.get('tab')) ?? 'reporter';
 
-  const [url, setUrl] = useState<string | null>(null);
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  // Null keeps the saved headers; a list replaces them all.
-  const [headers, setHeaders] = useState<HeaderDraft[] | null>(null);
-  const [nextKey, setNextKey] = useState(1);
-  const [secret, setSecret] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [pingResult, setPingResult] = useState<WebhookDelivery | null>(null);
-  const [confirming, setConfirming] = useState<'remove' | 'secret' | null>(null);
-  const ids = { url: useId(), urlHint: useId(), enabled: useId() };
-
-  const shownUrl = url ?? webhook?.url ?? '';
-  const shownEnabled = enabled ?? webhook?.enabled ?? true;
-
-  function addHeader(name = '', value = '') {
-    setHeaders((current) => [...(current ?? []), { key: nextKey, name, value }]);
-    setNextKey((k) => k + 1);
-  }
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      const saved = await api.put<{ webhook: WebhookSettings; secret: string | null }>(`/projects/${projectId}/webhook`, {
-        url: shownUrl.trim(),
-        enabled: shownEnabled,
-        headers: headers?.filter((h) => h.name.trim()).map((h) => ({ name: h.name.trim(), value: h.value })),
-      });
-      if (saved.secret) setSecret(saved.secret);
-      setUrl(null);
-      setEnabled(null);
-      setHeaders(null);
-      notify(webhook ? 'Webhook saved.' : 'Webhook created.');
-      settings.reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save the webhook");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function ping() {
-    setError(null);
-    setPingResult(null);
-    try {
-      setPingResult(await api.post<WebhookDelivery>(`/projects/${projectId}/webhook/ping`));
-      settings.reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send the test");
-    }
-  }
-
-  if (!isAdmin) {
-    return (
-      <>
-        <PageHeader title="Integrations" />
-        <p className="muted">Only project admins can set up integrations.</p>
-      </>
-    );
-  }
   if (settings.error) return <LoadError message={settings.error} onRetry={settings.reload} />;
   if (!settings.data) return <Loading />;
 
@@ -159,312 +39,25 @@ TESTOPS_PROJECT_ID=${projectId}
         title="Integrations"
         description="Connect CI to TestOps and report automated test results."
       />
-      <section className="surface integrations-section" aria-labelledby="playwright-heading">
-        <h2 id="playwright-heading" className="section-title">Playwright test reporter</h2>
-        <p className="muted">
-          Install the reporter in your Playwright project to send test results, failure details and screenshots to this project.
-          Create an API token on the <Link to="/account">Account → API tokens</Link> page and store it as a CI secret
-          with the <strong>Automation</strong> role. Do not commit the token to your repository.
-        </p>
-        <ol className="prose-list">
-          <li>
-            Install the package. <span className="muted">Playwright must already be installed in your project.</span>
-            <div className="code-header">
-              <span id={`${playwrightInstallId}-label`} className="field-label">Install command</span>
-              <CopyButton text={installCommand} what="install command" targetId={playwrightInstallId} />
-            </div>
-            <pre
-              id={playwrightInstallId}
-              className="code-block"
-              tabIndex={0}
-              role="region"
-              aria-labelledby={`${playwrightInstallId}-label`}
-            >
-              {installCommand}
-            </pre>
-          </li>
-          <li>
-            Add the reporter to <code>playwright.config.ts</code>:
-            <div className="code-header">
-              <span id={`${playwrightConfigId}-label`} className="field-label">playwright.config.ts</span>
-              <CopyButton text={playwrightConfig} what="Playwright reporter configuration" targetId={playwrightConfigId} />
-            </div>
-            <pre
-              id={playwrightConfigId}
-              className="code-block"
-              tabIndex={0}
-              role="region"
-              aria-labelledby={`${playwrightConfigId}-label`}
-            >
-              {playwrightConfig}
-            </pre>
-          </li>
-          <li>
-            Open the TestOps case, copy its Test ID from the details panel, and pass that ID to <code>testops()</code>:
-            <div className="code-header">
-              <span id={`${playwrightTestId}-label`} className="field-label">Linked Playwright test</span>
-              <CopyButton text={playwrightTest} what="linked Playwright test example" targetId={playwrightTestId} />
-            </div>
-            <pre
-              id={playwrightTestId}
-              className="code-block"
-              tabIndex={0}
-              role="region"
-              aria-labelledby={`${playwrightTestId}-label`}
-            >
-              {playwrightTest}
-            </pre>
-          </li>
-          <li>
-            Set these environment variables in your CI job. The URL and project ID are prefilled for this TestOps project;
-            keep the result token in your CI secret store. The optional sync token needs a Tester or Admin role:
-            <div className="code-header">
-              <span id={`${playwrightEnvId}-label`} className="field-label">CI environment</span>
-              <CopyButton text={playwrightEnv} what="CI environment variables" targetId={playwrightEnvId} />
-            </div>
-            <pre
-              id={playwrightEnvId}
-              className="code-block"
-              tabIndex={0}
-              role="region"
-              aria-labelledby={`${playwrightEnvId}-label`}
-            >
-              {playwrightEnv}
-            </pre>
-          </li>
-          <li>
-            Run this before Playwright in CI to update linked case titles and mark them as automated when the tests change:
-            <div className="code-header">
-              <span id={`${playwrightEnvId}-sync-label`} className="field-label">Sync command</span>
-              <CopyButton text={playwrightSync} what="TestOps sync command" targetId={`${playwrightEnvId}-sync`} />
-            </div>
-            <pre
-              id={`${playwrightEnvId}-sync`}
-              className="code-block"
-              tabIndex={0}
-              role="region"
-              aria-labelledby={`${playwrightEnvId}-sync-label`}
-            >
-              {playwrightSync}
-            </pre>
-          </li>
-        </ol>
-        <p className="field-hint">
-          The sync command defaults to a dry run; add <code>--apply</code> to update TestOps. It changes only case
-          titles and automation status by Test ID. Without <code>TESTOPS_RUN_ID</code>, each CI execution creates and
-          completes a run. Set it when a job is triggered by the webhook below to report into that existing run; the
-          reporter leaves it open for manual cases.
-        </p>
-      </section>
-      {secret && <SecretOnce secret={secret} />}
-
-      <section className="surface integrations-section" aria-labelledby="webhook-heading">
-        <h2 id="webhook-heading" className="section-title">
-          CI webhook {webhook && <Tag tone={webhook.enabled ? 'strong' : 'outline'}>{webhook.enabled ? 'On' : 'Off'}</Tag>}
-        </h2>
-        <p className="muted">
-          When a run starts with cases set to <strong>Automation</strong>, TestOps POSTs it here as JSON
-          ({'{'} event_type, client_payload {'}'}, the shape of a GitHub <code>repository_dispatch</code>), signed
-          with HMAC-SHA256 in <code>X-TestOps-Signature-256</code>. Runs that CI starts itself never call it.
-        </p>
-        <form className="integrations-form" onSubmit={onSubmit}>
-          <div className="field">
-            <label htmlFor={ids.url} className="field-label">Webhook URL</label>
-            <input
-              id={ids.url}
-              type="url"
-              required
-              value={shownUrl}
-              aria-describedby={ids.urlHint}
-              placeholder="https://api.github.com/repos/OWNER/REPO/dispatches"
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            <p id={ids.urlHint} className="field-hint">
-              Addresses on private or local networks are refused, unless the server allows them.
-            </p>
-          </div>
-          <fieldset className="header-editor">
-            <legend className="field-label">Request headers</legend>
-            {headers === null ? (
+      <Tabs
+        label="Integrations"
+        active={active}
+        // Replacing the entry keeps the back button for leaving the page, not for stepping through tabs.
+        onChange={(id) => setParams({ tab: id }, { replace: true })}
+        tabs={[
+          { id: 'reporter', label: 'Playwright reporter', panel: <PlaywrightGuide projectId={projectId} /> },
+          {
+            id: 'webhook',
+            label: (
               <>
-                {webhook && webhook.headerNames.length > 0 ? (
-                  <ul className="header-names">
-                    {webhook.headerNames.map((name) => (
-                      <li key={name}><code>{name}</code> <span className="muted">value hidden</span></li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="muted">No extra headers.</p>
-                )}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => addHeader()}>
-                  <Plus size={14} aria-hidden="true" />
-                  {webhook?.headerNames.length ? 'Replace the headers' : 'Add a header'}
-                </button>
+                CI webhook{' '}
+                {webhook && <Tag tone={webhook.enabled ? 'strong' : 'outline'}>{webhook.enabled ? 'On' : 'Off'}</Tag>}
               </>
-            ) : (
-              <>
-                <p className="field-hint">Values are stored encrypted and never shown again. Saving replaces all headers.</p>
-                <ul className="header-rows">
-                  {headers.map((h, index) => (
-                    <li key={h.key}>
-                      <input
-                        aria-label={`Header ${index + 1} name`}
-                        placeholder="Authorization"
-                        value={h.name}
-                        onChange={(e) => setHeaders((all) => all!.map((x) => (x.key === h.key ? { ...x, name: e.target.value } : x)))}
-                      />
-                      <input
-                        aria-label={`Header ${index + 1} value`}
-                        placeholder="Bearer …"
-                        type="password"
-                        autoComplete="off"
-                        value={h.value}
-                        onChange={(e) => setHeaders((all) => all!.map((x) => (x.key === h.key ? { ...x, value: e.target.value } : x)))}
-                      />
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label={`Remove header ${index + 1}`}
-                        onClick={() => setHeaders((all) => all!.filter((x) => x.key !== h.key))}
-                      >
-                        <Trash2 size={16} aria-hidden="true" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <div className="header-actions">
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => addHeader()}>
-                    <Plus size={14} aria-hidden="true" />
-                    Add a header
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      addHeader('Authorization', 'Bearer ');
-                      addHeader('Accept', 'application/vnd.github+json');
-                    }}
-                  >
-                    Headers for GitHub
-                  </button>
-                  {webhook && (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHeaders(null)}>
-                      Keep the saved headers
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </fieldset>
-          <div className="checkbox-field">
-            <input id={ids.enabled} type="checkbox" checked={shownEnabled} onChange={(e) => setEnabled(e.target.checked)} />
-            <label htmlFor={ids.enabled}>Call it when a run starts</label>
-          </div>
-          <FormError message={error} />
-          <div className="form-buttons">
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {webhook ? 'Save changes' : 'Create webhook'}
-            </button>
-            {webhook && (
-              <>
-                <button type="button" className="btn btn-secondary" onClick={ping}>
-                  <Send size={16} aria-hidden="true" />
-                  Send a test
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => setConfirming('secret')}>
-                  New signing secret
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => setConfirming('remove')}>
-                  Remove webhook
-                </button>
-              </>
-            )}
-          </div>
-          {pingResult && (
-            <p className={pingResult.status === 'SUCCEEDED' ? 'note' : 'form-error'} role="status">
-              Test {pingResult.status === 'SUCCEEDED' ? 'delivered' : 'not delivered'}: {describeDelivery(pingResult)}
-            </p>
-          )}
-        </form>
-      </section>
-
-      {webhook && webhook.deliveries.length > 0 && (
-        <section className="surface table-wrap integrations-section" aria-labelledby="deliveries-heading">
-          <h2 id="deliveries-heading" className="section-title">Recent calls</h2>
-          <table className="data-table">
-            <caption className="visually-hidden">The latest calls of the webhook</caption>
-            <thead>
-              <tr>
-                <th scope="col">When</th>
-                <th scope="col">Event</th>
-                <th scope="col">Run</th>
-                <th scope="col" className="col-main">Outcome</th>
-              </tr>
-            </thead>
-            <tbody>
-              {webhook.deliveries.map((d) => (
-                <ClickableRow key={d.id} enabled={Boolean(d.run)}>
-                  <td className="num muted">{formatDateTime(d.createdAt)}</td>
-                  <td><code>{d.event}</code></td>
-                  <td>{d.run ? <Link to={`/projects/${projectId}/runs/${d.run.id}`} className="row-link">{d.run.title}</Link> : <span className="muted">—</span>}</td>
-                  <td>
-                    <Tag tone={d.status === 'SUCCEEDED' ? 'strong' : 'outline'}>{DELIVERY_LABEL[d.status]}</Tag>{' '}
-                    <span className="muted">{describeDelivery(d)}{d.attempts > 1 ? ` · ${d.attempts} tries` : ''}</span>
-                  </td>
-                </ClickableRow>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-
-      <section className="surface integrations-section" aria-labelledby="github-heading">
-        <h2 id="github-heading" className="section-title">GitHub Actions</h2>
-        <ol className="prose-list">
-          <li>
-            URL: <code>https://api.github.com/repos/OWNER/REPO/dispatches</code>
-          </li>
-          <li>
-            Headers: <code>Authorization: Bearer &lt;token&gt;</code> (a fine-grained token for that repository with
-            Contents: read and write) and <code>Accept: application/vnd.github+json</code>.
-          </li>
-          <li>
-            In the workflow, start on the event; the payload carries the run and the cases to run:
-            <pre className="code-block">{`on:
-  repository_dispatch:
-    types: [testops.run.started]
-# github.event.client_payload.run.id        the run to report to
-# github.event.client_payload.api_url       the TestOps API
-# github.event.client_payload.automation_case_ids  TestOps IDs of its automated cases`}</pre>
-          </li>
-        </ol>
-      </section>
-
-      <ConfirmDialog
-        open={confirming === 'remove'}
-        title="Remove the webhook?"
-        message="Runs no longer start CI. Its recent calls are deleted too."
-        confirmLabel="Remove webhook"
-        onConfirm={async () => {
-          await api.delete(`/projects/${projectId}/webhook`);
-          setConfirming(null);
-          setSecret(null);
-          notify('Webhook removed.');
-          settings.reload();
-        }}
-        onClose={() => setConfirming(null)}
-      />
-      <ConfirmDialog
-        open={confirming === 'secret'}
-        title="Make a new signing secret?"
-        message="The current secret stops working at once; update your CI with the new one."
-        confirmLabel="Make a new secret"
-        onConfirm={async () => {
-          const made = await api.post<{ secret: string }>(`/projects/${projectId}/webhook/secret`);
-          setConfirming(null);
-          setSecret(made.secret);
-        }}
-        onClose={() => setConfirming(null)}
+            ),
+            panel: <WebhookPanel projectId={projectId} webhook={webhook} reload={settings.reload} />,
+          },
+          { id: 'github', label: 'GitHub Actions', panel: <GithubActionsGuide /> },
+        ]}
       />
     </>
   );
