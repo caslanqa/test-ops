@@ -34,6 +34,8 @@ permissions:
 jobs:
   playwright:
     name: Playwright
+    # shop-e2e.yml serves the project named by SHOP_E2E_PROJECT_ID; the server sends the same event for every project.
+    if: github.event_name != 'repository_dispatch' || github.event.client_payload.project.id != vars.SHOP_E2E_PROJECT_ID
     runs-on: ubuntu-latest
     defaults:
       run:

@@ -1,0 +1,119 @@
+name: Shop E2E
+
+# Runs the Playwright framework in examples/shop-e2e against the example shop: typechecks it, tests
+# its dispatch script and runs its tests. On pushes and pull requests the reporter has no settings, so
+# the results stay in the job.
+#
+# It is also a CI that TestOps can start. A project's CI webhook (Integrations) pointed at this
+# repository's dispatches endpoint sends "testops.run.started"; the job then links the tests to the
+# project's cases by title, runs only the run's cases and reports into that run. Result reporting uses
+# an Automation token (TESTOPS_TOKEN); linking and metadata sync use a Tester or Admin token
+# (TESTOPS_SYNC_TOKEN).
+#
+# The server sends the same event type for every project, so the repository variable
+# SHOP_E2E_PROJECT_ID names the one project this workflow serves; demo-shop.yml ignores that project.
+on:
+  repository_dispatch:
+    types: [testops.run.started]
+  push:
+    branches: [master]
+    paths:
+      - "examples/shop-e2e/**"
+      - "examples/demo-shop/app/**"
+      - "examples/demo-shop/server.mjs"
+      - "packages/reporter/**"
+      - ".github/workflows/shop-e2e.yml"
+  pull_request:
+    paths:
+      - "examples/shop-e2e/**"
+      - "examples/demo-shop/app/**"
+      - "examples/demo-shop/server.mjs"
+      - "packages/reporter/**"
+      - ".github/workflows/shop-e2e.yml"
+  workflow_dispatch: {}
+
+# Every dispatch is its own TestOps run, so a newer one must not cancel an older one.
+concurrency:
+  group: shop-e2e-${{ github.event_name == 'repository_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Playwright
+    if: github.event_name != 'repository_dispatch' || github.event.client_payload.project.id == vars.SHOP_E2E_PROJECT_ID
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/shop-e2e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/shop-e2e/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test the dispatch script
+        run: npm run test:scripts
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The tests carry no case IDs in git. This writes the IDs of this TestOps project into the
+      # checkout, for the tests whose title is exactly one case's title.
+      - name: Link the tests to the project's cases
+        if: github.event_name == 'repository_dispatch'
+        env:
+          TESTOPS_URL: ${{ github.event.client_payload.api_url }}
+          TESTOPS_PROJECT_ID: ${{ github.event.client_payload.project.id }}
+          TESTOPS_SYNC_TOKEN: ${{ secrets.TESTOPS_SYNC_TOKEN }}
+        run: npx testops-sync --link --apply
+
+      - name: Sync Playwright test metadata to TestOps
+        if: github.event_name == 'repository_dispatch'
+        env:
+          TESTOPS_URL: ${{ github.event.client_payload.api_url }}
+          TESTOPS_PROJECT_ID: ${{ github.event.client_payload.project.id }}
+          TESTOPS_SYNC_TOKEN: ${{ secrets.TESTOPS_SYNC_TOKEN }}
+        run: npx testops-sync --apply
+
+      # Only the cases the run wants: the reporter tags each linked test with its TestOps case ID.
+      - name: Choose the tests TestOps asked for
+        id: pick
+        if: github.event_name == 'repository_dispatch'
+        run: node scripts/pick-from-dispatch.mjs "$GITHUB_EVENT_PATH"
+
+      - name: Run the tests
+        env:
+          GREP: ${{ steps.pick.outputs.grep }}
+          # Set only when TestOps started the job; the reporter then writes into that run.
+          TESTOPS_URL: ${{ github.event.client_payload.api_url }}
+          TESTOPS_PROJECT_ID: ${{ github.event.client_payload.project.id }}
+          TESTOPS_RUN_ID: ${{ github.event.client_payload.run.id }}
+          TESTOPS_TOKEN: ${{ github.event_name == 'repository_dispatch' && secrets.TESTOPS_TOKEN || '' }}
+        run: |
+          if [ -n "$GREP" ]; then
+            npx playwright test --grep "$GREP"
+          else
+            npx playwright test
+          fi
+
+      - name: Keep the Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: examples/shop-e2e/playwright-report
+          retention-days: 14
