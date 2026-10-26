@@ -16,6 +16,7 @@ export default class TestOpsSyncReporter {
     const tests = suite.allTests().map((test) => ({
       testCaseId: testCaseId(test),
       title: test.title,
+      location: test.location,
     }));
     writeFileSync(output, JSON.stringify(tests), 'utf8');
   }

@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { createReporterClient } from '../core.js';
 
 export const API_BASE = 'https://t.example/api/v1';
@@ -82,4 +83,15 @@ export function fakeTest({ id, title = id, testCaseId, expectedStatus = 'passed'
 /** A Playwright Suite stand-in. */
 export function fakeSuite(tests) {
   return { allTests: () => tests };
+}
+
+/**
+ * Playwright's 1-based line and column for a test, as reported in test.location: the `(` of
+ * `test(...)`, or the start of the modifier name in `test.only(...)`. `text` starts at that point.
+ */
+export function locationOf(source, text) {
+  const index = source.indexOf(text);
+  assert.notEqual(index, -1, `${text} is not in the source`);
+  const before = source.slice(0, index);
+  return { line: before.split('\n').length, column: index - (before.lastIndexOf('\n') + 1) + 1 };
 }

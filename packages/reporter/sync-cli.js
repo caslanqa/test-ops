@@ -10,7 +10,8 @@ import { syncTestCases } from './core.js';
 
 const args = process.argv.slice(2);
 const apply = args.includes('--apply');
-const playwrightArgs = args.filter((arg) => arg !== '--apply');
+const link = args.includes('--link');
+const playwrightArgs = args.filter((arg) => arg !== '--apply' && arg !== '--link');
 const require = createRequire(resolve(process.cwd(), 'package.json'));
 
 let playwrightCli;
@@ -40,7 +41,7 @@ try {
   if (result.status !== 0) process.exitCode = result.status ?? 1;
   else {
     const tests = JSON.parse(readFileSync(output, 'utf8'));
-    await syncTestCases(tests, { apply });
+    await syncTestCases(tests, { apply, link });
   }
 } catch (error) {
   console.error(`TestOps sync: ${error instanceof Error ? error.message : error}`);

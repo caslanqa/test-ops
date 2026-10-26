@@ -1,23 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { IMPORT_LINE, linkTestsInSource } from '../link.js';
+import { locationOf } from './helpers.js';
 
 const ID1 = '550e8400-e29b-41d4-a716-446655440000';
 const ID2 = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
 const ID3 = '9b2f4c1e-3d5a-4f7b-8c6d-1a2b3c4d5e6f';
 const PLAYWRIGHT_IMPORT = "import { test } from '@playwright/test';";
 
-/**
- * Playwright's 1-based line and column for a test, as reported in test.location: the `(` of
- * `test(...)`, or the start of the modifier name in `test.only(...)`. `text` starts at that point.
- */
-function at(source, text) {
-  const index = source.indexOf(text);
-  assert.notEqual(index, -1, `${text} is not in the source`);
-  const before = source.slice(0, index);
-  return { line: before.split('\n').length, column: index - (before.lastIndexOf('\n') + 1) + 1 };
-}
-const link = (source, text, testCaseId = ID1) => ({ ...at(source, text), testCaseId });
+const link = (source, text, testCaseId = ID1) => ({ ...locationOf(source, text), testCaseId });
 const linked = (id) => `, testops('${id}')`;
 
 test('inserts testops after a plain string title and adds the import before the first import', () => {
@@ -137,7 +128,7 @@ test('a location that does not point at a test call is skipped', () => {
 
 test('an ID that is not a UUID is never written into the source', () => {
   const source = [PLAYWRIGHT_IMPORT, "test('plain', async () => {});"].join('\n');
-  const result = linkTestsInSource(source, [{ ...at(source, "('plain'"), testCaseId: "x'); process.exit(1); //" }]);
+  const result = linkTestsInSource(source, [{ ...locationOf(source, "('plain'"), testCaseId: "x'); process.exit(1); //" }]);
   assert.equal(result.source, source);
   assert.equal(result.linked, 0);
   assert.match(result.skipped[0].reason, /UUID/);

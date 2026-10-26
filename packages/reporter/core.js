@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { basename, relative } from 'node:path';
 import { groupFiles, parseAttachmentPolicy, shouldAttach, skipReason } from './artifacts.js';
-import { matchSteps } from './match.js';
+import { linkTestsInSource } from './link.js';
+import { dedupeByLocation, matchSteps, matchTestsToCases } from './match.js';
 
 const COMMENT_MAX = 10_000;
 const BULK_MAX = 500;
@@ -204,7 +205,7 @@ class TestOpsClient {
     this.logUnlinked(unlinked, outsideRun);
   }
 
-  async syncTests(inputTests, { apply = false } = {}) {
+  async syncTests(inputTests, { apply = false, link = false } = {}) {
     const cases = await this.request('GET', `${this.projectPath}/cases`);
     const casesById = new Map(cases.map((testCase) => [testCase.id, testCase]));
     const testsById = new Map();
@@ -249,21 +250,74 @@ class TestOpsClient {
 
     if (changes.length === 0) {
       console.log(`TestOps sync: ${testsById.size} linked ${testsById.size === 1 ? 'test is' : 'tests are'} already in sync.`);
-      return;
+    } else {
+      for (const change of changes) {
+        const summary = [
+          change.update.title ? `title: "${change.currentTitle}" → "${change.update.title}"` : undefined,
+          change.update.automationStatus ? 'automation status: AUTOMATED' : undefined,
+        ].filter(Boolean).join(', ');
+        console.log(`TestOps sync: ${apply ? 'updating' : 'would update'} ${change.testCaseId} (${summary}).`);
+        if (apply) {
+          await this.request('PATCH', `${this.projectPath}/cases/${encodeURIComponent(change.testCaseId)}`, change.update, { retryable: true });
+        }
+      }
+      if (!apply) console.log('TestOps sync: dry run only. Pass --apply to update case titles and automation status.');
+      else console.log(`TestOps sync: ${changes.length} ${changes.length === 1 ? 'case' : 'cases'} updated.`);
     }
 
-    for (const change of changes) {
-      const summary = [
-        change.update.title ? `title: "${change.currentTitle}" → "${change.update.title}"` : undefined,
-        change.update.automationStatus ? 'automation status: AUTOMATED' : undefined,
-      ].filter(Boolean).join(', ');
-      console.log(`TestOps sync: ${apply ? 'updating' : 'would update'} ${change.testCaseId} (${summary}).`);
-      if (apply) {
-        await this.request('PATCH', `${this.projectPath}/cases/${encodeURIComponent(change.testCaseId)}`, change.update, { retryable: true });
+    if (link) await this.linkTests(inputTests, cases, new Set(testsById.keys()), { apply });
+  }
+
+  /**
+   * Pairs tests that have no case ID with cases by title and, with `apply`, writes the ID of each exact
+   * match into the test source. Cases that a test already links to are not offered again.
+   */
+  async linkTests(inputTests, cases, linkedCaseIds, { apply }) {
+    const unlinkedTests = dedupeByLocation(inputTests.filter((test) => !clean(test.testCaseId) && clean(test.title)));
+    const candidates = cases.filter((testCase) => !linkedCaseIds.has(testCase.id));
+    const { exact, suggestions, ambiguous, unmatched } = matchTestsToCases(unlinkedTests, candidates);
+    const where = (test) => (test.location ? `${relative(process.cwd(), test.location.file)}:${test.location.line}` : 'an unknown location');
+
+    console.log(`TestOps link: ${unlinkedTests.length} ${unlinkedTests.length === 1 ? 'test has' : 'tests have'} no TestOps ID: ${exact.length} match a case by title, ${suggestions.length} ${suggestions.length === 1 ? 'is a suggestion' : 'are suggestions'}, ${ambiguous.length} ${ambiguous.length === 1 ? 'is ambiguous' : 'are ambiguous'}, ${unmatched.length} ${unmatched.length === 1 ? 'has' : 'have'} no match.`);
+    if (!apply) {
+      for (const item of exact) console.log(`TestOps link: would link ${where(item.test)} "${item.test.title}" to case ${item.caseId}.`);
+    }
+    for (const item of suggestions) {
+      console.log(`TestOps link: suggestion for ${where(item.test)} "${item.test.title}": case ${item.caseId} "${item.caseTitle}" (similarity ${item.score.toFixed(2)}). Add testops('${item.caseId}') by hand if it is the right case.`);
+    }
+    for (const item of ambiguous) console.log(`TestOps link: skipped ${where(item.test)} "${item.test.title}": ${item.reason}.`);
+    if (unmatched.length) console.log(`TestOps link: no case matches ${shortList(unmatched.map((test) => `${where(test)} "${test.title}"`))}.`);
+
+    if (exact.length === 0) return;
+    if (!apply) {
+      console.log('TestOps link: dry run only. Pass --link --apply to write the IDs into the test files.');
+      return;
+    }
+    await this.writeLinks(exact);
+  }
+
+  /** Writes the matched case IDs into each test file, one write per file; refused tests are listed, never edited. */
+  async writeLinks(exact) {
+    const byFile = new Map();
+    for (const item of exact) {
+      if (!item.test.location) {
+        console.warn(`TestOps link: could not link "${item.test.title}": Playwright reported no source location.`);
+        continue;
+      }
+      byFile.set(item.test.location.file, [...(byFile.get(item.test.location.file) ?? []), item]);
+    }
+    for (const [file, items] of byFile) {
+      const shown = relative(process.cwd(), file);
+      const { source, linked, skipped } = linkTestsInSource(
+        await readFile(file, 'utf8'),
+        items.map(({ test, caseId }) => ({ line: test.location.line, column: test.location.column, testCaseId: caseId })),
+      );
+      for (const item of skipped) console.warn(`TestOps link: could not link ${shown}:${item.line}: ${item.reason}.`);
+      if (linked > 0) {
+        await writeFile(file, source, 'utf8');
+        console.log(`TestOps link: linked ${linked} ${linked === 1 ? 'test' : 'tests'} in ${shown}.`);
       }
     }
-    if (!apply) console.log('TestOps sync: dry run only. Pass --apply to update case titles and automation status.');
-    else console.log(`TestOps sync: ${changes.length} ${changes.length === 1 ? 'case' : 'cases'} updated.`);
   }
 
   /**
@@ -378,11 +432,11 @@ export async function reportResults(results, options = {}, env = process.env) {
 
 /** Syncs Playwright case titles and automation status to TestOps using explicit TestOps IDs. */
 export async function syncTestCases(tests, options = {}, env = process.env) {
-  const { apply = false, ...reporterOptions } = options;
+  const { apply = false, link = false, ...reporterOptions } = options;
   const client = createReporterClient({
     ...reporterOptions,
     token: reporterOptions.token ?? env.TESTOPS_SYNC_TOKEN ?? env.TESTOPS_TOKEN,
   }, env);
   if (!client) throw new Error('Configure TESTOPS_URL, TESTOPS_PROJECT_ID and TESTOPS_SYNC_TOKEN (or TESTOPS_TOKEN).');
-  await client.syncTests(tests, { apply });
+  await client.syncTests(tests, { apply, link });
 }

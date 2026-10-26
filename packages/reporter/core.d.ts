@@ -38,6 +38,8 @@ export interface TestOpsResult {
 export interface TestOpsSyncTest {
   testCaseId?: string;
   title: string;
+  /** Where the test is declared; needed to write a case ID into the source with `link`. */
+  location?: { file: string; line: number; column: number };
 }
 
 export interface ReporterOptions {
@@ -60,6 +62,11 @@ export interface ReporterOptions {
 export interface TestOpsSyncOptions extends ReporterOptions {
   /** Apply title and automation status changes. Defaults to false (dry run). */
   apply?: boolean;
+  /**
+   * Pair tests that have no case ID with cases by title. With `apply`, the ID of each exact match is
+   * written into the test source. Defaults to false.
+   */
+  link?: boolean;
 }
 
 /** Uploads framework-neutral results using the TestOps v1 REST contract. */
