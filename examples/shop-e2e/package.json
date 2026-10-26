@@ -1,0 +1,20 @@
+{
+  "name": "testops-shop-e2e",
+  "private": true,
+  "description": "A customer-style Playwright framework for the Bean & Leaf shop that reports its results to TestOps",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "cases": "node scripts/create-cases.mjs",
+    "pick": "node scripts/pick-from-dispatch.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs"
+  },
+  "devDependencies": {
+    "@testops/reporter": "file:../../packages/reporter",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.18.8",
+    "typescript": "5.9.3"
+  }
+}
