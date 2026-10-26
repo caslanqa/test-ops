@@ -78,3 +78,28 @@ test('a failing upload warns and the result is still reported', async () => {
   assert.match(warnings[0], /attachments for "one" could not be uploaded/);
   assert.match(warnings[0], /400/);
 });
+
+test('a group the server refuses is resent file by file', async () => {
+  const { calls, warnings } = await report({
+    files: [{ name: 'shot.png' }, { name: 'trace.zip' }, { name: 'log.txt' }],
+    routeMap: routes(({ form }) => (form.getAll('files').length > 1 ? { status: 413, body: { message: 'too large' } } : {})),
+  });
+  const uploads = calls.filter(isUpload);
+  assert.deepEqual(uploads.map((call) => call.form.getAll('files').length), [3, 1, 1, 1]);
+  assert.deepEqual(warnings, []);
+});
+
+test('only the file the server still refuses on its own warns', async () => {
+  const { calls, warnings } = await report({
+    files: [{ name: 'shot.png' }, { name: 'bad.txt' }, { name: 'log.txt' }],
+    routeMap: routes(({ form }) => {
+      const names = form.getAll('files').map((file) => file.name);
+      return names.includes('bad.txt') ? { status: 400, body: { message: 'refused' } } : {};
+    }),
+  });
+  const uploaded = calls.filter(isUpload).filter((call) => call.form.getAll('files').length === 1)
+    .map((call) => call.form.getAll('files')[0].name);
+  assert.deepEqual(uploaded, ['shot.png', 'bad.txt', 'log.txt']);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /bad\.txt/);
+});

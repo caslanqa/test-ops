@@ -49,9 +49,10 @@ to the API becomes `<adapter externalTestId>:<executionId>`.
 The Playwright reporter walks `result.steps` depth first and keeps steps with `category === 'test.step'`
 (nested ones included) in execution order.
 
-1. The linked case's steps come from `GET /projects/:id/cases`, which returns every case with its steps
-   ordered by `position` and is not paged unless `limit` is passed. It is fetched once per run, and only
-   when at least one linked test has user-defined steps.
+1. The linked case's steps come from the run itself: `runCases[].caseSnapshot.steps` (`position`, `action`) in
+   the response that already identifies the run (`GET /runs/:id` for an existing run, `POST /runs` for one the
+   reporter creates). TestOps shows step results against this snapshot, taken when the run started, so a case
+   edited after the run began must still be read through it. No case list is requested.
 2. `normalize(title)` lowercases, collapses whitespace, trims and drops trailing `.` or `:`.
 3. Each Playwright step is matched to the first not-yet-matched case step with the same normalized
    `action`. A repeated title therefore matches in order.
@@ -79,7 +80,9 @@ files per request, extension allow list. The reporter:
 
 - Skips a file that is over 32 MB, has an extension outside the default allow list, or cannot be read,
   and prints one warning per skipped file. A skipped file never fails the run.
-- Groups files into requests of at most 20 files and 128 MB. Today each file is its own request.
+- Groups files into requests of at most 20 files and 128 MB. The server refuses an upload as a whole when one
+  file breaks a limit it has configured, so a group that answers 400, 413 or 415 is sent again file by file and
+  only the files still refused are lost, each with a warning.
 
 The default `failed` keeps today's status filter (failed tests only) and widens the file types from
 failure screenshots to all of the above.
@@ -113,6 +116,10 @@ unmatched tests.
 3. Inserts `, testops('<uuid>')` after the title literal.
 4. Adds `import { testops } from '@testops/reporter';` before the first top-level `import` when the file
    has none. A file with no top-level `import` (CommonJS) is reported for a manual edit.
+
+`@testops/reporter` is ES-module-only, so a test file is edited only when the project loads it as an ES module
+(`.mjs`/`.mts`, or `"type": "module"` in the nearest `package.json`); in any other project the matches are
+reported and nothing is written.
 
 Any file that does not fit these rules is left untouched and reported with `file:line`. Parameterized tests
 (a title built from a template literal or a loop) are always reported, never rewritten. Edits within one
@@ -172,5 +179,4 @@ and the history behavior. The README of the demo shop example gets a short step-
 - `TestResult.stdout` and `stderr` element types (`string | Buffer`) on the minimum supported Playwright
   version (peer range is `>=1.40`); older versions may lack `TestStep.attachments`, which this design does
   not use.
-- Whether `GET /cases` payload size is acceptable for the largest demo project; if not, fetch only the
-  linked cases.
+- Resolved: step matching reads the run's `caseSnapshot`, so no `GET /cases` call is made.

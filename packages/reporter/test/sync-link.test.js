@@ -23,11 +23,12 @@ const cases = [
 ];
 
 /** Runs syncTests against a spec file in a temp directory; `discover` builds the tests from the file path. */
-async function sync({ source = SPEC, options, discover, caseList = cases }) {
+async function sync({ source = SPEC, options, discover, caseList = cases, packageJson = '{"type":"module"}' }) {
   const dir = await mkdtemp(join(tmpdir(), 'testops-test-'));
   const output = captureConsole();
   try {
     const file = join(dir, 'cart.spec.ts');
+    await writeFile(join(dir, 'package.json'), packageJson);
     await writeFile(file, source);
     const tests = discover(file, source);
     const { fetch, calls } = fakeFetch({ 'GET /projects/p/cases': () => caseList });
@@ -119,4 +120,23 @@ test('without link nothing changes in how sync behaves', async () => {
   assert.equal(after, source);
   assert.equal(logs.some((line) => line.includes('TestOps link:')), false);
   assert.match(logs.join('\n'), /0 linked tests are already in sync/);
+});
+
+test('a project that is not an ES module project is reported and its files are untouched', async () => {
+  const { logs, warnings, after, source } = await sync({
+    options: { link: true, apply: true },
+    packageJson: '{}',
+    discover: unlinkedTests,
+  });
+  assert.equal(after, source);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /"type": "module"/);
+  assert.match(warnings[0], /cart\.spec\.ts/);
+  assert.equal(logs.some((line) => line.includes('linked 1 test')), false);
+});
+
+test('a dry run does not offer to link tests in a project that is not an ES module project', async () => {
+  const { logs, warnings } = await sync({ options: { link: true }, packageJson: '{}', discover: unlinkedTests });
+  assert.equal(logs.some((line) => line.includes('would link')), false);
+  assert.equal(warnings.length, 1);
 });

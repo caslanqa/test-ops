@@ -8,6 +8,9 @@ const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*m/g, '');
 const COMMENT_MAX = 10_000;
 
 // Extension for an in-memory attachment whose own name has none the server accepts.
+// Longest base name given to an in-memory attachment's temp file, well under the 255 bytes a file name may have.
+const MAX_BASE_NAME = 100;
+
 const EXTENSION_BY_CONTENT_TYPE = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -40,26 +43,45 @@ class ArtifactFiles {
 
 /** File name for an in-memory attachment: its own name when that has an allowed extension, else one from its content type. */
 function bodyFileName(attachment) {
-  const name = (attachment.name || 'attachment').replace(/[^\w.\- ]+/g, '_');
-  if (ALLOWED_EXTENSIONS.has(extensionOf(name))) return name;
-  const extension = EXTENSION_BY_CONTENT_TYPE[attachment.contentType?.split(';')[0].trim()];
-  return extension ? `${name}.${extension}` : name;
+  const name = (attachment.name || '').replace(/[^\w.\- ]+/g, '_');
+  const ownExtension = extensionOf(name);
+  const keepsOwnExtension = ALLOWED_EXTENSIONS.has(ownExtension);
+  const extension = keepsOwnExtension
+    ? ownExtension
+    : EXTENSION_BY_CONTENT_TYPE[attachment.contentType?.split(';')[0].trim()];
+  // "." and ".." would name a directory, and a long name would not fit the file system.
+  const base = (keepsOwnExtension ? name.slice(0, -(ownExtension.length + 1)) : name)
+    .replace(/^\.+$/, '')
+    .slice(0, MAX_BASE_NAME) || 'attachment';
+  return extension ? `${base}.${extension}` : base;
 }
 
-/** Everything worth uploading for one attempt: its attachments (video, trace and screenshots included), stdout and stderr. */
-async function collectArtifacts(result, files) {
+/**
+ * Everything worth uploading for one attempt: its attachments (video, trace and screenshots included), stdout
+ * and stderr. A file that cannot be prepared is skipped with a warning; it never costs the results.
+ */
+async function collectArtifacts(result, files, title) {
   const artifacts = [];
+  const prepare = async (name, write) => {
+    try {
+      artifacts.push(await write());
+    } catch (error) {
+      console.warn(`TestOps: skipped attachment "${name}" of "${title}": it could not be prepared (${error instanceof Error ? error.message : error}).`);
+    }
+  };
   for (const attachment of result.attachments ?? []) {
     if (attachment.path) {
       artifacts.push({ path: attachment.path, contentType: attachment.contentType });
     } else if (attachment.body) {
-      const name = bodyFileName(attachment);
-      artifacts.push({ path: await files.write(name, attachment.body), contentType: attachment.contentType, name });
+      await prepare(attachment.name || 'attachment', async () => {
+        const name = bodyFileName(attachment);
+        return { path: await files.write(name, attachment.body), contentType: attachment.contentType, name };
+      });
     }
   }
   for (const [name, chunks] of [['stdout.log', result.stdout], ['stderr.log', result.stderr]]) {
     const text = (chunks ?? []).map((chunk) => (typeof chunk === 'string' ? chunk : chunk.toString('utf8'))).join('');
-    if (text) artifacts.push({ path: await files.write(name, text), contentType: 'text/plain', name });
+    if (text) await prepare(name, async () => ({ path: await files.write(name, text), contentType: 'text/plain', name }));
   }
   return artifacts;
 }
@@ -183,7 +205,8 @@ export default class TestOpsReporter {
             ? new Date(result.startTime.getTime() + result.duration).toISOString()
             : undefined,
           durationMs: Math.round(result.duration),
-          attachments: this.client.wantsAttachments(mapped.status) ? await collectArtifacts(result, files) : [],
+          // Only a linked result is sent, so nothing is prepared for the others.
+          attachments: testCaseId && this.client.wantsAttachments(mapped.status) ? await collectArtifacts(result, files, title) : [],
           steps: collectSteps(result.steps ?? []),
           defectTitle: annotation(test, result, 'testops-defect'),
         });

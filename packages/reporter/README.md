@@ -74,7 +74,8 @@ replaced. A request that is retried inside one execution is still sent only once
 
 ### Steps
 
-Steps written with `test.step()` are reported against the steps of the linked case. A step is
+Steps written with `test.step()` are reported against the steps of the linked case as the run holds
+them (the case's steps when the run started, which is what TestOps shows results against). A step is
 matched to the case step whose text is the same as the step title, ignoring case, extra spaces and a
 trailing dot or colon. Repeated titles match case steps in order.
 
@@ -101,8 +102,9 @@ For those tests the reporter uploads everything Playwright recorded for the repo
 screenshots, video, `trace.zip`, files added with `testInfo.attach()`, and the test's standard
 output and error as `stdout.log` and `stderr.log`. Files are sent in requests of at most 20 files and
 128 MB. A file larger than 32 MB or of a type the server does not accept is skipped with a warning,
-as is a file that cannot be read; a failed upload warns too. None of them loses the result or fails
-the run.
+as is a file that cannot be read or prepared. If the server refuses a request, its files are sent
+again one by one, so only the file it still refuses is lost. None of this loses a result or fails the
+run.
 
 ## Keep test cases in sync
 
@@ -137,7 +139,10 @@ npx testops-sync --link --apply
 - Cases that a test already links to are not offered again.
 
 With `--apply`, the ID of each exact match is written into the test: `, testops('<id>')` after the
-title, and `import { testops } from '@testops/reporter';` when the file has no such import. Only a
+title, and `import { testops } from '@testops/reporter';` when the file has no such import. The package
+is ES-module-only, so this is done only in a project that loads the file as an ES module (`"type":
+"module"` in `package.json`, or a `.mjs`/`.mts` file); in any other project the matches are reported
+and no file is changed. Only a
 test written as `test('title', async () => { … })` (also `test.only`, `test.skip`, `test.fixme` and
 `test.fail`) is edited. A test with a details object, a template-literal title, a helper call as its
 second argument, or in a file without a top-level `import` is listed with `file:line` for you to

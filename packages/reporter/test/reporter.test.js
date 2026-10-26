@@ -16,8 +16,14 @@ const step = (title, extra = {}) => ({ category: 'test.step', title, steps: [], 
 
 function routes() {
   return {
-    'GET /projects/p/runs/r1': () => ({ id: 'r1', runCases: [{ testCaseId: CASE_ID, executionMode: 'AUTOMATED' }] }),
-    'GET /projects/p/cases': () => [{ id: CASE_ID, steps: [{ position: 0, action: 'Open the cart' }, { position: 1, action: 'Pay' }] }],
+    'GET /projects/p/runs/r1': () => ({
+      id: 'r1',
+      runCases: [{
+        testCaseId: CASE_ID,
+        executionMode: 'AUTOMATED',
+        caseSnapshot: { steps: [{ position: 0, action: 'Open the cart' }, { position: 1, action: 'Pay' }] },
+      }],
+    }),
     // Reached only when the environment running the tests looks like a CI system.
     'PATCH /projects/p/runs/r1': () => ({}),
     'POST /projects/p/runs/r1/results/bulk': ({ body }) => ({ results: body.results.map((_, index) => ({ id: `x${index}` })) }),
@@ -177,4 +183,55 @@ test('the temp directory is removed when sending fails', async () => {
   );
   assert.deepEqual(outcome, { status: 'failed' });
   assert.deepEqual(await artifactDirs(), before);
+});
+
+test('an attachment with a very long name does not drop the results of the run', async () => {
+  const { calls, outcome, output } = await runReporter([
+    fakeTest({
+      id: 'pw-1',
+      testCaseId: CASE_ID,
+      results: [failed({ attachments: [{ name: 'x'.repeat(300), contentType: 'text/plain', body: Buffer.from('hello') }] })],
+    }),
+  ]);
+  assert.equal(outcome, undefined);
+  assert.equal(calls.filter(isBulk).length, 1);
+  const [file] = calls.filter(isUpload).flatMap((call) => call.form.getAll('files'));
+  assert.ok(file.name.length <= 110, `file name has ${file.name.length} characters`);
+  assert.ok(file.name.endsWith('.txt'));
+  assert.deepEqual(output.warnings, []);
+});
+
+test('a body that cannot be written as a file warns and the other artifacts and the result still go', async () => {
+  const { calls, outcome, output } = await runReporter([
+    fakeTest({
+      id: 'pw-1',
+      testCaseId: CASE_ID,
+      results: [failed({
+        attachments: [
+          { name: 'broken', contentType: 'text/plain', body: 42 },
+          { name: 'notes', contentType: 'text/plain', body: Buffer.from('hello') },
+        ],
+      })],
+    }),
+  ]);
+  assert.equal(outcome, undefined);
+  assert.equal(calls.filter(isBulk).length, 1);
+  const files = calls.filter(isUpload).flatMap((call) => call.form.getAll('files'));
+  assert.deepEqual(files.map((file) => file.name), ['notes.txt']);
+  assert.equal(output.warnings.length, 1);
+  assert.match(output.warnings[0], /broken/);
+});
+
+test('a failed test without a TestOps ID is not touched for artifacts and cannot drop the results of the run', async () => {
+  const { calls, outcome, output } = await runReporter([
+    fakeTest({
+      id: 'pw-unlinked',
+      // A body that cannot be written would fail the whole run if artifacts were collected for this test.
+      results: [failed({ attachments: [{ name: 'notes', contentType: 'text/plain', body: 42 }], stdout: ['out'] })],
+    }),
+    fakeTest({ id: 'pw-linked', testCaseId: CASE_ID, results: [{ status: 'passed' }] }),
+  ]);
+  assert.equal(outcome, undefined);
+  assert.equal(calls.find(isBulk).body.results.length, 1);
+  assert.deepEqual(output.warnings, []);
 });

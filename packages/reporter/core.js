@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, relative } from 'node:path';
 import { groupFiles, parseAttachmentPolicy, shouldAttach, skipReason } from './artifacts.js';
-import { linkTestsInSource } from './link.js';
+import { isEsmFile, linkTestsInSource } from './link.js';
 import { dedupeByLocation, matchSteps, matchTestsToCases } from './match.js';
 
 const COMMENT_MAX = 10_000;
@@ -57,6 +57,14 @@ function settingsFrom(options, env) {
 function shortList(items, limit = 10) {
   const shown = items.slice(0, limit);
   return `${shown.join('; ')}${items.length > limit ? `; and ${items.length - limit} more` : ''}`;
+}
+
+/**
+ * The steps of each case as the run holds them, by case ID. TestOps shows step results against this
+ * snapshot, taken when the run started, so positions must come from it and not from the live case.
+ */
+function stepsByCase(run) {
+  return new Map((run.runCases ?? []).map((runCase) => [runCase.testCaseId, runCase.caseSnapshot?.steps ?? []]));
 }
 
 function chunks(items, size) {
@@ -164,7 +172,7 @@ class TestOpsClient {
       });
     }
 
-    const caseSteps = await this.loadCaseSteps(linked);
+    const caseSteps = stepsByCase(run);
     let openDefects;
     for (const batch of chunks(linked, BULK_MAX)) {
       const submitted = await this.request('POST', `${this.projectPath}/runs/${encodeURIComponent(run.id)}/results/bulk`, {
@@ -278,9 +286,23 @@ class TestOpsClient {
     const { exact, suggestions, ambiguous, unmatched } = matchTestsToCases(unlinkedTests, candidates);
     const where = (test) => (test.location ? `${relative(process.cwd(), test.location.file)}:${test.location.line}` : 'an unknown location');
 
+    // @testops/reporter is ES-module-only: an import of it breaks every file of a project that loads as CommonJS.
+    const linkable = [];
+    const skippedByFile = new Map();
+    const esmByFile = new Map();
+    for (const item of exact) {
+      const file = item.test.location?.file;
+      if (file !== undefined && !esmByFile.has(file)) esmByFile.set(file, await isEsmFile(file));
+      if (file === undefined || esmByFile.get(file)) linkable.push(item);
+      else skippedByFile.set(file, (skippedByFile.get(file) ?? 0) + 1);
+    }
+    for (const [file, count] of skippedByFile) {
+      console.warn(`TestOps link: not linking ${count} ${count === 1 ? 'test' : 'tests'} in ${relative(process.cwd(), file)}: the project is not an ES module project ("type": "module" is missing in package.json) and @testops/reporter can only be imported from one. Add testops() by hand once the project is ESM.`);
+    }
+
     console.log(`TestOps link: ${unlinkedTests.length} ${unlinkedTests.length === 1 ? 'test has' : 'tests have'} no TestOps ID: ${exact.length} match a case by title, ${suggestions.length} ${suggestions.length === 1 ? 'is a suggestion' : 'are suggestions'}, ${ambiguous.length} ${ambiguous.length === 1 ? 'is ambiguous' : 'are ambiguous'}, ${unmatched.length} ${unmatched.length === 1 ? 'has' : 'have'} no match.`);
     if (!apply) {
-      for (const item of exact) console.log(`TestOps link: would link ${where(item.test)} "${item.test.title}" to case ${item.caseId}.`);
+      for (const item of linkable) console.log(`TestOps link: would link ${where(item.test)} "${item.test.title}" to case ${item.caseId}.`);
     }
     for (const item of suggestions) {
       console.log(`TestOps link: suggestion for ${where(item.test)} "${item.test.title}": case ${item.caseId} "${item.caseTitle}" (similarity ${item.score.toFixed(2)}). Add testops('${item.caseId}') by hand if it is the right case.`);
@@ -288,12 +310,12 @@ class TestOpsClient {
     for (const item of ambiguous) console.log(`TestOps link: skipped ${where(item.test)} "${item.test.title}": ${item.reason}.`);
     if (unmatched.length) console.log(`TestOps link: no case matches ${shortList(unmatched.map((test) => `${where(test)} "${test.title}"`))}.`);
 
-    if (exact.length === 0) return;
+    if (linkable.length === 0) return;
     if (!apply) {
       console.log('TestOps link: dry run only. Pass --link --apply to write the IDs into the test files.');
       return;
     }
-    await this.writeLinks(exact);
+    await this.writeLinks(linkable);
   }
 
   /** Writes the matched case IDs into each test file, one write per file; refused tests are listed, never edited. */
@@ -320,25 +342,9 @@ class TestOpsClient {
     }
   }
 
-  /**
-   * The steps of the linked cases by case ID, fetched once and only when a result carries steps.
-   * Returns null when no result has steps or the case list could not be read; step results are then
-   * skipped and the results themselves are still sent.
-   */
-  async loadCaseSteps(results) {
-    if (!results.some((result) => result.steps?.length)) return null;
-    try {
-      const cases = await this.request('GET', `${this.projectPath}/cases`, undefined, { retryable: true });
-      return new Map(cases.map((testCase) => [testCase.id, testCase.steps ?? []]));
-    } catch (error) {
-      console.warn(`TestOps: case steps could not be loaded, so step results are skipped. ${error instanceof Error ? error.message : error}`);
-      return null;
-    }
-  }
-
   /** The stepResults of one result, or undefined when it has none to send. */
   stepResultsFor(result, caseSteps) {
-    if (!caseSteps || !result.steps?.length) return undefined;
+    if (!result.steps?.length) return undefined;
     const { stepResults, unmatched } = matchSteps(result.steps, caseSteps.get(result.testCaseId) ?? []);
     if (unmatched.length) {
       console.warn(`TestOps: steps of "${result.title}" without a matching case step: ${shortList(unmatched)}.`);
@@ -376,16 +382,33 @@ class TestOpsClient {
 
     for (const group of groupFiles(files)) {
       try {
-        const form = new FormData();
-        for (const file of group) {
-          const bytes = new Uint8Array(await readFile(file.path));
-          form.append('files', new Blob([bytes], { type: file.contentType }), file.name);
-        }
-        await this.request('POST', `${this.projectPath}/results/${encodeURIComponent(resultId)}/attachments`, undefined, { form });
+        await this.sendFiles(resultId, group);
       } catch (error) {
-        console.warn(`TestOps: attachments for "${title}" could not be uploaded. ${error instanceof Error ? error.message : error}`);
+        // The server (or a proxy in front of it) refuses an upload as a whole when one file breaks a limit
+        // it has configured, so send the files one by one: only those it still refuses are lost.
+        if (group.length > 1 && [400, 413, 415].includes(error?.status)) {
+          for (const file of group) {
+            try {
+              await this.sendFiles(resultId, [file]);
+            } catch (single) {
+              console.warn(`TestOps: attachment "${file.name}" for "${title}" could not be uploaded. ${single instanceof Error ? single.message : single}`);
+            }
+          }
+        } else {
+          console.warn(`TestOps: attachments for "${title}" could not be uploaded. ${error instanceof Error ? error.message : error}`);
+        }
       }
     }
+  }
+
+  /** One multipart request carrying the given files of a result. */
+  async sendFiles(resultId, files) {
+    const form = new FormData();
+    for (const file of files) {
+      const bytes = new Uint8Array(await readFile(file.path));
+      form.append('files', new Blob([bytes], { type: file.contentType }), file.name);
+    }
+    await this.request('POST', `${this.projectPath}/results/${encodeURIComponent(resultId)}/attachments`, undefined, { form });
   }
 
   async listOpenDefects() {
