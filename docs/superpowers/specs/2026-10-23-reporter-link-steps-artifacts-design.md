@@ -102,10 +102,14 @@ unmatched tests.
 
 `--link --apply` writes the exact matches into the source. For each file it:
 
-1. Reads the text at the recorded location and requires `test` (optionally followed by `.only`, `.skip`,
-   `.fixme`, `.fail` or `.slow`), `(`, then a plain string literal title.
-2. Requires that the argument after the title is not an object literal. A test that already has a details
-   object is reported with `file:line` for a manual edit.
+1. Reads the text at the recorded location. Playwright reports the `(` of `test(...)`, or the start of the
+   modifier name in `test.only(...)`, `test.skip(...)`, `test.fixme(...)` and `test.fail(...)` (1-based line and
+   column, measured on Playwright 1.64). A location of any other shape is reported, not edited. After the `(`
+   it requires a plain string literal title.
+2. Requires the argument after the title to be an inline test function (`async`, `function`, a parenthesized
+   parameter list or a single-parameter arrow). A details object, a helper call such as `demoTestops(...)` or an
+   identifier is reported with `file:line` for a manual edit, because a second details argument would be
+   invalid.
 3. Inserts `, testops('<uuid>')` after the title literal.
 4. Adds `import { testops } from '@testops/reporter';` before the first top-level `import` when the file
    has none. A file with no top-level `import` (CommonJS) is reported for a manual edit.
@@ -162,8 +166,8 @@ and the history behavior. The README of the demo shop example gets a short step-
 
 ## To verify during implementation
 
-- What `test.location` points at (the `test` identifier or the call) for `test`, `test.only` and
-  `test.skip`; the insertion rule in section 4 depends on it.
+- Resolved: `test.location` points at the `(` of `test(...)` and at the modifier name of `test.only/skip/fixme/fail(...)`
+  (section 4); `test.slow('title', fn)` does not declare a test.
 - `TestResult.stdout` and `stderr` element types (`string | Buffer`) on the minimum supported Playwright
   version (peer range is `>=1.40`); older versions may lack `TestStep.attachments`, which this design does
   not use.
