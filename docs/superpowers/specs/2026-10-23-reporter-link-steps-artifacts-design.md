@@ -116,8 +116,9 @@ unmatched tests.
 
 Any file that does not fit these rules is left untouched and reported with `file:line`. Parameterized tests
 (a title built from a template literal or a loop) are always reported, never rewritten. Edits within one
-file are applied from the bottom up so earlier locations stay valid. `--link` needs `TESTOPS_SYNC_TOKEN`
-with Tester or Admin, like `--apply`.
+file are applied from the bottom up so earlier locations stay valid. `--link` only reads the case list, so a
+token that can read the project is enough; `--apply` also updates titles and status and needs
+`TESTOPS_SYNC_TOKEN` with Tester or Admin.
 
 ### 5. Configuration
 

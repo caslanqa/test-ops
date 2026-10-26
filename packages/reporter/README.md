@@ -65,9 +65,44 @@ in the run whose execution mode is Automation, and leaves the run open for its m
 URL is attached to the run when detected.
 
 The reporter maps passed, failed, timed-out and skipped tests to TestOps results. It reports the
-last retry, records a stable Playwright test ID for safe result re-sends, includes duration and
-failure details, uploads failure screenshots, and can link a failed test to an existing open defect
-by title. Results are sent in API-supported batches of up to 500.
+last retry of each test, includes duration and failure details, and can link a failed test to an
+existing open defect by title. Results are sent in API-supported batches of up to 500.
+
+Every execution adds an attempt: when the same run is written to again (a second CI job, a rerun),
+the earlier results, failed ones included, stay in the case's result history instead of being
+replaced. A request that is retried inside one execution is still sent only once.
+
+### Steps
+
+Steps written with `test.step()` are reported against the steps of the linked case. A step is
+matched to the case step whose text is the same as the step title, ignoring case, extra spaces and a
+trailing dot or colon. Repeated titles match case steps in order.
+
+```ts
+await test.step('Open the cart', async () => { … });
+await test.step('Pay by card', async () => { … });
+```
+
+A step that fails is reported as failed, with its error. A step without a matching case step is
+named in a warning and not reported; Playwright's own steps (`expect`, page actions, hooks) are never
+reported. The case steps themselves are never changed by a test run.
+
+### Artifacts
+
+`TESTOPS_ATTACHMENTS` decides which results get their artifacts uploaded:
+
+| Value | Artifacts of |
+|---|---|
+| `failed` (default) | failed tests |
+| `all` | every reported test |
+| `none` | no test |
+
+For those tests the reporter uploads everything Playwright recorded for the reported attempt:
+screenshots, video, `trace.zip`, files added with `testInfo.attach()`, and the test's standard
+output and error as `stdout.log` and `stderr.log`. Files are sent in requests of at most 20 files and
+128 MB. A file larger than 32 MB or of a type the server does not accept is skipped with a warning,
+as is a file that cannot be read; a failed upload warns too. None of them loses the result or fails
+the run.
 
 ## Keep test cases in sync
 
@@ -83,6 +118,33 @@ Run a dry run locally, then apply the changes:
 npx testops-sync
 npx testops-sync --apply
 ```
+
+### Link tests that have no case ID
+
+`testops-sync --link` looks at the tests without a `testops()` ID and pairs them with the project's
+cases by title. It prints a dry run:
+
+```sh
+npx testops-sync --link
+npx testops-sync --link --apply
+```
+
+- A title that matches one case exactly (ignoring case and spacing) and is unique among the tests and
+  the cases is an **exact match**.
+- Titles shared by several tests or several cases are reported as **ambiguous** and never linked.
+- A similar title (most words in common) is only a **suggestion**: add the ID by hand if it is the
+  right case.
+- Cases that a test already links to are not offered again.
+
+With `--apply`, the ID of each exact match is written into the test: `, testops('<id>')` after the
+title, and `import { testops } from '@testops/reporter';` when the file has no such import. Only a
+test written as `test('title', async () => { … })` (also `test.only`, `test.skip`, `test.fixme` and
+`test.fail`) is edited. A test with a details object, a template-literal title, a helper call as its
+second argument, or in a file without a top-level `import` is listed with `file:line` for you to
+change by hand, and its file is left as it was. Cases are never created or deleted.
+
+`--link` only reads the case list, so a token that can read the project is enough. `--apply` also
+updates case titles and automation status, which needs `TESTOPS_SYNC_TOKEN` (see above).
 
 Add `npx testops-sync --apply` before Playwright in CI to keep case metadata in sync when test code
 changes. Applying changes requires a Tester or Admin API token; provide it as `TESTOPS_SYNC_TOKEN`.

@@ -6,14 +6,19 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('adding products updates the cart badge and the totals', demoTestops('cart-add'), async ({ page }) => {
-  await addToCart(page, 'Espresso beans, 250 g', 2);
-  await addToCart(page, 'Ceramic mug');
-  await expect(cartBadge(page)).toHaveText('3');
+  // The step titles are the case's step texts, so TestOps reports each step against its case step.
+  await test.step('Add Espresso beans twice and a Ceramic mug', async () => {
+    await addToCart(page, 'Espresso beans, 250 g', 2);
+    await addToCart(page, 'Ceramic mug');
+    await expect(cartBadge(page)).toHaveText('3');
+  });
 
-  await page.getByRole('link', { name: /Cart/ }).click();
-  await expect(summary(page, 'subtotal')).toHaveText('€31.80');
-  await expect(summary(page, 'shipping')).toHaveText('€4.90');
-  await expect(summary(page, 'total')).toHaveText('€36.70');
+  await test.step('Open the cart', async () => {
+    await page.getByRole('link', { name: /Cart/ }).click();
+    await expect(summary(page, 'subtotal')).toHaveText('€31.80');
+    await expect(summary(page, 'shipping')).toHaveText('€4.90');
+    await expect(summary(page, 'total')).toHaveText('€36.70');
+  });
 });
 
 test('changing the quantity updates the totals', demoTestops('cart-quantity'), async ({ page }) => {

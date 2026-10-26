@@ -128,6 +128,7 @@ The results can go to the shop's project in your DEMO workspace.
 | `TESTOPS_RUN_TITLE` | Optional. Default: `Playwright – <branch> @ <commit>` on GitHub Actions, `Playwright – local` elsewhere |
 | `TESTOPS_ENVIRONMENT` | Optional. Default: `CI` on CI, `local` elsewhere |
 | `TESTOPS_CI_URL` | Optional. Overrides the CI job URL detected from GitHub Actions, GitLab CI, CircleCI or Buildkite. |
+| `TESTOPS_ATTACHMENTS` | Optional: `failed` (default), `all` or `none`. Which tests get their artifacts (screenshots, video, trace, logs) uploaded. |
 
 ### Let TestOps start CI
 
@@ -155,6 +156,11 @@ The reporter submits the exact TestOps case ID, so the test and case titles may 
 
 `testops('<test-case-uuid>', '<defect title>')` also links a failure of the test to that open defect.
 
+Steps written with `test.step()` are reported against the case's steps. A step is matched by its title, so
+it must read the same as the case step (case and spacing don't matter). The "Adding products updates the cart
+badge and the totals" test in [`tests/cart.spec.ts`](tests/cart.spec.ts) shows it: its two steps are the two
+steps of the matching case.
+
 ### Keep test cases in sync
 
 `testops-sync` discovers tests with `playwright test --list`; it does not execute them. It compares
@@ -164,6 +170,9 @@ dry run. To apply changed titles and set those cases to **Automated**, run this 
 ```bash
 npx testops-sync --apply
 ```
+
+`npx testops-sync --link` also pairs tests that have no ID with cases of the same title, and `--link --apply`
+writes the IDs into the test files; see the package README for the rules.
 
 It leaves descriptions, steps, tags, requirements and all unannotated cases untouched. Use
 `TESTOPS_SYNC_TOKEN` with a Tester or Admin role for write access; the regular reporter can continue

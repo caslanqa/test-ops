@@ -34,6 +34,9 @@
     "sync-cli.js",
     "sync-reporter.js",
     "core.js",
+    "match.js",
+    "artifacts.js",
+    "link.js",
     "core.d.ts",
     "README.md",
     "LICENSE"
@@ -54,6 +57,6 @@
   },
   "scripts": {
     "test": "node --test",
-    "build": "node --check index.js && node --check reporter.js && node --check core.js && node --check sync-reporter.js && node --check sync-cli.js"
+    "build": "node --check index.js && node --check reporter.js && node --check core.js && node --check sync-reporter.js && node --check sync-cli.js && node --check match.js && node --check artifacts.js && node --check link.js"
   }
 }
