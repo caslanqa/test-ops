@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { matchSteps } from './match.js';
 
 const COMMENT_MAX = 10_000;
 const BULK_MAX = 500;
@@ -158,6 +159,7 @@ class TestOpsClient {
       });
     }
 
+    const caseSteps = await this.loadCaseSteps(linked);
     let openDefects;
     for (const batch of chunks(linked, BULK_MAX)) {
       const submitted = await this.request('POST', `${this.projectPath}/runs/${encodeURIComponent(run.id)}/results/bulk`, {
@@ -171,6 +173,7 @@ class TestOpsClient {
           startedAt: result.startedAt,
           endedAt: result.endedAt,
           durationMs: result.durationMs,
+          stepResults: this.stepResultsFor(result, caseSteps),
         })),
       }, { retryable: true });
 
@@ -257,6 +260,32 @@ class TestOpsClient {
     }
     if (!apply) console.log('TestOps sync: dry run only. Pass --apply to update case titles and automation status.');
     else console.log(`TestOps sync: ${changes.length} ${changes.length === 1 ? 'case' : 'cases'} updated.`);
+  }
+
+  /**
+   * The steps of the linked cases by case ID, fetched once and only when a result carries steps.
+   * Returns null when no result has steps or the case list could not be read; step results are then
+   * skipped and the results themselves are still sent.
+   */
+  async loadCaseSteps(results) {
+    if (!results.some((result) => result.steps?.length)) return null;
+    try {
+      const cases = await this.request('GET', `${this.projectPath}/cases`, undefined, { retryable: true });
+      return new Map(cases.map((testCase) => [testCase.id, testCase.steps ?? []]));
+    } catch (error) {
+      console.warn(`TestOps: case steps could not be loaded, so step results are skipped. ${error instanceof Error ? error.message : error}`);
+      return null;
+    }
+  }
+
+  /** The stepResults of one result, or undefined when it has none to send. */
+  stepResultsFor(result, caseSteps) {
+    if (!caseSteps || !result.steps?.length) return undefined;
+    const { stepResults, unmatched } = matchSteps(result.steps, caseSteps.get(result.testCaseId) ?? []);
+    if (unmatched.length) {
+      console.warn(`TestOps: steps of "${result.title}" without a matching case step: ${shortList(unmatched)}.`);
+    }
+    return stepResults.length ? stepResults : undefined;
   }
 
   async uploadAttachments(resultId, attachments) {

@@ -1,5 +1,13 @@
 export type TestOpsResultStatus = 'PASSED' | 'FAILED' | 'SKIPPED';
 
+/** A framework step; reported against the case step whose text equals its title (ignoring case and spacing). */
+export interface TestOpsStep {
+  title: string;
+  status: 'PASSED' | 'FAILED';
+  /** Failure message of the step. */
+  comment?: string;
+}
+
 /** Framework-neutral result shape consumed by TestOps' shared reporting client. */
 export interface TestOpsResult {
   /** Exact UUID of the TestOps case. */
@@ -13,6 +21,8 @@ export interface TestOpsResult {
   endedAt?: string;
   durationMs?: number;
   attachments?: Array<{ path: string; contentType: string }>;
+  /** Steps in execution order, matched to the case's steps by title. */
+  steps?: TestOpsStep[];
   defectTitle?: string;
 }
 
