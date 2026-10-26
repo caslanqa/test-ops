@@ -68,7 +68,11 @@ const keys = (object) => Object.keys(object ?? {}).sort().join(',');
 
 /** Runs a piece of JavaScript inside the app container and returns what it printed. */
 const inApp = (code) =>
-  execFileSync('docker', ['compose', 'exec', '-T', 'app', 'node', '-e', code], { encoding: 'utf8' }).trim();
+  execFileSync('docker', ['compose', 'exec', '-T', 'app', 'node', '-e', code], {
+    encoding: 'utf8',
+    // A failing snippet is reported through the error it throws, not by dumping its stack trace here.
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
 const fakeUrl = 'http://127.0.0.1:8098';
 const fromFake = (path, method = 'GET') =>
   inApp(`fetch('${fakeUrl}${path}',{method:'${method}'}).then(r=>r.text()).then(t=>process.stdout.write(t))`);
@@ -355,6 +359,174 @@ try {
   check('a name that resolves to loopback is reached', connect.local === 200, JSON.stringify(connect));
 } catch (error) {
   check('the helper checks ran', false, String(error.message).slice(0, 300));
+}
+
+console.log('--- AI runs ---');
+const P = `/projects/${project.id}`;
+const RUNS = `${P}/ai/runs`;
+const requirement = await ok(admin, 'POST', `${P}/requirements`, { title: 'Password reset', description: 'A user can reset a forgotten password by email.' });
+const unrelatedCase = await ok(admin, 'POST', `${P}/cases`, { title: 'Unrelated login case' });
+const otherProject = await ok(admin, 'POST', `/workspaces/${ws.id}/projects`, { key: 'AO', name: 'Other AI project' });
+const otherRequirement = await ok(admin, 'POST', `/projects/${otherProject.id}/requirements`, { title: 'Other project secret requirement' });
+await ok(admin, 'POST', `/projects/${otherProject.id}/cases`, { title: 'Other project secret case' });
+const archivedRequirement = await ok(admin, 'POST', `${P}/requirements`, { title: 'Archived requirement' });
+await ok(admin, 'DELETE', `${P}/requirements/${archivedRequirement.id}`);
+const outsider = await makeUser('outsider', null);
+const limited = await makeUser('limited', 'TESTER');
+
+const start = (token, body = {}) => call(token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, ...body });
+const caseCount = async () => (await ok(admin, 'GET', `${P}/cases`)).length;
+const setting = (set) => psql(`update ai_settings set ${set} where "workspaceId" = '${ws.id}'`);
+const useModel = (model) => setting(`model = '${model}'`);
+const resetFake = () => fromFake('/__reset', 'POST');
+const calls = () => JSON.parse(fromFake('/__calls'));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitForRun(runId, statuses, seconds = 40) {
+  for (let i = 0; i < seconds * 2; i++) {
+    const run = await ok(admin, 'GET', `${RUNS}/${runId}`);
+    if (statuses.includes(run.status)) return run;
+    await sleep(500);
+  }
+  throw new Error(`run ${runId} did not reach ${statuses.join(' or ')} in ${seconds} s`);
+}
+const stepNames = (run) => run.steps.map((step) => step.name).join(',');
+const finished = ['AWAITING_APPROVAL', 'FAILED', 'COMPLETED', 'CANCELLED'];
+
+await expectStatus('a Viewer cannot start a run', 403, viewer.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+await expectStatus('an Automation user cannot start a run', 403, automation.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+await expectStatus('someone outside the project cannot start a run', 403, outsider.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+await expectStatus('extra context is limited to 8000 characters', 400, tester.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, extraContext: 'x'.repeat(8001) });
+await expectStatus('an unknown workflow type is refused', 400, tester.token, 'POST', RUNS, { type: 'SOMETHING_ELSE', requirementId: requirement.id });
+await expectStatus('a requirement of another project is not found', 404, tester.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: otherRequirement.id });
+await expectStatus('an archived requirement is not found', 404, tester.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: archivedRequirement.id });
+setting('enabled = false');
+await expectStatus('with AI switched off no run starts', 409, tester.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+setting('enabled = true');
+
+console.log('--- A run from start to approval ---');
+const casesBefore = await caseCount();
+useModel('ok');
+resetFake();
+const started = await call(tester.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, extraContext: 'Mention the mobile app.' });
+check(`[${started.status}] a Tester starts a run`, started.status === 202 && typeof started.json?.runId === 'string', started.text);
+const first = await waitForRun(started.json.runId, finished);
+check('the run ends waiting for approval', first.status === 'AWAITING_APPROVAL', `${first.status} ${first.error ?? ''}`);
+check('...after review, design and audit, in that order', stepNames(first) === 'REVIEW,DESIGN,AUDIT', stepNames(first));
+check('...each with a skill version and token usage', first.steps.every((step) => step.skillVersion === 1 && step.usage?.inputTokens === 11 && step.usage?.outputTokens === 7 && step.status === 'COMPLETED' && step.attempt === 1), JSON.stringify(first.steps));
+check('...holding the review, the drafts and the audit', first.result?.review?.acceptanceCriteria?.length === 2 && first.result?.drafts?.length === 2 && first.result?.audit?.revisionNeeded === false, JSON.stringify(first.result));
+check('...every draft says what kind of case it is', first.result.drafts.every((draft) => ['positive', 'negative', 'boundary', 'error'].includes(draft.kind)));
+check('the run shows which setting it used', first.providerSnapshot?.source === 'WORKSPACE' && first.providerSnapshot?.endpointHost === '127.0.0.1' && first.providerSnapshot?.model === 'ok', JSON.stringify(first.providerSnapshot));
+check('...and what was asked', first.input?.requirementId === requirement.id && first.input?.extraContext === 'Mention the mobile app.', JSON.stringify(first.input));
+check('a step shows no prompt and no answer, only how it went', keys(first.steps[0]) === 'attempt,endedAt,error,name,skillVersion,startedAt,status,usage', keys(first.steps[0]));
+check('the run carries no provider key', !JSON.stringify(first).includes(SECRET) && !JSON.stringify(first).includes('credential'));
+check('nothing was written to the cases yet', (await caseCount()) === casesBefore);
+const lastPrompt = JSON.stringify((await lastRequest()).body.messages);
+check('the requirement and the project\'s other cases went to the provider', lastPrompt.includes('Password reset') && lastPrompt.includes('Unrelated login case') && lastPrompt.includes(unrelatedCase.id), lastPrompt.slice(0, 300));
+check('...and nothing from another project', !lastPrompt.includes('Other project secret') && !lastPrompt.includes(otherProject.id));
+const reviewCall = calls();
+check('three model calls were made', reviewCall.length === 3, JSON.stringify(reviewCall));
+
+console.log('--- Reading runs ---');
+const asViewer = await call(viewer.token, 'GET', `${RUNS}/${started.json.runId}`);
+check(`[${asViewer.status}] a Viewer can read a run`, asViewer.status === 200 && asViewer.json?.id === started.json.runId);
+await expectStatus('someone outside the project cannot read a run', 403, outsider.token, 'GET', `${RUNS}/${started.json.runId}`);
+await expectStatus('...or list runs', 403, outsider.token, 'GET', `${RUNS}?requirementId=${requirement.id}`);
+await expectStatus('a run of another project is not found through this one', 404, admin, 'GET', `/projects/${otherProject.id}/ai/runs/${started.json.runId}`);
+await expectStatus('an unknown run is not found', 404, tester.token, 'GET', `${RUNS}/00000000-0000-0000-0000-000000000000`);
+
+console.log('--- Revision, retry and failure ---');
+useModel('revise');
+resetFake();
+const revising = await waitForRun((await start(tester.token)).json.runId, finished);
+check('a revision follows an audit that asks for one', revising.status === 'AWAITING_APPROVAL' && stepNames(revising) === 'REVIEW,DESIGN,AUDIT,REVISE,AUDIT_REVISED', `${revising.status} ${stepNames(revising)}`);
+check('...with five model calls and the audit after the revision', calls().length === 5 && revising.result?.audit?.revisionNeeded === false, JSON.stringify(revising.result?.audit));
+
+useModel('flaky');
+resetFake();
+const flaky = await waitForRun((await start(tester.token)).json.runId, finished);
+check('a step whose answer is not JSON is tried once more', flaky.status === 'AWAITING_APPROVAL' && flaky.steps.some((step) => step.name === 'REVIEW' && step.attempt === 1 && step.status === 'FAILED') && flaky.steps.some((step) => step.name === 'REVIEW' && step.attempt === 2 && step.status === 'COMPLETED'), JSON.stringify(flaky.steps));
+check('...four model calls in all', calls().length === 4, String(calls().length));
+
+useModel('invalid');
+resetFake();
+const invalid = await waitForRun((await start(tester.token)).json.runId, finished);
+check('an answer that does not fit the schema fails the run after one retry', invalid.status === 'FAILED' && Boolean(invalid.error) && calls().length === 2, `${invalid.status} ${invalid.error} calls=${calls().length}`);
+check('...and writes no cases', (await caseCount()) === casesBefore);
+
+useModel('fail500');
+resetFake();
+const failing = await waitForRun((await start(tester.token)).json.runId, finished);
+check('a provider that keeps failing fails the run after one retry', failing.status === 'FAILED' && calls().length === 2, `${failing.status} calls=${calls().length}`);
+check('...saying only the status, for a private address', String(failing.error).includes('500') && !String(failing.error).includes('INTERNAL-SECRET-BODY'), String(failing.error));
+check('...and the failed step is recorded without its answer', failing.steps.length === 2 && failing.steps.every((step) => step.status === 'FAILED' && step.attempt >= 1), JSON.stringify(failing.steps));
+
+console.log('--- Cancelling ---');
+useModel('ok');
+const toCancel = await waitForRun((await start(tester.token)).json.runId, finished);
+await expectStatus('a run waiting for approval can be cancelled', 200, tester.token, 'POST', `${RUNS}/${toCancel.id}/cancel`);
+check('...and stays cancelled', (await ok(admin, 'GET', `${RUNS}/${toCancel.id}`)).status === 'CANCELLED');
+await expectStatus('a finished run cannot be cancelled again', 409, tester.token, 'POST', `${RUNS}/${toCancel.id}/cancel`);
+await expectStatus('a Viewer cannot cancel a run', 403, viewer.token, 'POST', `${RUNS}/${first.id}/cancel`);
+
+useModel('slow');
+const slowRun = (await start(tester.token)).json.runId;
+await waitForRun(slowRun, ['RUNNING']);
+await expectStatus('a run in progress can be cancelled', 200, tester.token, 'POST', `${RUNS}/${slowRun}/cancel`);
+await sleep(26_000);
+const slowAfter = await ok(admin, 'GET', `${RUNS}/${slowRun}`);
+check('...and stays cancelled when the step it was in returns', slowAfter.status === 'CANCELLED' && stepNames(slowAfter) === 'REVIEW', `${slowAfter.status} ${stepNames(slowAfter)}`);
+
+console.log('--- Limits and listing ---');
+useModel('ok');
+setting('"maxRunsPerUserPerDay" = 2');
+await expectStatus('a user may start a run within the daily limit', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+await expectStatus('...and a second one', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+await expectStatus('...but not a third', 429, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+setting('"maxRunsPerUserPerDay" = 20');
+const listed = await call(viewer.token, 'GET', `${RUNS}?requirementId=${requirement.id}`);
+check(`[${listed.status}] a Viewer can list the runs of a requirement`, listed.status === 200 && Array.isArray(listed.json) && listed.json.length >= 8, listed.text.slice(0, 200));
+const stamps = listed.json.map((run) => Date.parse(run.createdAt));
+check('...newest first', stamps.every((time, index) => index === 0 || stamps[index - 1] >= time));
+check('...as a summary without the result or the steps', !('result' in listed.json[0]) && !('steps' in listed.json[0]) && listed.json[0].providerSnapshot?.model !== undefined);
+const paged = await call(viewer.token, 'GET', `${RUNS}?requirementId=${requirement.id}&limit=2`);
+check('...and in pages, with the total in the header', paged.json.length === 2, paged.text.slice(0, 100));
+const other = await call(viewer.token, 'GET', `${RUNS}?requirementId=${otherRequirement.id}`);
+check('runs of another requirement are not listed', other.status === 200 && other.json.length === 0, other.text.slice(0, 100));
+
+console.log('--- A run whose setting changes ---');
+const copied = psql(`insert into ai_workflow_runs (id, type, "projectId", "createdById", status, input, "providerSnapshot", "availableAt", "createdAt")
+  select gen_random_uuid()::text, type, "projectId", "createdById", 'QUEUED', input, "providerSnapshot", timezone('utc', now()) + interval '1 hour', timezone('utc', now())
+  from ai_workflow_runs where id = '${first.id}' returning id`).split('\n')[0];
+setting('enabled = false');
+psql(`update ai_workflow_runs set "availableAt" = timezone('utc', now()) where id = '${copied}'`);
+const orphaned = await waitForRun(copied, finished);
+check('a waiting run fails when AI was switched off before it started', orphaned.status === 'FAILED' && String(orphaned.error).includes('AI is not enabled for this project'), `${orphaned.status} ${orphaned.error}`);
+check('...without calling the provider', orphaned.steps.length === 0);
+setting('enabled = true');
+
+console.log('--- A crash in the middle of a run ---');
+useModel('slow-after-review');
+resetFake();
+const crashed = (await start(tester.token)).json.runId;
+for (let i = 0; i < 40; i++) {
+  const run = await ok(admin, 'GET', `${RUNS}/${crashed}`);
+  if (run.steps.some((step) => step.name === 'REVIEW' && step.status === 'COMPLETED') && run.steps.some((step) => step.name === 'DESIGN' && step.status === 'RUNNING')) break;
+  await sleep(500);
+}
+execFileSync('docker', ['compose', 'kill', 'app'], { stdio: 'ignore' });
+useModel('ok');
+execFileSync('docker', ['compose', 'up', '-d', '--wait', '--wait-timeout', '120', 'app'], { stdio: 'ignore' });
+await startFakeProvider();
+psql(`update ai_workflow_runs set "lockedUntil" = timezone('utc', now()) - interval '1 minute' where id = '${crashed}'`);
+const recovered = await waitForRun(crashed, finished, 60);
+check('a run left behind by a crash is taken over and finished', recovered.status === 'AWAITING_APPROVAL', `${recovered.status} ${recovered.error ?? ''}`);
+check('...the review that was done before the crash was not asked again', recovered.steps.filter((step) => step.name === 'REVIEW').length === 1, JSON.stringify(recovered.steps));
+check('...the interrupted design is recorded as failed, then done', recovered.steps.filter((step) => step.name === 'DESIGN').map((step) => step.status).join() === 'FAILED,COMPLETED', JSON.stringify(recovered.steps));
+useModel('ok');
+
+console.log('--- What the runs left in the audit log ---');
+for (const action of ['ai.run.started', 'ai.run.cancelled', 'ai.run.failed']) {
+  check(`${action} is audited`, Number(psql(`select count(*) from audit_log where action = '${action}' and "projectId" = '${project.id}'`)) >= 1);
 }
 
 console.log('--- What the database holds ---');

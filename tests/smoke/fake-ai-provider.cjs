@@ -12,6 +12,8 @@
 //   redirect                 HTTP 302
 //   slow                     an answer after 20 s
 //   flaky                    the first call (since the last reset) isn't JSON, the rest are valid
+//   revise                   the first coverage audit (since the last reset) asks for a revision
+//   slow-after-review        the requirement review is instant, every later call answers after 20 s
 // Control: GET /__last (the last request: path, headers, body), GET /__calls (every request: path, model),
 // POST /__reset, POST /__quit. Start it with `docker compose exec -T app node -` and the file on stdin.
 const http = require('http');
@@ -19,12 +21,53 @@ const http = require('http');
 let last = null;
 let calls = [];
 let flakyCalls = 0;
+let audits = 0;
 
 const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body));
 };
-const cannedOutput = (schemaName) => (schemaName === 'connection_test' ? { ok: true } : {});
+const REVIEW = {
+  summary: 'A user can reset a forgotten password by email.',
+  acceptanceCriteria: ['A reset link is emailed to a known address', 'A reset link stops working after one hour'],
+  findings: [{ kind: 'question', severity: 'low', text: 'Which template does the email use?' }],
+};
+const DESIGN = {
+  cases: [
+    {
+      title: 'Reset link is emailed',
+      preconditions: null,
+      steps: [{ action: 'Request a reset for a known address', expectedResult: 'An email with a link arrives' }],
+      priority: 'HIGH',
+      type: 'FUNCTIONAL',
+      kind: 'positive',
+    },
+    {
+      title: 'Expired reset link is rejected',
+      preconditions: 'A link older than one hour',
+      steps: [{ action: 'Open the link', expectedResult: null }],
+      priority: 'MEDIUM',
+      type: 'REGRESSION',
+      kind: 'negative',
+    },
+  ],
+};
+const audit = (revisionNeeded) => ({
+  coverage: [{ criterion: 0, caseIndexes: [0] }, { criterion: 1, caseIndexes: [1] }],
+  uncovered: [],
+  duplicates: [],
+  revisionNeeded,
+  notes: revisionNeeded ? 'Add a boundary case for exactly one hour' : 'Both criteria are covered',
+});
+function cannedOutput(schemaName, model) {
+  switch (schemaName) {
+    case 'connection_test': return { ok: true };
+    case 'requirement_review': return REVIEW;
+    case 'test_design': return DESIGN;
+    case 'coverage_audit': return audit(model === 'revise' && audits++ === 0);
+    default: return {};
+  }
+}
 
 function validAnswer(res, anthropic, model, schemaName, output) {
   json(
@@ -72,6 +115,7 @@ const server = http.createServer((req, res) => {
       last = null;
       calls = [];
       flakyCalls = 0;
+      audits = 0;
       return json(res, 200, { reset: true });
     }
     if (req.url === '/__quit') return res.end('bye', () => process.exit(0));
@@ -105,12 +149,15 @@ const server = http.createServer((req, res) => {
         return res.end('"}');
       }
       case 'slow':
-        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName)), 20000);
+        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), 20000);
+      case 'slow-after-review':
+        if (schemaName === 'requirement_review') return validAnswer(res, anthropic, model, schemaName, REVIEW);
+        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), 20000);
       case 'flaky':
         if (flakyCalls++ === 0) return notJson(res, anthropic, model);
-        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName));
+        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model));
       default:
-        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName));
+        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model));
     }
   });
 });

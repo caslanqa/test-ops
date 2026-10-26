@@ -40,6 +40,7 @@ model User {
   auditLogEntries      AuditLog[]
   testCaseHistory      TestCaseHistory[]
   sentInvitations      WorkspaceInvitation[]
+  aiRuns               AiWorkflowRun[]   @relation("AiRunCreatedBy")
 
   @@map("users")
 }
@@ -137,6 +138,7 @@ model Project {
   webhook      ProjectWebhook?
   invitations  WorkspaceInvitation[]
   aiSettings   AiSettings?
+  aiRuns       AiWorkflowRun[]
 
   @@unique([workspaceId, key])
   @@map("projects")
@@ -712,4 +714,77 @@ model AiSettings {
   project   Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("ai_settings")
+}
+
+enum AiWorkflowType {
+  REQUIREMENT_TO_CASES
+}
+
+enum AiRunStatus {
+  QUEUED
+  RUNNING
+  /// The drafts are ready and wait for a person to approve them; nothing is written to cases before that.
+  AWAITING_APPROVAL
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AiStepStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// One run of an AI workflow on a project (ai/ai-worker.service.ts). The API only queues it; a worker loop in
+/// the API process claims it, and a claim that outlives lockedUntil is taken over, so a crash loses nothing.
+model AiWorkflowRun {
+  id               String         @id @default(uuid())
+  type             AiWorkflowType
+  projectId        String
+  createdById      String
+  status           AiRunStatus    @default(QUEUED)
+  /// What the person asked for: { requirementId, extraContext }.
+  input            Json
+  /// Which setting the run was started with: provider, model, endpoint host, source, settings id. Never the key.
+  providerSnapshot Json
+  /// { review, drafts, audit } once the drafts are ready.
+  result           Json?
+  error            String?
+  availableAt      DateTime       @default(now())
+  lockedUntil      DateTime?
+  createdAt        DateTime       @default(now())
+  startedAt        DateTime?
+  finishedAt       DateTime?
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User             @relation("AiRunCreatedBy", fields: [createdById], references: [id])
+  steps     AiWorkflowStep[]
+
+  @@index([status, availableAt])
+  @@index([projectId, createdAt])
+  @@map("ai_workflow_runs")
+}
+
+/// One model call of a run. A step that has to be repeated gets a new row with the next attempt number.
+model AiWorkflowStep {
+  id           String       @id @default(uuid())
+  runId        String
+  /// REVIEW, DESIGN, AUDIT, REVISE or AUDIT_REVISED (the audit that follows a revision).
+  name         String
+  skillVersion Int
+  status       AiStepStatus @default(RUNNING)
+  attempt      Int
+  /// What was sent to the provider; project data, so it is never part of an API answer.
+  input        Json
+  output       Json?
+  usage        Json?
+  error        String?
+  startedAt    DateTime     @default(now())
+  endedAt      DateTime?
+
+  run AiWorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, name, attempt])
+  @@map("ai_workflow_steps")
 }

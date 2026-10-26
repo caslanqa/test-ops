@@ -1,0 +1,248 @@
+import { Injectable, Logger } from "@nestjs/common";
+import type { AiWorkflowRun, Prisma } from "@prisma/client";
+import { AuditService } from "../audit/audit.service";
+import { PrismaService } from "../prisma/prisma.service";
+import { AiSettingsService } from "./ai-settings.service";
+import { AiProviderError, scrubProviderError } from "./provider-error";
+import { createAiProvider, type AiProvider } from "./providers/provider";
+import { coverageAuditor, sanitizeAudit } from "./skills/coverage-auditor";
+import { requirementReviewer } from "./skills/requirement-reviewer";
+import type { AiSkill } from "./skills/skill";
+import { testDesigner, testReviser } from "./skills/test-designer";
+import type { Audit, CaseDraft, Review, RunContext } from "./skills/types";
+import { stripBounds } from "./validate-output";
+
+/** How long a claim on a run holds, unless a step needs longer (see extendLock). */
+export const RUN_LOCK_MS = 5 * 60 * 1000;
+/** A step is tried at most twice: once, and once more when the first answer was unusable. */
+const MAX_ATTEMPTS_PER_STEP = 2;
+/** Every model call of a run, retries included. A revision makes exactly five. */
+const MAX_MODEL_CALLS = 5;
+/** Other cases of the project that are sent for duplicate detection. */
+const OTHER_CASES_SENT = 200;
+
+/** The run was cancelled (or ended some other way) while a step was under way: stop, and leave it as it is. */
+class RunStopped extends Error {}
+/** The run cannot go on; the message is shown to people. */
+class RunFailure extends Error {}
+
+type StepName = "REVIEW" | "DESIGN" | "AUDIT" | "REVISE" | "AUDIT_REVISED";
+
+/**
+ * Carries one claimed run to its next resting place: waiting for approval, failed, or stopped by a cancel. The
+ * steps are saved as they finish, so a run that was taken over after a crash resumes at the first step without
+ * an answer. Nothing here writes to cases; that happens only when a person approves the drafts.
+ */
+@Injectable()
+export class AiRunExecutor {
+  private readonly logger = new Logger(AiRunExecutor.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: AiSettingsService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /** Never throws: whatever goes wrong ends the run as failed, or is logged. */
+  async execute(runId: string): Promise<void> {
+    const run = await this.prisma.aiWorkflowRun.findUnique({ where: { id: runId } });
+    if (!run || run.status !== "RUNNING") return;
+    // Known once the setting is read, so an error message can be scrubbed of it.
+    let credential: string | null = null;
+    try {
+      await this.runWorkflow(run, (value) => {
+        credential = value;
+      });
+    } catch (error) {
+      if (error instanceof RunStopped) return;
+      const message =
+        error instanceof RunFailure || error instanceof AiProviderError
+          ? error.message
+          : "The run failed unexpectedly";
+      if (!(error instanceof RunFailure || error instanceof AiProviderError)) {
+        this.logger.error(`AI run ${runId} failed unexpectedly: ${error instanceof Error ? error.stack : String(error)}`);
+      }
+      await this.fail(run, scrubProviderError(message, credential));
+    }
+  }
+
+  private async runWorkflow(run: AiWorkflowRun, rememberCredential: (value: string | null) => void): Promise<void> {
+    // A step still marked as running was in flight when the process died; it has no answer.
+    await this.prisma.aiWorkflowStep.updateMany({
+      where: { runId: run.id, status: "RUNNING" },
+      data: { status: "FAILED", error: "Interrupted by a restart", endedAt: new Date() },
+    });
+
+    const { settings } = await this.settings.resolve(run.projectId);
+    if (!settings || !settings.enabled) throw new RunFailure("AI is not enabled for this project");
+    let credential: string | null = null;
+    if (settings.credentialCipher) {
+      credential = this.settings.openCredential(settings);
+      rememberCredential(credential);
+      if (credential === null) {
+        throw new RunFailure("The saved provider key can't be read, probably because AI_ENCRYPTION_KEY changed");
+      }
+    }
+    const provider = createAiProvider({
+      provider: settings.provider,
+      model: settings.model,
+      endpoint: settings.endpoint,
+      credential,
+      maxOutputTokens: settings.maxOutputTokens,
+      requestTimeoutMs: settings.requestTimeoutMs,
+    });
+    const context = await this.loadContext(run);
+    const step = <I, O>(name: StepName, skill: AiSkill<I, O>, input: I) =>
+      this.runStep(run.id, provider, settings.requestTimeoutMs, credential, name, skill, input);
+
+    const review: Review = await step("REVIEW", requirementReviewer, context);
+    const design = await step("DESIGN", testDesigner, { context, review });
+    let drafts: CaseDraft[] = design.cases;
+    let audit: Audit = await step("AUDIT", coverageAuditor, { context, review, drafts });
+    if (audit.revisionNeeded) {
+      // One revision, then one more audit; whatever that audit finds is shown, not acted on.
+      const revised = await step("REVISE", testReviser, { context, review, previous: drafts, audit });
+      drafts = revised.cases;
+      audit = await step("AUDIT_REVISED", coverageAuditor, { context, review, drafts });
+    }
+    audit = sanitizeAudit(audit, review.acceptanceCriteria.length, drafts.length, new Set(context.otherCases.map((c) => c.id)));
+
+    // Only while the run is still ours: a cancel that came in meanwhile stays a cancel.
+    await this.prisma.aiWorkflowRun.updateMany({
+      where: { id: run.id, status: "RUNNING" },
+      data: {
+        status: "AWAITING_APPROVAL",
+        result: { review, drafts, audit } as unknown as Prisma.InputJsonValue,
+        lockedUntil: null,
+      },
+    });
+  }
+
+  /** What the run may tell the provider about the project: the requirement, what is linked to it, other case titles. */
+  private async loadContext(run: AiWorkflowRun): Promise<RunContext> {
+    const input = run.input as { requirementId?: string; extraContext?: string | null };
+    const requirement = await this.prisma.requirement.findUnique({
+      where: { id: input.requirementId ?? "" },
+      include: {
+        cases: {
+          include: { testCase: { include: { steps: { orderBy: { position: "asc" } } } } },
+        },
+      },
+    });
+    if (!requirement || requirement.projectId !== run.projectId || requirement.archivedAt) {
+      throw new RunFailure("The requirement is no longer available");
+    }
+    const linked = requirement.cases.map((link) => link.testCase).filter((testCase) => !testCase.archivedAt);
+    const others = await this.prisma.testCase.findMany({
+      where: { projectId: run.projectId, archivedAt: null, id: { notIn: linked.map((testCase) => testCase.id) } },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+      take: OTHER_CASES_SENT,
+      select: { id: true, title: true },
+    });
+    return {
+      requirement: { title: requirement.title, description: requirement.description },
+      extraContext: input.extraContext || null,
+      linkedCases: linked.map((testCase) => ({
+        title: testCase.title,
+        steps: testCase.steps.map((s) => ({ action: s.action, expectedResult: s.expectedResult ?? undefined })),
+      })),
+      otherCases: others,
+    };
+  }
+
+  /**
+   * One step: its saved answer when it has one, else a model call. A call whose answer is unusable, or that failed
+   * in a way that may pass, is made once more; then the run fails with the last error. Between calls the run is
+   * read again, so a cancel takes effect as soon as the step in flight returns.
+   */
+  private async runStep<I, O>(
+    runId: string,
+    provider: AiProvider,
+    timeoutMs: number,
+    credential: string | null,
+    name: StepName,
+    skill: AiSkill<I, O>,
+    input: I,
+  ): Promise<O> {
+    for (;;) {
+      await this.assertStillRunning(runId);
+      const rows = await this.prisma.aiWorkflowStep.findMany({ where: { runId, name }, orderBy: { attempt: "asc" } });
+      const done = rows.find((row) => row.status === "COMPLETED");
+      if (done) return done.output as unknown as O;
+      if (rows.length >= MAX_ATTEMPTS_PER_STEP) throw new RunFailure(rows[rows.length - 1].error ?? "The step failed");
+      if ((await this.prisma.aiWorkflowStep.count({ where: { runId } })) >= MAX_MODEL_CALLS) {
+        throw new RunFailure("Model call limit reached");
+      }
+
+      const user = skill.user(input);
+      const row = await this.prisma.aiWorkflowStep.create({
+        data: { runId, name, skillVersion: skill.version, attempt: (rows[rows.length - 1]?.attempt ?? 0) + 1, input: { user } },
+      });
+      // The claim has to outlast the call, whatever the setting's timeout is.
+      await this.extendLock(runId, Math.max(RUN_LOCK_MS, timeoutMs + 60_000));
+      try {
+        const result = await provider.generate({
+          system: skill.system,
+          user,
+          schemaName: skill.schemaName,
+          schema: stripBounds(skill.schema),
+        });
+        const output = skill.validate(result.output);
+        await this.prisma.aiWorkflowStep.update({
+          where: { id: row.id },
+          data: {
+            status: "COMPLETED",
+            output: output as unknown as Prisma.InputJsonValue,
+            usage: result.usage as unknown as Prisma.InputJsonValue,
+            endedAt: new Date(),
+          },
+        });
+        await this.extendLock(runId, RUN_LOCK_MS);
+        return output;
+      } catch (error) {
+        const message = scrubProviderError(
+          error instanceof AiProviderError ? error.message : "The step failed unexpectedly",
+          credential,
+        );
+        await this.prisma.aiWorkflowStep.update({
+          where: { id: row.id },
+          data: { status: "FAILED", error: message, endedAt: new Date() },
+        });
+        if (!(error instanceof AiProviderError)) {
+          this.logger.error(`AI step ${name} of run ${runId} failed unexpectedly: ${error instanceof Error ? error.stack : String(error)}`);
+          throw new RunFailure(message);
+        }
+        if (!error.retryable) throw new RunFailure(message);
+        // Retryable: the next turn of the loop tries once more, or gives up.
+      }
+    }
+  }
+
+  private async assertStillRunning(runId: string): Promise<void> {
+    const run = await this.prisma.aiWorkflowRun.findUnique({ where: { id: runId }, select: { status: true } });
+    if (!run || run.status !== "RUNNING") throw new RunStopped();
+  }
+
+  private async extendLock(runId: string, ms: number): Promise<void> {
+    await this.prisma.aiWorkflowRun.updateMany({
+      where: { id: runId, status: "RUNNING" },
+      data: { lockedUntil: new Date(Date.now() + ms) },
+    });
+  }
+
+  private async fail(run: AiWorkflowRun, message: string): Promise<void> {
+    const failed = await this.prisma.aiWorkflowRun.updateMany({
+      where: { id: run.id, status: "RUNNING" },
+      data: { status: "FAILED", error: message, finishedAt: new Date(), lockedUntil: null },
+    });
+    if (failed.count === 0) return;
+    await this.audit.record({
+      userId: run.createdById,
+      projectId: run.projectId,
+      action: "ai.run.failed",
+      entityType: "ai_workflow_run",
+      entityId: run.id,
+      metadata: { error: message },
+    });
+  }
+}
