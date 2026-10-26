@@ -20,7 +20,10 @@ export interface TestOpsStep {
 export interface TestOpsResult {
   /** Exact UUID of the TestOps case. */
   testCaseId?: string;
-  /** Stable identity for safe retry and deduplication inside a run. */
+  /**
+   * Stable identity of the test, for safe retries. The client adds an id for each execution, so a later
+   * execution into the same run adds an attempt instead of replacing this one.
+   */
   externalTestId: string;
   title: string;
   status: TestOpsResultStatus;
@@ -67,6 +70,11 @@ export interface TestOpsSyncOptions extends ReporterOptions {
    * written into the test source. Defaults to false.
    */
   link?: boolean;
+  /**
+   * The tests were narrowed (a file, grep or project), so the list may be incomplete: `link` then only
+   * warns on a dry run and refuses `apply`. The `testops-sync` command sets it from its Playwright arguments.
+   */
+  partial?: boolean;
 }
 
 /** Uploads framework-neutral results using the TestOps v1 REST contract. */

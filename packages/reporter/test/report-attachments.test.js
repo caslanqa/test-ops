@@ -3,7 +3,7 @@ import { mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { captureConsole, fakeFetch, testClient } from './helpers.js';
+import { API_BASE, captureConsole, fakeFetch, testClient } from './helpers.js';
 
 const run = { id: 'r1', runCases: [{ testCaseId: 'c1', executionMode: 'AUTOMATED' }] };
 const isUpload = (call) => call.path.endsWith('/attachments');
@@ -102,4 +102,63 @@ test('only the file the server still refuses on its own warns', async () => {
   assert.deepEqual(uploaded, ['shot.png', 'bad.txt', 'log.txt']);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /bad\.txt/);
+});
+
+test('a large file is sent from disk and not copied into memory', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'testops-test-'));
+  const output = captureConsole();
+  try {
+    const path = join(dir, 'big.zip');
+    await writeFile(path, 'x');
+    await truncate(path, 30 * 1024 * 1024);
+    const baseline = process.memoryUsage().arrayBuffers;
+    let during;
+    const fetch = async (url, init = {}) => {
+      const requested = String(url).slice(API_BASE.length);
+      if (requested.endsWith('/attachments')) {
+        during = process.memoryUsage().arrayBuffers;
+        return new Response('{}');
+      }
+      if (init.method === 'GET') return new Response(JSON.stringify(run));
+      if (requested.endsWith('/results/bulk')) return new Response(JSON.stringify({ results: [{ id: 'x0' }] }));
+      return new Response('{}');
+    };
+    await testClient(fetch, { runId: 'r1' }).report([
+      { testCaseId: 'c1', externalTestId: 't1', title: 'one', status: 'FAILED', attachments: [{ path, contentType: 'application/zip' }] },
+    ]);
+    assert.notEqual(during, undefined, 'the upload request was made');
+    assert.ok(during - baseline < 8 * 1024 * 1024, `the upload held ${Math.round((during - baseline) / 1024 / 1024)} MB in memory`);
+  } finally {
+    output.restore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('after a network failure the remaining uploads are skipped with one more warning', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'testops-test-'));
+  const output = captureConsole();
+  try {
+    const path = join(dir, 'f.txt');
+    await writeFile(path, 'content');
+    const { fetch, calls } = fakeFetch({
+      'GET /projects/p/runs/r1': () => ({ id: 'r1', runCases: [{ testCaseId: 'c1', executionMode: 'AUTOMATED' }, { testCaseId: 'c2', executionMode: 'AUTOMATED' }] }),
+      'POST /projects/p/runs/r1/results/bulk': ({ body }) => ({ results: body.results.map((_, index) => ({ id: `x${index}` })) }),
+      'POST /projects/p/results/x0/attachments': () => { throw new Error('connection reset'); },
+      'POST /projects/p/results/x1/attachments': () => ({}),
+    });
+    const failed = (id) => ({ testCaseId: id, externalTestId: `t-${id}`, title: id, status: 'FAILED', attachments: [{ path, contentType: 'text/plain' }] });
+    await testClient(fetch, { runId: 'r1' }).report([failed('c1'), failed('c2')]);
+    assert.equal(calls.filter(isUpload).length, 1);
+    assert.equal(output.warnings.length, 2);
+    assert.match(output.warnings[0], /connection reset/);
+    assert.match(output.warnings[1], /uploads are skipped/);
+  } finally {
+    output.restore();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a file that cannot be read does not stop the uploads of the next result', async () => {
+  const { calls } = await report({ files: [{ name: 'gone.png', missing: true }, { name: 'ok.txt' }] });
+  assert.equal(calls.filter(isUpload).length, 1);
 });

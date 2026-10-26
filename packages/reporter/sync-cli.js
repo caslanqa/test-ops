@@ -41,7 +41,8 @@ try {
   if (result.status !== 0) process.exitCode = result.status ?? 1;
   else {
     const tests = JSON.parse(readFileSync(output, 'utf8'));
-    await syncTestCases(tests, { apply, link });
+    // Playwright arguments (a file, --grep, --project) narrow the tests the sync sees.
+    await syncTestCases(tests, { apply, link, partial: playwrightArgs.length > 0 });
   }
 } catch (error) {
   console.error(`TestOps sync: ${error instanceof Error ? error.message : error}`);

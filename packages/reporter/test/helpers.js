@@ -14,8 +14,13 @@ export function fakeFetch(routes) {
     const path = String(url).slice(API_BASE.length);
     const method = init.method ?? 'GET';
     const call = { method, path };
-    if (init.body instanceof FormData) call.form = init.body;
-    else if (typeof init.body === 'string') call.body = JSON.parse(init.body);
+    if (init.body instanceof FormData) {
+      // Uploads are streamed from disk, and the files may be gone when a test looks at the request.
+      call.form = new FormData();
+      for (const [field, file] of init.body) {
+        call.form.append(field, new File([await file.arrayBuffer()], file.name, { type: file.type }));
+      }
+    } else if (typeof init.body === 'string') call.body = JSON.parse(init.body);
     calls.push(call);
 
     const handler = routes[`${method} ${path}`];

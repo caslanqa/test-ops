@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { openAsBlob } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, relative } from 'node:path';
 import { groupFiles, parseAttachmentPolicy, shouldAttach, skipReason } from './artifacts.js';
@@ -82,6 +83,8 @@ class TestOpsClient {
     // One id per execution: results sent by a later execution into the same run become new attempts
     // instead of replacing earlier ones, while a retried request of this execution stays idempotent.
     this.executionId = randomUUID();
+    // Set when an upload fails because TestOps cannot be reached; the rest of the uploads are then skipped.
+    this.uploadsStopped = false;
   }
 
   async request(method, path, body, { form, retryable = false } = {}) {
@@ -108,6 +111,8 @@ class TestOpsClient {
         return text ? JSON.parse(text) : undefined;
       } catch (error) {
         lastError = error;
+        // No status means the request never got an answer: the server could not be reached, or timed out.
+        if (error && error.status === undefined) error.network = true;
         const retryableStatus = error?.status === 429 || error?.status >= 500;
         const retryableNetwork = error?.status === undefined;
         if (!retryable || (!retryableStatus && !retryableNetwork) || attempt + 1 >= maxAttempts) throw error;
@@ -213,7 +218,10 @@ class TestOpsClient {
     this.logUnlinked(unlinked, outsideRun);
   }
 
-  async syncTests(inputTests, { apply = false, link = false } = {}) {
+  async syncTests(inputTests, { apply = false, link = false, partial = false } = {}) {
+    if (link && apply && partial) {
+      throw new Error('TestOps link: --link --apply needs every test, so run it without Playwright arguments (a file path, --grep or --project).');
+    }
     const cases = await this.request('GET', `${this.projectPath}/cases`);
     const casesById = new Map(cases.map((testCase) => [testCase.id, testCase]));
     const testsById = new Map();
@@ -273,14 +281,17 @@ class TestOpsClient {
       else console.log(`TestOps sync: ${changes.length} ${changes.length === 1 ? 'case' : 'cases'} updated.`);
     }
 
-    if (link) await this.linkTests(inputTests, cases, new Set(testsById.keys()), { apply });
+    if (link) await this.linkTests(inputTests, cases, new Set(testsById.keys()), { apply, partial });
   }
 
   /**
    * Pairs tests that have no case ID with cases by title and, with `apply`, writes the ID of each exact
    * match into the test source. Cases that a test already links to are not offered again.
    */
-  async linkTests(inputTests, cases, linkedCaseIds, { apply }) {
+  async linkTests(inputTests, cases, linkedCaseIds, { apply, partial }) {
+    if (partial) {
+      console.warn('TestOps link: Playwright arguments narrowed the tests, so this list may be incomplete: a case that another test links, or a title that repeats elsewhere, can be missed.');
+    }
     const unlinkedTests = dedupeByLocation(inputTests.filter((test) => !clean(test.testCaseId) && clean(test.title)));
     const candidates = cases.filter((testCase) => !linkedCaseIds.has(testCase.id));
     const { exact, suggestions, ambiguous, unmatched } = matchTestsToCases(unlinkedTests, candidates);
@@ -318,7 +329,7 @@ class TestOpsClient {
       const shown = relative(process.cwd(), file);
       const { source, linked, skipped } = linkTestsInSource(
         await readFile(file, 'utf8'),
-        items.map(({ test, caseId }) => ({ line: test.location.line, column: test.location.column, testCaseId: caseId })),
+        items.map(({ test, caseId }) => ({ line: test.location.line, column: test.location.column, testCaseId: caseId, title: test.title })),
       );
       for (const item of skipped) console.warn(`TestOps link: could not link ${shown}:${item.line}: ${item.reason}.`);
       if (linked > 0) {
@@ -348,6 +359,7 @@ class TestOpsClient {
    * refuse, an unreadable file and a failed upload each warn; none of them loses the result.
    */
   async uploadAttachments(resultId, attachments, title) {
+    if (this.uploadsStopped) return;
     const files = [];
     for (const attachment of attachments) {
       const name = attachment.name ?? basename(attachment.path);
@@ -378,22 +390,28 @@ class TestOpsClient {
               await this.sendFiles(resultId, [file]);
             } catch (single) {
               console.warn(`TestOps: attachment "${file.name}" for "${title}" could not be uploaded. ${single instanceof Error ? single.message : single}`);
+              if (single?.network) return this.stopUploads();
             }
           }
         } else {
           console.warn(`TestOps: attachments for "${title}" could not be uploaded. ${error instanceof Error ? error.message : error}`);
+          if (error?.network) return this.stopUploads();
         }
       }
     }
   }
 
+  /** After the server cannot be reached, every further upload would wait for its own timeout: skip them. */
+  stopUploads() {
+    this.uploadsStopped = true;
+    console.warn('TestOps: attachment uploads are skipped from here on: the TestOps server could not be reached.');
+  }
+
   /** One multipart request carrying the given files of a result. */
   async sendFiles(resultId, files) {
     const form = new FormData();
-    for (const file of files) {
-      const bytes = new Uint8Array(await readFile(file.path));
-      form.append('files', new Blob([bytes], { type: file.contentType }), file.name);
-    }
+    // A Blob backed by the file: it is read while it is sent, so a large group is never held in memory.
+    for (const file of files) form.append('files', await openAsBlob(file.path, { type: file.contentType }), file.name);
     await this.request('POST', `${this.projectPath}/results/${encodeURIComponent(resultId)}/attachments`, undefined, { form });
   }
 
@@ -441,11 +459,11 @@ export async function reportResults(results, options = {}, env = process.env) {
 
 /** Syncs Playwright case titles and automation status to TestOps using explicit TestOps IDs. */
 export async function syncTestCases(tests, options = {}, env = process.env) {
-  const { apply = false, link = false, ...reporterOptions } = options;
+  const { apply = false, link = false, partial = false, ...reporterOptions } = options;
   const client = createReporterClient({
     ...reporterOptions,
     token: reporterOptions.token ?? env.TESTOPS_SYNC_TOKEN ?? env.TESTOPS_TOKEN,
   }, env);
   if (!client) throw new Error('Configure TESTOPS_URL, TESTOPS_PROJECT_ID and TESTOPS_SYNC_TOKEN (or TESTOPS_TOKEN).');
-  await client.syncTests(tests, { apply, link });
+  await client.syncTests(tests, { apply, link, partial });
 }

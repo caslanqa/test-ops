@@ -133,3 +133,67 @@ test('an ID that is not a UUID is never written into the source', () => {
   assert.equal(result.linked, 0);
   assert.match(result.skipped[0].reason, /UUID/);
 });
+
+const BOM = String.fromCharCode(0xfeff);
+const CR = String.fromCharCode(13);
+const BACKSLASH = String.fromCharCode(92);
+
+test('an import line inside a block comment is not taken for the first import', () => {
+  const source = ['/*', "import old from 'x';", '*/', PLAYWRIGHT_IMPORT, "test('plain', async () => {});"].join('\n');
+  const result = linkTestsInSource(source, [link(source, "('plain'")]);
+  assert.equal(result.source, ['/*', "import old from 'x';", '*/', IMPORT_LINE, PLAYWRIGHT_IMPORT, `test('plain'${linked(ID1)}, async () => {});`].join('\n'));
+});
+
+test('a commented-out testops import does not stand in for the real one', () => {
+  const source = [PLAYWRIGHT_IMPORT, "// import { testops } from '@testops/reporter';", "test('plain', async () => {});"].join('\n');
+  const result = linkTestsInSource(source, [link(source, "('plain'")]);
+  assert.equal(result.linked, 1);
+  assert.ok(result.source.startsWith(`${IMPORT_LINE}\n${PLAYWRIGHT_IMPORT}\n`));
+});
+
+test('a string that looks like the start of a comment does not hide the imports after it', () => {
+  const source = ["const note = '/* not a comment';", PLAYWRIGHT_IMPORT, "test('plain', async () => {});"].join('\n');
+  const result = linkTestsInSource(source, [link(source, "('plain'")]);
+  assert.equal(result.linked, 1);
+  assert.ok(result.source.includes(`${IMPORT_LINE}\n${PLAYWRIGHT_IMPORT}`));
+});
+
+test('a testops name that another import already binds refuses the file', () => {
+  const source = [PLAYWRIGHT_IMPORT, "import { testops } from './helpers';", "test('plain', async () => {});"].join('\n');
+  const result = linkTestsInSource(source, [link(source, "('plain'")]);
+  assert.equal(result.source, source);
+  assert.equal(result.linked, 0);
+  assert.match(result.skipped[0].reason, /testops/);
+});
+
+test('a byte order mark before the first import is kept and the import goes after it', () => {
+  const source = BOM + [PLAYWRIGHT_IMPORT, "test('plain', async () => {});"].join('\n');
+  const result = linkTestsInSource(source, [link(source, "('plain'")]);
+  assert.equal(result.linked, 1);
+  assert.ok(result.source.startsWith(`${BOM}${IMPORT_LINE}\n${PLAYWRIGHT_IMPORT}`));
+});
+
+test('a lone CR counts as a line break, like in the line numbers Playwright reports', () => {
+  const source = [PLAYWRIGHT_IMPORT, `/* a${CR}b */`, "test('plain', async () => {});", ''].join('\n');
+  // The CR inside the comment starts a line, so the test is on line 4.
+  const result = linkTestsInSource(source, [{ line: 4, column: 5, testCaseId: ID1, title: 'plain' }]);
+  assert.equal(result.linked, 1);
+  assert.deepEqual(result.skipped, []);
+});
+
+test('a location that belongs to a different test is skipped when the title does not match', () => {
+  const source = [PLAYWRIGHT_IMPORT, "test('first', async () => {});", "test('second', async () => {});"].join('\n');
+  const result = linkTestsInSource(source, [{ ...locationOf(source, "('first'"), testCaseId: ID1, title: 'second' }]);
+  assert.equal(result.source, source);
+  assert.equal(result.linked, 0);
+  assert.match(result.skipped[0].reason, /"first".*"second"/);
+});
+
+test('the title is compared after the escapes in the literal are resolved', () => {
+  const literal = `it${BACKSLASH}'s ${BACKSLASH}u00fc ${BACKSLASH}x41 ${BACKSLASH}u{1F600}`;
+  const title = `it's ${String.fromCharCode(0xfc)} A ${String.fromCodePoint(0x1f600)}`;
+  const source = [PLAYWRIGHT_IMPORT, `test('${literal}', async () => {});`].join('\n');
+  const result = linkTestsInSource(source, [{ ...locationOf(source, "('it"), testCaseId: ID1, title }]);
+  assert.equal(result.linked, 1);
+  assert.deepEqual(result.skipped, []);
+});

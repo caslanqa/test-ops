@@ -23,7 +23,7 @@ const cases = [
 ];
 
 /** Runs syncTests against a spec file in a temp directory; `discover` builds the tests from the file path. */
-async function sync({ source = SPEC, options, discover, caseList = cases, packageJson = '{"type":"module"}' }) {
+async function sync({ source = SPEC, options, discover, caseList = cases, packageJson = '{"type":"module"}', expectError = false }) {
   const dir = await mkdtemp(join(tmpdir(), 'testops-test-'));
   const output = captureConsole();
   try {
@@ -32,8 +32,14 @@ async function sync({ source = SPEC, options, discover, caseList = cases, packag
     await writeFile(file, source);
     const tests = discover(file, source);
     const { fetch, calls } = fakeFetch({ 'GET /projects/p/cases': () => caseList });
-    await testClient(fetch).syncTests(tests, options);
-    return { calls, logs: output.logs, warnings: output.warnings, after: await readFile(file, 'utf8'), source };
+    let error;
+    try {
+      await testClient(fetch).syncTests(tests, options);
+    } catch (caught) {
+      if (!expectError) throw caught;
+      error = caught;
+    }
+    return { calls, logs: output.logs, warnings: output.warnings, after: await readFile(file, 'utf8'), source, error };
   } finally {
     output.restore();
     await rm(dir, { recursive: true, force: true });
@@ -130,5 +136,29 @@ test('tests in a project that is not an ES module project are linked too', async
   });
   assert.ok(after.startsWith("import { testops } from '@testops/reporter';\n"));
   assert.ok(after.includes(`test('Open the cart', testops('${C1}'), async`));
+  assert.deepEqual(warnings, []);
+});
+
+test('--link --apply with narrowed tests refuses before it changes anything', async () => {
+  const { error, after, source, calls } = await sync({
+    options: { link: true, apply: true, partial: true },
+    discover: unlinkedTests,
+    expectError: true,
+  });
+  assert.match(error.message, /without Playwright arguments/);
+  assert.equal(after, source);
+  assert.equal(calls.filter((call) => call.method !== 'GET').length, 0);
+});
+
+test('a dry run with narrowed tests warns that the list may be incomplete', async () => {
+  const { warnings, error } = await sync({ options: { link: true, partial: true }, discover: unlinkedTests, expectError: true });
+  assert.equal(error, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Playwright arguments/);
+});
+
+test('narrowed tests change nothing for a sync without link', async () => {
+  const { warnings, error } = await sync({ options: { apply: true, partial: true }, discover: unlinkedTests, expectError: true });
+  assert.equal(error, undefined);
   assert.deepEqual(warnings, []);
 });

@@ -107,8 +107,13 @@ screenshots, video, `trace.zip`, files added with `testInfo.attach()`, and the t
 output and error as `stdout.log` and `stderr.log`. Files are sent in requests of at most 20 files and
 128 MB. A file larger than 32 MB or of a type the server does not accept is skipped with a warning,
 as is a file that cannot be read or prepared. If the server refuses a request, its files are sent
-again one by one, so only the file it still refuses is lost. None of this loses a result or fails the
-run.
+again one by one, so only the file it still refuses is lost. If TestOps cannot be reached, the
+remaining uploads are skipped with one warning instead of each waiting for its own timeout. None of
+this loses a result or fails the run.
+
+**Check what the artifacts contain.** A trace holds request headers, cookies and page content, and the
+logs hold whatever the test prints. Every member of the project can download them from the result, so
+keep secrets out of them (mask tokens in logs, or use `TESTOPS_ATTACHMENTS=none`).
 
 ## Keep test cases in sync
 
@@ -148,6 +153,11 @@ test written as `test('title', async () => { … })` (also `test.only`, `test.sk
 `test.fail`) is edited. A test with a details object, a template-literal title, a helper call as its
 second argument, or in a file without a top-level `import` is listed with `file:line` for you to
 change by hand, and its file is left as it was. Cases are never created or deleted.
+
+Run `--link` without Playwright arguments. A file path, `--grep` or `--project` narrows the tests it
+sees, so a case that another test already links, or a title that repeats in another file, could be
+missed: with such arguments `--link` only warns, and `--link --apply` refuses to write anything. A
+`grep` or `testMatch` set in the Playwright config narrows the tests the same way and is not detected.
 
 `--link` only reads the case list, so a token that can read the project is enough. `--apply` also
 updates case titles and automation status, which needs `TESTOPS_SYNC_TOKEN` (see above).
