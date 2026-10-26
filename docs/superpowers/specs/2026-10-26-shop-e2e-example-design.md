@@ -125,7 +125,8 @@ Job `playwright`, working directory `examples/shop-e2e`:
    `npx playwright install --with-deps chromium`;
 2. for a dispatch only: `npx testops-sync --link --apply`, so the checkout's tests carry the IDs of this
    TestOps project;
-3. for a dispatch only: `npx testops-sync --apply` with `TESTOPS_SYNC_TOKEN`;
+3. for a dispatch only: `npx testops-sync --apply` (with `TESTOPS_TOKEN`; the sync command takes it when
+   `TESTOPS_SYNC_TOKEN` is not set);
 4. for a dispatch only: `node scripts/pick-from-dispatch.mjs "$GITHUB_EVENT_PATH"` writes the `--grep`
    (`@testops-(<id>|<id>)(\s|$)`, or `(?!)` when the run has no automated case IDs) to `$GITHUB_OUTPUT`;
 5. `npx playwright test`, with `--grep` on a dispatch. For a dispatch the env is `TESTOPS_URL` from
@@ -135,8 +136,8 @@ Job `playwright`, working directory `examples/shop-e2e`:
 6. upload `playwright-report` (14 days), also after a failure.
 
 The selection is a script, not inline `jq`, so the same code runs in CI and in the local verification.
-Needed in the repository: secrets `TESTOPS_TOKEN` (Automation) and `TESTOPS_SYNC_TOKEN` (Tester or Admin),
-variable `SHOP_E2E_PROJECT_ID`, and the project's webhook pointing at the repository's dispatches
+Needed in the repository: the secret `TESTOPS_TOKEN` (one API token of a Tester or Admin user does the
+linking, the sync and the reporting), variable `SHOP_E2E_PROJECT_ID`, and the project's webhook pointing at the repository's dispatches
 endpoint (see the README).
 
 `demo-shop.yml` gets `if: github.event_name != 'repository_dispatch' || github.event.client_payload.project.id != vars.SHOP_E2E_PROJECT_ID`

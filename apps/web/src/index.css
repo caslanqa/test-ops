@@ -1285,6 +1285,16 @@ input[type='checkbox'] {
   margin-bottom: 0.5rem;
 }
 
+.integrations-section > .field-hint {
+  margin-top: 1rem;
+}
+
+.integrations-section > .section-subtitle {
+  margin: 1rem 0 0.5rem;
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
 .integrations-form {
   display: flex;
   flex-direction: column;
@@ -1351,6 +1361,11 @@ input[type='checkbox'] {
   margin: 0;
   padding-inline-start: 1.25rem;
   font-size: var(--text-sm);
+}
+
+/* A long URL in a step wraps instead of widening the page (WCAG 1.4.10). */
+.prose-list code {
+  overflow-wrap: anywhere;
 }
 
 /* Whether CI was called for a run, under its header. */

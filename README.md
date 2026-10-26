@@ -160,7 +160,7 @@ The shop and its Playwright tests are in [`examples/demo-shop`](examples/demo-sh
 
 ### CI webhook
 
-A project admin can connect CI under **Integrations**. When a run starts with cases set to **Automation** (set per case in the plan's case list, next to the assignee, or by the cases' automation status), TestOps POSTs the run to the webhook URL so CI can run those cases.
+A project admin can connect CI under **Integrations**; the other roles see neither that section nor **Members**. When a run starts with cases set to **Automation** (set per case in the plan's case list, next to the assignee, or by the cases' automation status), TestOps POSTs the run to the webhook URL so CI can run those cases.
 
 - **Body.** It has the shape of a GitHub `repository_dispatch` (`event_type: "testops.run.started"`, `client_payload` with the run, the API address and the automated cases), so `https://api.github.com/repos/OWNER/REPO/dispatches` can be the webhook itself.
 - **Headers and signature.** Extra headers, such as `Authorization`, are stored encrypted and never shown again. Every call is signed in `X-TestOps-Signature-256` (HMAC-SHA256 of the body with the webhook's secret).

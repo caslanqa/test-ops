@@ -45,8 +45,10 @@ for failures, so the reporter has files to upload for passing tests too.
 
 ## Report to TestOps
 
-1. **Create an API token** under **Account → API tokens**. A Tester or Admin token can create cases and
-   link tests; the results can use the same token or a separate one with the Automation role.
+1. **Create an API token** under **Account → API tokens**. One token does everything here: it creates
+   cases, links tests, syncs titles and reports results. A token has the rights of the account that made
+   it, so there is no role to set; the account only has to be a Tester or Admin in the project (a project
+   or workspace admin already is).
 2. **Find the project ID** in the address of the project (`/projects/<project id>/…`).
 3. **Create the cases** in the project. It is safe to run again, also after step 5 renamed the cases: it
    finds each case by its `shop-e2e:<key>` tag and adds only what is missing:
@@ -60,7 +62,6 @@ for failures, so the reporter has files to upload for passing tests too.
    writes `testops('<id>')` into the tests whose title is exactly one case's title:
 
    ```bash
-   export TESTOPS_SYNC_TOKEN=<token>
    npx testops-sync --link
    npx testops-sync --link --apply
    ```
@@ -113,8 +114,9 @@ the run. On pushes and pull requests it only runs the tests.
    to `https://api.github.com/repos/OWNER/REPO/dispatches` and add the headers
    `Authorization: Bearer <GitHub token>` and `Accept: application/vnd.github+json` (a fine-grained token
    for the repository with Contents set to read and write).
-2. **Add repository secrets** `TESTOPS_TOKEN` (an Automation token, to report results) and
-   `TESTOPS_SYNC_TOKEN` (a Tester or Admin token, to link and sync).
+2. **Add the repository secret** `TESTOPS_TOKEN`, the same kind of API token as above. The job uses it
+   to link, sync and report. (To keep reporting to the narrower Automation role, use the separate
+   `TESTOPS_SYNC_TOKEN` of the reporter's own docs; this workflow does not need it.)
 3. **Add the repository variable** `SHOP_E2E_PROJECT_ID`, the TestOps project ID. The server sends the
    same event for every project, so the workflow runs a dispatch only for this project, and
    [`demo-shop.yml`](../../.github/workflows/demo-shop.yml) ignores it.

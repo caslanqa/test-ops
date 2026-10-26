@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import { AppShell } from './components/AppShell';
+import { ProjectAdminOnly } from './components/ProjectAdminOnly';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { InvitePage } from './pages/InvitePage';
@@ -47,8 +48,10 @@ export default function App() {
               <Route path="runs" element={<RunsPage />} />
               <Route path="runs/:runId" element={<RunDetailPage />} />
               <Route path="defects" element={<DefectsPage />} />
-              <Route path="members" element={<ProjectMembersPage />} />
-              <Route path="integrations" element={<IntegrationsPage />} />
+              <Route element={<ProjectAdminOnly />}>
+                <Route path="members" element={<ProjectMembersPage />} />
+                <Route path="integrations" element={<IntegrationsPage />} />
+              </Route>
             </Route>
           </Route>
         </Route>
