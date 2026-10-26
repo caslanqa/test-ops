@@ -84,7 +84,7 @@ export type ProjectRole = keyof typeof PROJECT_ROLE_LABEL;
 
 /** Descriptions shown in the role picker (matching the server's permission rules). */
 export const PROJECT_ROLE_DESCRIPTION: Record<ProjectRole, string> = {
-  ADMIN: "Can do everything, including managing project members and their roles.",
+  ADMIN: "Manages the project and its members: gives and changes the Tester, Automation and Viewer roles.",
   TESTER: "Creates cases, suites, requirements and plans; starts runs and records results.",
   AUTOMATION: "Starts runs and submits results (from CI with an API token); can't change the repository.",
   VIEWER: "Can see everything but can't change anything.",
@@ -103,7 +103,7 @@ export const WORKSPACE_ROLE_DESCRIPTION: Record<WorkspaceRole, string> = {
 
 /**
  * The five user types of the role ladder, top first. "Workspace admin" is the workspace role ADMIN; the
- * other four are project roles, held together with the workspace role MEMBER (design-doc.md, section 3).
+ * other four are project roles, held together with the workspace role MEMBER (README, "Roles and who can see what").
  */
 export const USER_TYPES = ['WORKSPACE_ADMIN', 'PROJECT_ADMIN', 'TESTER', 'AUTOMATION', 'VIEWER'] as const;
 export type UserType = (typeof USER_TYPES)[number];

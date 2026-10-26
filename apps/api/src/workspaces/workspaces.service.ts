@@ -161,9 +161,9 @@ export class WorkspacesService {
   }
 
   /**
-   * Everything the permissions screen needs in one answer: the members with their workspace role,
-   * the active projects, and every membership in those projects. Workspace admins only, since it
-   * shows who can reach projects the caller may not be a member of.
+   * The permissions matrix in one answer, for API clients (the web app has no page for it any more): the
+   * members with their workspace role, the active projects, and every membership in those projects.
+   * Workspace admins only, since it shows who can reach projects the caller may not be a member of.
    */
   async permissions(userId: string, workspaceId: string) {
     await this.accessControl.requireWorkspaceRole(userId, workspaceId, [

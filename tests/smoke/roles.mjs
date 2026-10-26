@@ -4,9 +4,9 @@
 //   node tests/smoke/roles.mjs
 // Requires SELF_REGISTRATION=true (the default). The target can be changed with BASE, ADMIN_EMAIL and ADMIN_PASSWORD.
 //
-// The rule (design-doc.md, section 3): a workspace admin gives every project role; a project admin gives and
+// The rule (README, "Roles and who can see what"): a workspace admin gives every project role; a project admin gives and
 // manages only Tester, Automation and Viewer, so cannot raise anyone to their own level, touch a peer, or
-// demote or remove themselves. API tokens cannot manage members at all, whoever owns them.
+// demote or remove themselves. API tokens cannot add members or change their roles, whoever owns them.
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'ChangeMe123!';
@@ -82,6 +82,7 @@ const pa = await makeUser('pa', 'ADMIN');
 const pa2 = await makeUser('pa2', 'ADMIN');
 const tester = await makeUser('tester', 'TESTER');
 const viewer = await makeUser('viewer', 'VIEWER');
+const automation = await makeUser('automation', 'AUTOMATION');
 const candidate = await makeUser('candidate', null);
 
 console.log('--- Project admin limits ---');
@@ -134,7 +135,7 @@ await setRole(pa2, 'ADMIN');
 
 console.log('--- Other roles ---');
 const target = await memberIdOf(pa2);
-for (const who of [tester, viewer]) {
+for (const who of [tester, viewer, automation]) {
   await expectStatus(`a ${who.label} cannot add a member`, 403, who.token, 'POST', members, { email: candidate.email, role: 'VIEWER' });
   await expectStatus(`a ${who.label} cannot change a member`, 403, who.token, 'PATCH', `${members}/${target}`, { role: 'VIEWER' });
   await expectStatus(`a ${who.label} cannot remove a member`, 403, who.token, 'DELETE', `${members}/${target}`);

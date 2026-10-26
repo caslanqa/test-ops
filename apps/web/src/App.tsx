@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import { AppShell } from './components/AppShell';
 import { ProjectRoleRoute } from './components/ProjectRoleRoute';
+import { INTEGRATIONS_ROLES, MEMBERS_ROLES } from './lib/sections';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { InvitePage } from './pages/InvitePage';
@@ -46,10 +47,10 @@ export default function App() {
               <Route path="runs" element={<RunsPage />} />
               <Route path="runs/:runId" element={<RunDetailPage />} />
               <Route path="defects" element={<DefectsPage />} />
-              <Route element={<ProjectRoleRoute roles={['ADMIN']} />}>
+              <Route element={<ProjectRoleRoute roles={MEMBERS_ROLES} />}>
                 <Route path="members" element={<ProjectMembersPage />} />
               </Route>
-              <Route element={<ProjectRoleRoute roles={['ADMIN', 'AUTOMATION']} />}>
+              <Route element={<ProjectRoleRoute roles={INTEGRATIONS_ROLES} />}>
                 <Route path="integrations" element={<IntegrationsPage />} />
               </Route>
             </Route>

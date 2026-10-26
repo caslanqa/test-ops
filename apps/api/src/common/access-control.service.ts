@@ -32,7 +32,7 @@ const ALL_PROJECT_ROLES: ProjectRole[] = [
 ];
 
 /**
- * The role ladder (design-doc.md, section 3): a workspace admin gives and manages every project role. A
+ * The role ladder (README, "Roles and who can see what"): a workspace admin gives and manages every project role. A
  * project admin only the ones below their own, so they cannot raise anyone to their level, touch a peer,
  * or change or remove themselves. Callers have passed the project admin check by now.
  */
