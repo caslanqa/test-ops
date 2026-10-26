@@ -3091,6 +3091,63 @@ input[type='checkbox'] {
   font-size: var(--text-sm);
 }
 
+/* The AI run page: the status line, the steps, and the drafts to edit before approving. */
+.ai-run-status {
+  font-weight: 600;
+}
+.ai-steps {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+.ai-drafts {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ai-draft-list {
+  display: grid;
+  gap: 1rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+.ai-draft {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+.ai-draft-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ai-draft-head .icon-button {
+  margin-left: auto;
+}
+.ai-draft-selects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+.ai-draft-steps {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ai-draft-steps li {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
 /* Facts about a setting, in a grid of term and value, like the role guide's. */
 .detail-list {
   display: grid;
