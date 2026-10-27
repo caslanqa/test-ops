@@ -201,6 +201,8 @@ export class AiRunExecutor {
       });
       // The claim has to outlast the call, whatever the setting's timeout is.
       await this.extendLock(runId, Math.max(RUN_LOCK_MS, timeoutMs + 60_000));
+      // What the provider used is known as soon as it answers, even when the answer turns out to be unusable.
+      let usage: { inputTokens: number; outputTokens: number } | undefined;
       try {
         const result = await provider.generate({
           system: skill.system,
@@ -208,6 +210,7 @@ export class AiRunExecutor {
           schemaName: skill.schemaName,
           schema: stripBounds(skill.schema),
         });
+        usage = result.usage;
         const output = skill.validate(result.output);
         await this.prisma.aiWorkflowStep.update({
           where: { id: row.id },
@@ -227,7 +230,12 @@ export class AiRunExecutor {
         );
         await this.prisma.aiWorkflowStep.update({
           where: { id: row.id },
-          data: { status: "FAILED", error: message, endedAt: new Date() },
+          data: {
+            status: "FAILED",
+            error: message,
+            endedAt: new Date(),
+            ...(usage ? { usage: usage as unknown as Prisma.InputJsonValue } : {}),
+          },
         });
         if (!(error instanceof AiProviderError)) {
           this.logger.error(`AI step ${name} of run ${runId} failed unexpectedly: ${error instanceof Error ? error.stack : String(error)}`);

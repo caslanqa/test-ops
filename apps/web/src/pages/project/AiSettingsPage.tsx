@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom';
 import { api } from '../../api/client';
 import { AiSettingsForm } from '../../components/AiSettingsForm';
 import { ConfirmDialog } from '../../components/Members';
-import { LoadError, Loading, PageHeader } from '../../components/Page';
+import { EmptyState, LoadError, Loading, PageHeader } from '../../components/Page';
+import { Sparkles } from 'lucide-react';
 import { Tag } from '../../components/StatusChip';
 import {
   AI_PROVIDER_LABEL,
@@ -32,16 +33,25 @@ export function AiSettingsPage() {
   const { data: info } = useProjectInfo(projectId);
   usePageTitle(info ? `AI (${info.project.name})` : 'AI');
   const [removing, setRemoving] = useState(false);
+  // A DEMO workspace is for looking around; the server takes no AI settings for it or its projects.
+  const isDemo = Boolean(info?.workspace.isDemo);
   const { data, error, reload } = useResource(
-    () => api.get<ProjectAiSettings>(`/projects/${projectId}/ai/settings`),
-    [projectId],
+    () => (info && !info.workspace.isDemo ? api.get<ProjectAiSettings>(`/projects/${projectId}/ai/settings`) : Promise.resolve(undefined)),
+    [projectId, info?.workspace.id, isDemo],
   );
 
   return (
     <>
       <PageHeader title="AI" description="Which AI provider drafts test cases for this project." />
+      {isDemo && (
+        <div className="surface">
+          <EmptyState icon={Sparkles} title="AI can't be set up in a DEMO workspace">
+            A DEMO workspace is for looking around. Create a workspace of your own to define an AI provider.
+          </EmptyState>
+        </div>
+      )}
       {error && <LoadError message={error} onRetry={reload} />}
-      {!data && !error && <Loading />}
+      {!isDemo && !data && !error && <Loading />}
       {data && (
         <>
           <section className="surface integrations-section" aria-labelledby="ai-applies-heading">

@@ -307,6 +307,8 @@ export function RequirementsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const { notify } = useNotice();
   const navigate = useNavigate();
+  // The requirement a run is being started for; the button waits, so a double click starts one run.
+  const [starting, setStarting] = useState<string | null>(null);
   // Whether AI is on for the project decides whether the rows get a "Draft test cases" action.
   const aiStatus = useResource(
     () => api.get<{ enabled: boolean }>(`/projects/${projectId}/ai/status`).catch(() => ({ enabled: false })),
@@ -357,6 +359,8 @@ export function RequirementsPage() {
   }
 
   async function draftWithAi(r: Requirement) {
+    if (starting) return;
+    setStarting(r.id);
     setActionError(null);
     try {
       const started = await api.post<{ runId: string }>(`/projects/${projectId}/ai/runs`, {
@@ -366,6 +370,8 @@ export function RequirementsPage() {
       navigate(`/projects/${projectId}/ai/runs/${started.runId}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't start the AI run");
+    } finally {
+      setStarting(null);
     }
   }
 
@@ -487,6 +493,7 @@ export function RequirementsPage() {
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
+                            disabled={starting !== null}
                             onClick={() => draftWithAi(r)}
                             aria-label={`Draft test cases for ${r.title}`}
                           >

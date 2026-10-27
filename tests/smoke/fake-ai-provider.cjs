@@ -13,6 +13,7 @@
 //   slow                     an answer after 20 s
 //   flaky                    the first call (since the last reset) isn't JSON, the rest are valid
 //   revise                   the first coverage audit (since the last reset) asks for a revision
+//   dup                      the coverage audit says draft 0 repeats the first existing case it was given
 //   slow-after-review        the requirement review is instant, every later call answers after 20 s
 // Control: GET /__last (the last request: path, headers, body), GET /__calls (every request: path, model),
 // POST /__reset, POST /__quit. Start it with `docker compose exec -T app node -` and the file on stdin.
@@ -57,19 +58,26 @@ const DESIGN = {
     },
   ],
 };
-const audit = (revisionNeeded) => ({
+const audit = (revisionNeeded, duplicates = []) => ({
   coverage: [{ criterion: 0, caseIndexes: [0] }, { criterion: 1, caseIndexes: [1] }],
   uncovered: [],
-  duplicates: [],
+  duplicates,
   revisionNeeded,
   notes: revisionNeeded ? 'Add a boundary case for exactly one hour' : 'Both criteria are covered',
 });
-function cannedOutput(schemaName, model) {
+function cannedOutput(schemaName, model, userText = '') {
   switch (schemaName) {
     case 'connection_test': return { ok: true };
     case 'requirement_review': return REVIEW;
     case 'test_design': return DESIGN;
-    case 'coverage_audit': return audit(model === 'revise' && audits++ === 0);
+    case 'coverage_audit': {
+      if (model === 'dup') {
+        // The prompt lists the project's existing cases as "<id> | <title>" under this tag; name the first one.
+        const listed = userText.split('<existing_cases_of_the_project>\n')[1]?.split('\n')[0]?.split(' | ')[0];
+        return audit(false, listed ? [{ caseIndex: 0, existingCaseId: listed, reason: 'Same steps as the existing case' }] : []);
+      }
+      return audit(model === 'revise' && audits++ === 0);
+    }
     default: return {};
   }
 }
@@ -132,6 +140,7 @@ const server = http.createServer((req, res) => {
     const model = body.model;
     const schemaName = anthropic ? body.tool_choice?.name : body.response_format?.json_schema?.name;
     last = { path: req.url, headers: req.headers, body };
+    const userText = String((body.messages || []).filter((m) => m.role === 'user').map((m) => m.content).join('\n'));
     calls.push({ path: req.url, model });
 
     switch (model) {
@@ -154,15 +163,15 @@ const server = http.createServer((req, res) => {
         return res.end('"}');
       }
       case 'slow':
-        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), delay());
+        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText)), delay());
       case 'slow-after-review':
         if (schemaName === 'requirement_review') return validAnswer(res, anthropic, model, schemaName, REVIEW);
-        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), delay());
+        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText)), delay());
       case 'flaky':
         if (flakyCalls++ === 0) return notJson(res, anthropic, model);
-        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model));
+        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText));
       default:
-        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model));
+        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText));
     }
   });
 });

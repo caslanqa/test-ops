@@ -78,6 +78,10 @@ for (const [network, prefix] of [
   ["203.0.113.0", 24], // documentation
   ["224.0.0.0", 4], // multicast
   ["240.0.0.0", 4], // reserved and broadcast
+  // Cloud metadata services outside the link-local range, which the private ranges above would otherwise let through.
+  ["100.100.100.200", 32], // Alibaba Cloud
+  ["168.63.129.16", 32], // Azure wire server
+  ["192.0.0.192", 32], // Oracle Cloud
 ] as const) {
   reserved4.addSubnet(network, prefix, "ipv4");
 }
@@ -94,6 +98,7 @@ for (const [network, prefix] of [
   ["fe80::", 10], // link-local
   ["fec0::", 10], // site-local (deprecated)
   ["ff00::", 8], // multicast
+  ["fd00:ec2::254", 128], // AWS metadata over IPv6, inside the unique local range
 ] as const) {
   reserved6.addSubnet(network, prefix, "ipv6");
 }
@@ -135,6 +140,9 @@ export function assertAiEndpoint(raw: string): URL {
   if (isIP(host) && isReservedAddress(host)) {
     throw new AiEndpointError("The endpoint points to a link-local, multicast or reserved address");
   }
+  if (url.protocol === "http:" && isIP(host) && !isPrivateAddress(host)) {
+    throw new AiEndpointError("An http:// endpoint on a public address would send project data in clear text; use https://");
+  }
   return url;
 }
 
@@ -174,7 +182,8 @@ export interface PostResult {
  * (connecting, sending, and the answer) takes longer than `timeoutMs`. Only the start of the answer
  * (`maxChars`, 1000 unless asked) is read; the rest is dropped, so a server that keeps sending can't hold
  * the call open. `refuseReserved` additionally refuses link-local, multicast and reserved addresses, for
- * callers that set `allowPrivate`.
+ * callers that set `allowPrivate`; `refuseCleartextPublic` refuses http:// to a public address, so nothing
+ * private is sent in clear text over the internet.
  */
 export function safePost(
   url: URL,
@@ -183,9 +192,16 @@ export function safePost(
   {
     allowPrivate,
     refuseReserved = false,
+    refuseCleartextPublic = false,
     maxChars = 1000,
     timeoutMs = 10_000,
-  }: { allowPrivate: boolean; refuseReserved?: boolean; maxChars?: number; timeoutMs?: number },
+  }: {
+    allowPrivate: boolean;
+    refuseReserved?: boolean;
+    refuseCleartextPublic?: boolean;
+    maxChars?: number;
+    timeoutMs?: number;
+  },
 ): Promise<PostResult> {
   const lookup: LookupFunction = (hostname, options, callback) => {
     dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
@@ -197,6 +213,9 @@ export function safePost(
       }
       if (refuseReserved && list.some((a) => isReservedAddress(a.address))) {
         return callback(new WebhookAddressError(`${hostname} resolves to a link-local, multicast or reserved address`), "", 0);
+      }
+      if (refuseCleartextPublic && url.protocol === "http:" && list.some((a) => !isPrivateAddress(a.address))) {
+        return callback(new WebhookAddressError(`${hostname} is a public address; use https:// so project data isn't sent in clear text`), "", 0);
       }
       if ((options as dns.LookupOptions).all) return (callback as (e: null, a: dns.LookupAddress[]) => void)(null, list);
       callback(null, list[0].address, list[0].family);
@@ -211,6 +230,10 @@ export function safePost(
     }
     if (refuseReserved && isIP(host) && isReservedAddress(host)) {
       reject(new WebhookAddressError("The URL points to a link-local, multicast or reserved address"));
+      return;
+    }
+    if (refuseCleartextPublic && url.protocol === "http:" && isIP(host) && !isPrivateAddress(host)) {
+      reject(new WebhookAddressError("The URL is a public address; use https:// so project data isn't sent in clear text"));
       return;
     }
     let settled = false;

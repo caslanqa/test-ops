@@ -76,8 +76,9 @@ export function validateAgainst(schema: JsonSchema, value: unknown, path = "$"):
       }
     }
     if (schema.additionalProperties === false) {
-      const extra = Object.keys(object).find((name) => !(name in (schema.properties ?? {})));
-      if (extra) return `${path}.${extra} isn't expected`;
+      // Not named: the property name comes from the provider, and this message is stored and shown to the team.
+      const unexpected = Object.keys(object).some((name) => !(name in (schema.properties ?? {})));
+      if (unexpected) return `${path} has a property that isn't expected`;
     }
   }
   return null;

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
@@ -18,7 +18,10 @@ import { CasePriority, CaseType } from "@prisma/client";
 export const APPROVE_MAX_CASES = 25;
 const DRAFT_KINDS = ["positive", "negative", "boundary", "error"] as const;
 
+const trimmed = ({ value }: { value: unknown }) => (typeof value === "string" ? value.trim() : value);
+
 export class DraftStepDto {
+  @Transform(trimmed)
   @IsString()
   @IsNotEmpty()
   @MaxLength(1000)
@@ -32,6 +35,7 @@ export class DraftStepDto {
 
 /** A draft as a person approves it, possibly edited: the case fields of CreateTestCaseDto, and the kind of case. */
 export class CaseDraftDto {
+  @Transform(trimmed)
   @IsString()
   @IsNotEmpty()
   @MaxLength(300)

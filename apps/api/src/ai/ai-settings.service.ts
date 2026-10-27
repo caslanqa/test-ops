@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { AiProviderKind, ProjectRole, WorkspaceRole, type AiSettings } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
@@ -126,6 +133,7 @@ export class AiSettingsService {
 
   async saveWorkspace(userId: string, workspaceId: string, dto: SaveAiSettingsDto) {
     await this.requireWorkspaceAdmin(userId, workspaceId);
+    await this.assertNotDemo({ kind: "WORKSPACE", id: workspaceId });
     return this.save({ kind: "WORKSPACE", id: workspaceId }, userId, dto);
   }
 
@@ -152,6 +160,7 @@ export class AiSettingsService {
 
   async saveProject(userId: string, projectId: string, dto: SaveAiSettingsDto) {
     await this.requireProjectAdmin(userId, projectId, false);
+    await this.assertNotDemo({ kind: "PROJECT", id: projectId });
     return this.save({ kind: "PROJECT", id: projectId }, userId, dto);
   }
 
@@ -173,6 +182,7 @@ export class AiSettingsService {
       "workspaceId" in scope ? { kind: "WORKSPACE", id: scope.workspaceId } : { kind: "PROJECT", id: scope.projectId };
     if (owner.kind === "WORKSPACE") await this.requireWorkspaceAdmin(userId, owner.id);
     else await this.requireProjectAdmin(userId, owner.id, false);
+    await this.assertNotDemo(owner);
     const row = await this.prisma.aiSettings.findUnique({ where: whereOwner(owner) });
     if (!row) throw new NotFoundException("Save the AI settings before testing them");
 
@@ -233,6 +243,22 @@ export class AiSettingsService {
     return this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, [ProjectRole.ADMIN], {
       allowArchived,
     });
+  }
+
+  /**
+   * Every account is an admin of its own DEMO workspace, and defining a provider lets an admin aim the server at
+   * its own network. A DEMO workspace is for looking around, so it takes no AI settings: what the server may be
+   * pointed at is for workspaces people made on purpose.
+   */
+  private async assertNotDemo(owner: Owner): Promise<void> {
+    const workspace =
+      owner.kind === "WORKSPACE"
+        ? await this.prisma.workspace.findUnique({ where: { id: owner.id }, select: { isDemo: true } })
+        : (await this.prisma.project.findUnique({ where: { id: owner.id }, select: { workspace: { select: { isDemo: true } } } }))
+            ?.workspace;
+    if (workspace?.isDemo) {
+      throw new ForbiddenException("AI can't be set up in a DEMO workspace; create a workspace of your own for that");
+    }
   }
 
   private seal(plain: string): string {

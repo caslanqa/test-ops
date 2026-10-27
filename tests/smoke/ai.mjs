@@ -297,7 +297,7 @@ await expectStatus('a workspace default that was never saved has nothing to test
 
 console.log('--- Address and error helpers, inside the app ---');
 try {
-  const reservedYes = ['169.254.169.254', 'fe80::1', '0.0.0.0', '224.0.0.1', '255.255.255.255', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', '::', 'ff02::1'];
+  const reservedYes = ['169.254.169.254', 'fe80::1', '0.0.0.0', '224.0.0.1', '255.255.255.255', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', '::', 'ff02::1', '100.100.100.200', '168.63.129.16', '192.0.0.192', 'fd00:ec2::254'];
   const reservedNo = ['127.0.0.1', '10.1.2.3', '192.168.1.5', '172.16.0.1', '100.64.1.1', '::1', 'fd00::1', '8.8.8.8'];
   // Node's BlockList checks an IPv4 address as an IPv4-mapped IPv6 one, so an IPv6 "mapped" rule in the same
   // list as the IPv4 ranges would match every IPv4 address, public ones included.
@@ -333,6 +333,35 @@ try {
   );
   for (const [address, reserved] of helpers.yes) check(`${address} is reserved`, reserved === true);
   for (const [address, reserved] of helpers.no) check(`${address} is not reserved`, reserved === false);
+  const units = JSON.parse(
+    inApp(`
+      const { outputLimitParam } = require('./dist/ai/providers/openai-compatible');
+      const { renderRequirement } = require('./dist/ai/skills/prompts');
+      const { validateAgainst } = require('./dist/ai/validate-output');
+      const { assertAiEndpoint } = require('./dist/webhooks/safe-post');
+      const linked = Array.from({ length: 500 }, (_, i) => ({ title: 'Case ' + i, steps: Array.from({ length: 30 }, () => ({ action: 'x'.repeat(400) })) }));
+      const rendered = renderRequirement({ requirement: { title: 'T', description: 'D' }, extraContext: null, linkedCases: linked, otherCases: [] });
+      const refuses = (url) => { try { assertAiEndpoint(url); return false; } catch { return true; } };
+      console.log(JSON.stringify({
+        openai: outputLimitParam('api.openai.com'),
+        azure: outputLimitParam('myorg.openai.azure.com'),
+        local: outputLimitParam('localhost:11434'),
+        promptLength: rendered.length,
+        promptSaysMore: /more/.test(rendered),
+        unexpected: validateAgainst({ type: 'object', additionalProperties: false, properties: { a: { type: 'string' } } }, { a: 'x', 'LEAKED-PROPERTY': 1 }),
+        httpPublic: refuses('http://8.8.8.8/v1'),
+        httpsPublic: refuses('https://8.8.8.8/v1'),
+        httpPrivate: refuses('http://10.0.0.5:11434/v1'),
+        httpLocalhost: refuses('http://localhost:11434/v1'),
+      }));
+    `),
+  );
+  check('OpenAI itself is asked for max_completion_tokens', units.openai === 'max_completion_tokens' && units.azure === 'max_completion_tokens', JSON.stringify(units));
+  check('...and a local server for max_tokens', units.local === 'max_tokens', JSON.stringify(units));
+  check('a requirement with hundreds of linked cases stays within a prompt budget', units.promptLength < 60000 && units.promptSaysMore === true, `${units.promptLength}`);
+  check('a validation message does not repeat a property name the provider made up', typeof units.unexpected === 'string' && !units.unexpected.includes('LEAKED-PROPERTY'), String(units.unexpected));
+  check('http:// to a public address is refused when saving', units.httpPublic === true && units.httpsPublic === false, JSON.stringify(units));
+  check('...but http:// to a private address or localhost is fine', units.httpPrivate === false && units.httpLocalhost === false, JSON.stringify(units));
   check('a provider key is removed from error text', !helpers.scrubbed.includes('sk-1'), helpers.scrubbed);
   check('error text is cut to 500 characters', helpers.cut <= 500, String(helpers.cut));
   check('...and a key at the cut is removed before cutting', !helpers.edge.includes('sk-'), helpers.edge);
@@ -343,7 +372,7 @@ try {
     inApp(`
       const dns = require('dns');
       const { safePost } = require('./dist/webhooks/safe-post');
-      const table = { 'metadata.test': [{ address: '169.254.169.254', family: 4 }], 'local.test': [{ address: '127.0.0.1', family: 4 }] };
+      const table = { 'metadata.test': [{ address: '169.254.169.254', family: 4 }], 'local.test': [{ address: '127.0.0.1', family: 4 }], 'public.test': [{ address: '8.8.8.8', family: 4 }] };
       const real = dns.lookup;
       dns.lookup = (host, options, cb) => (table[host] ? cb(null, table[host]) : real(host, options, cb));
       const send = (host) => safePost(new URL('http://' + host + ':8098/__last'), '{}', {}, { allowPrivate: true, refuseReserved: true, timeoutMs: 3000 });
@@ -351,12 +380,14 @@ try {
         const out = {};
         try { out.metadata = 'sent ' + (await send('metadata.test')).status; } catch (e) { out.metadata = e.message; }
         try { out.local = (await send('local.test')).status; } catch (e) { out.local = e.message; }
+        try { out.cleartext = 'sent ' + (await safePost(new URL('http://public.test:8098/'), '{}', {}, { allowPrivate: true, refuseReserved: true, refuseCleartextPublic: true, timeoutMs: 3000 })).status; } catch (e) { out.cleartext = e.message; }
         console.log(JSON.stringify(out));
       })();
     `),
   );
   check('a name that resolves to a link-local address is refused when connecting', /link-local/.test(connect.metadata), JSON.stringify(connect));
   check('a name that resolves to loopback is reached', connect.local === 200, JSON.stringify(connect));
+  check('a name that resolves to a public address is not sent http:// when connecting', /https/.test(connect.cleartext) && !/^sent/.test(connect.cleartext), JSON.stringify(connect));
 
   // A model on the host is reached as host.docker.internal from inside the container (docker-compose.yml maps it
   // for Linux, Docker Desktop provides it); its address must not be one the helper refuses.
@@ -464,6 +495,7 @@ resetFake();
 const invalid = await waitForRun((await start(tester.token)).json.runId, finished);
 check('an answer that does not fit the schema fails the run after one retry', invalid.status === 'FAILED' && Boolean(invalid.error) && calls().length === 2, `${invalid.status} ${invalid.error} calls=${calls().length}`);
 check('...and writes no cases', (await caseCount()) === casesBefore);
+check('...and the failed steps still record what the provider used', invalid.steps.length === 2 && invalid.steps.every((step) => step.status === 'FAILED' && step.usage?.inputTokens === 11 && step.usage?.outputTokens === 7), JSON.stringify(invalid.steps));
 
 useModel('fail500');
 resetFake();
@@ -491,13 +523,13 @@ check('...and stays cancelled when the step it was in returns', slowAfter.status
 console.log('--- Limits and listing ---');
 useModel('ok');
 setting('"maxRunsPerUserPerDay" = 2');
-await expectStatus('a user may start a run within the daily limit', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
-await expectStatus('...and a second one', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
-await expectStatus('...but not a third', 429, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id });
+await expectStatus('a user may start a run within the daily limit', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, extraContext: 'first' });
+await expectStatus('...and a second one', 202, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, extraContext: 'second' });
+await expectStatus('...but not a third', 429, limited.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, extraContext: 'third' });
 // Starts that arrive together must not slip past the limit by being counted before any of them is saved.
 const racer = await makeUser('racer', 'TESTER');
 setting('"maxRunsPerUserPerDay" = 2');
-const racing = await Promise.all(Array.from({ length: 6 }, () => call(racer.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id })));
+const racing = await Promise.all(Array.from({ length: 6 }, (_, i) => call(racer.token, 'POST', RUNS, { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, extraContext: `race ${i}` })));
 check('six starts at once with a limit of two: two are accepted', racing.filter((r) => r.status === 202).length === 2, racing.map((r) => r.status).join());
 check('...and the rest are refused', racing.filter((r) => r.status === 429).length === 4, racing.map((r) => r.status).join());
 setting('"maxRunsPerUserPerDay" = 100');
@@ -550,6 +582,8 @@ await expectStatus('no drafts are refused', 400, tester.token, 'POST', `${RUNS}/
 await expectStatus('a draft without a title is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ ...run3.result.drafts[0], title: '' }] });
 await expectStatus('a draft with an unknown priority is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ ...run3.result.drafts[0], priority: 'URGENT' }] });
 await expectStatus('a draft without a kind is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ title: 'x' }] });
+await expectStatus('a draft whose title is only spaces is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ ...run3.result.drafts[0], title: '   ' }] });
+await expectStatus('a step whose action is only spaces is refused', 400, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { cases: [{ ...run3.result.drafts[0], steps: [{ action: '   ' }] }] });
 await expectStatus('a suite of another project is not found', 404, tester.token, 'POST', `${RUNS}/${run3.id}/approve`, { suiteId: otherSuite.id, cases: run3.result.drafts });
 check('...nothing was written', (await caseCount()) === before3);
 check('...and the run still waits for approval', (await ok(admin, 'GET', `${RUNS}/${run3.id}`)).status === 'AWAITING_APPROVAL');
@@ -640,6 +674,56 @@ psql(`update ai_workflow_runs set "availableAt" = timezone('utc', now()) where i
 const queuedEnd = await waitForRun(queuedCopy, finished, 30);
 check('a waiting run fails when its setting was pointed elsewhere before it started', queuedEnd.status === 'FAILED' && String(queuedEnd.error).includes('setting changed') && queuedEnd.steps.length === 0, `${queuedEnd.status} ${queuedEnd.error}`);
 setting(`endpoint = '${ENDPOINT}'`);
+useModel('ok');
+
+console.log('--- The same start twice is one run ---');
+const sameBody = { type: 'REQUIREMENT_TO_CASES', requirementId: requirement.id, extraContext: `double click ${sfx}` };
+const twice = await Promise.all([call(tester.token, 'POST', RUNS, sameBody), call(tester.token, 'POST', RUNS, sameBody)]);
+check('two identical starts at once are both accepted', twice.every((r) => r.status === 202), twice.map((r) => r.status).join());
+check('...and give the same run', twice[0].json?.runId === twice[1].json?.runId, twice.map((r) => r.text).join(' '));
+check('...so only one was made', psql(`select count(*) from ai_workflow_runs where input->>'extraContext' = '${sameBody.extraContext}'`) === '1');
+const different = await call(tester.token, 'POST', RUNS, { ...sameBody, extraContext: `${sameBody.extraContext} and more` });
+check('a start with other notes is a run of its own', different.status === 202 && different.json?.runId !== twice[0].json?.runId, different.text);
+await waitForRun(twice[0].json.runId, finished);
+await waitForRun(different.json.runId, finished);
+const afterFinish = await call(tester.token, 'POST', RUNS, sameBody);
+check('once that run has finished the same start makes a new one', afterFinish.status === 202 && afterFinish.json?.runId !== twice[0].json?.runId, afterFinish.text);
+await waitForRun(afterFinish.json.runId, finished);
+
+console.log('--- The provider key is trimmed ---');
+await expectStatus('a key of only spaces is refused', 400, admin, 'PUT', WS, openAi('ok', { credential: '   ', maxRunsPerUserPerDay: 100 }));
+await ok(admin, 'PUT', WS, openAi('ok', { credential: '  sk-trim-1 \n', maxRunsPerUserPerDay: 100 }));
+check('a key pasted with spaces and a line break is saved without them', (await ok(admin, 'POST', `${WS}/test`)).ok === true && (await lastRequest()).headers.authorization === 'Bearer sk-trim-1', JSON.stringify((await lastRequest()).headers));
+await restoreDefault();
+
+console.log('--- A DEMO workspace takes no AI settings ---');
+const demoOwner = await makeUser('demo-owner', null);
+const demoWorkspace = (await ok(demoOwner.token, 'GET', '/workspaces')).find((w) => w.isDemo);
+check('a user has a DEMO workspace of their own', demoWorkspace?.isDemo === true, JSON.stringify(demoWorkspace));
+const demoProject = (await ok(demoOwner.token, 'GET', `/workspaces/${demoWorkspace?.id}/projects`))[0];
+const demoRefused = await call(demoOwner.token, 'PUT', `/workspaces/${demoWorkspace?.id}/ai`, workspaceDefault);
+check(`[${demoRefused.status}] its workspace default cannot be defined`, demoRefused.status === 403 && String(demoRefused.json?.message).includes('DEMO'), demoRefused.text);
+await expectStatus('...nor a project setting in it', 403, demoOwner.token, 'PUT', `/projects/${demoProject?.id}/ai/settings`, workspaceDefault);
+await expectStatus('...nor tested', 403, demoOwner.token, 'POST', `/workspaces/${demoWorkspace?.id}/ai/test`);
+await expectStatus('...nor a project setting tested', 403, demoOwner.token, 'POST', `/projects/${demoProject?.id}/ai/settings/test`);
+await expectStatus('what is there can still be read', 200, demoOwner.token, 'GET', `/workspaces/${demoWorkspace?.id}/ai`);
+
+console.log('--- A graceful restart hands a run on at once ---');
+async function waitReady() {
+  for (let i = 0; i < 90; i++) {
+    try { if ((await fetch(`${new URL(BASE).origin}/ready`)).status === 200) return; } catch { /* still starting */ }
+    await sleep(1000);
+  }
+  throw new Error('the app did not become ready again');
+}
+const restartRun = await startSlowRun();
+execFileSync('docker', ['compose', 'restart', '-t', '40', 'app'], { stdio: 'ignore' });
+await waitReady();
+inApp("require('fs').writeFileSync('/tmp/fake-ai-fast', '')");
+await startFakeProvider();
+const restarted = await waitForRun(restartRun, finished, 60);
+check('after a restart the run is taken on at once, not when its claim runs out', restarted.status === 'AWAITING_APPROVAL', `${restarted.status} ${restarted.error ?? ''}`);
+inApp("require('fs').rmSync('/tmp/fake-ai-fast', { force: true })");
 useModel('ok');
 
 console.log('--- A crash in the middle of a run ---');

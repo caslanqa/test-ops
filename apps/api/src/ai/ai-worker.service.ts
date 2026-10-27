@@ -18,6 +18,7 @@ export class AiWorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AiWorkerService.name);
   private timer: NodeJS.Timeout | undefined;
   private current: Promise<void> | undefined;
+  private currentRunId: string | undefined;
   private stopping = false;
   private lastError = "";
 
@@ -37,6 +38,14 @@ export class AiWorkerService implements OnModuleInit, OnModuleDestroy {
     let grace: NodeJS.Timeout | undefined;
     await Promise.race([this.current, new Promise((resolve) => (grace = setTimeout(resolve, SHUTDOWN_GRACE_MS)))]);
     if (grace) clearTimeout(grace);
+    // A model call that outlasted the grace period dies with the process. Its claim is given up now, so the next
+    // start takes the run at once instead of leaving it at "Working" until the claim runs out (5 minutes or more).
+    // currentRunId is cleared when the call finishes, so it is still set only for a call that outlasted the grace.
+    if (this.currentRunId) {
+      await this.prisma.aiWorkflowRun
+        .updateMany({ where: { id: this.currentRunId, status: "RUNNING" }, data: { lockedUntil: new Date(0) } })
+        .catch((error: unknown) => this.logger.warn(`Couldn't hand the run on at shutdown: ${String(error)}`));
+    }
   }
 
   private schedule(ms: number) {
@@ -55,7 +64,9 @@ export class AiWorkerService implements OnModuleInit, OnModuleDestroy {
       const runId = await this.claim();
       if (runId) {
         busy = true;
+        this.currentRunId = runId;
         await this.executor.execute(runId);
+        this.currentRunId = undefined;
       }
       this.lastError = "";
     } catch (error) {

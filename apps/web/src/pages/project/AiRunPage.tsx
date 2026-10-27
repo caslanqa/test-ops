@@ -15,17 +15,30 @@ import { usePageTitle, useResource } from '../../lib/useResource';
 
 const POLL_MS = 2000;
 
+/** One possible duplicate, by the title of the existing case (the id means nothing to a person). */
+function DuplicateHint({ projectId, caseIndex, existingCaseId, reason }: { projectId: string; caseIndex: number; existingCaseId: string; reason: string }) {
+  const existing = useResource(() => api.get<{ title: string }>(`/projects/${projectId}/cases/${existingCaseId}`), [projectId, existingCaseId]);
+  return (
+    <li>
+      Draft {caseIndex + 1} may repeat the existing case {existing.data ? <>“{existing.data.title}”</> : 'in this project'}: {reason}
+    </li>
+  );
+}
+
 /** What a person sees of one run and, once the drafts are ready, what they can do with them. */
 function RunView({
   run,
   requirementTitle,
   canEdit,
+  archived,
   refreshError,
   reload,
 }: {
   run: AiRun;
   requirementTitle: string | undefined;
   canEdit: boolean;
+  /** The project is archived, which is why nobody can change or approve drafts. */
+  archived: boolean;
   /** Why the last refresh of a run that is still going failed; the page keeps trying. */
   refreshError: string | null;
   reload: () => void;
@@ -131,7 +144,7 @@ function RunView({
         <p className="info-note">
           <Info size={16} aria-hidden="true" />
           Sent to {snapshot.endpointHost} ({snapshot.model}), using {snapshot.source === 'PROJECT' ? 'this project’s AI setting' : 'the workspace default'}:
-          the requirement’s title and description, any notes added, the cases already linked to it (title and steps), and
+          the requirement’s title and description, any notes added, the cases already linked to it (title and steps; the first 50), and
           the id and title of up to 200 other cases of the project. Nothing else, and nothing from other projects.
         </p>
         {run.input.extraContext && <p className="muted">Notes for the model: {run.input.extraContext}</p>}
@@ -176,7 +189,7 @@ function RunView({
           {run.result.audit.duplicates.length > 0 && (
             <ul>
               {run.result.audit.duplicates.map((d, i) => (
-                <li key={i}>Draft {d.caseIndex + 1} may repeat the existing case <code>{d.existingCaseId}</code>: {d.reason}</li>
+                <DuplicateHint key={i} projectId={projectId} caseIndex={d.caseIndex} existingCaseId={d.existingCaseId} reason={d.reason} />
               ))}
             </ul>
           )}
@@ -186,9 +199,12 @@ function RunView({
       {waiting && run.result && (
         <form className="surface integrations-section" aria-labelledby="ai-drafts-heading" onSubmit={approve}>
           <h2 id="ai-drafts-heading" className="section-title" tabIndex={-1}>Drafts</h2>
-          {!canEdit && <p className="muted">Only testers and project admins can change and approve drafts.</p>}
-          <fieldset disabled={!canEdit} className="ai-drafts">
-            <legend className="visually-hidden">Draft test cases</legend>
+          {!canEdit && (
+            <p className="muted">
+              {archived ? 'This project is archived, so drafts can’t be changed or approved.' : 'Only testers and project admins can change and approve drafts.'}
+            </p>
+          )}
+          <div className="ai-drafts" role="group" aria-label="Draft test cases">
             {drafts.length === 0 ? (
               <p className="muted">No drafts are left to approve.</p>
             ) : (
@@ -198,6 +214,7 @@ function RunView({
                     key={i}
                     index={i}
                     draft={draft}
+                    readOnly={!canEdit}
                     onChange={(next) => setEdited(drafts.map((d, at) => (at === i ? next : d)))}
                     onDelete={() => {
                       requestFocus();
@@ -208,14 +225,16 @@ function RunView({
                 ))}
               </ol>
             )}
-            <div className="field">
-              <label htmlFor={suiteFieldId} className="field-label">Suite</label>
-              <Select id={suiteFieldId} value={suiteId} onChange={(e) => setSuiteId(e.target.value)}>
-                <option value="">No suite</option>
-                {(suites.data ?? []).map((suite) => <option key={suite.id} value={suite.id}>{suitePath(suites.data ?? [], suite.id)}</option>)}
-              </Select>
-            </div>
-          </fieldset>
+            {canEdit && (
+              <div className="field">
+                <label htmlFor={suiteFieldId} className="field-label">Suite</label>
+                <Select id={suiteFieldId} value={suiteId} onChange={(e) => setSuiteId(e.target.value)}>
+                  <option value="">No suite</option>
+                  {(suites.data ?? []).map((suite) => <option key={suite.id} value={suite.id}>{suitePath(suites.data ?? [], suite.id)}</option>)}
+                </Select>
+              </div>
+            )}
+          </div>
           {canEdit && (
             <div className="form-buttons">
               <button type="submit" className="btn btn-primary" disabled={busy || drafts.length === 0}>
@@ -245,7 +264,7 @@ function RunView({
  */
 export function AiRunPage() {
   const { projectId = '', runId = '' } = useParams();
-  const { editRepository } = useProjectPermissions(projectId);
+  const { editRepository, archived } = useProjectPermissions(projectId);
   const runRes = useResource(() => api.get<AiRun>(`/projects/${projectId}/ai/runs/${runId}`), [projectId, runId]);
   // A reload keeps the old data until the new arrives; another run's data must not show under this run's address.
   const run = runRes.data?.id === runId ? runRes.data : undefined;
@@ -273,6 +292,7 @@ export function AiRunPage() {
       run={run}
       requirementTitle={requirement.data?.title}
       canEdit={editRepository}
+      archived={archived}
       refreshError={runRes.error}
       reload={reload}
     />

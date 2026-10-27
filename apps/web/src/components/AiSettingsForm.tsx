@@ -198,8 +198,8 @@ export function AiSettingsForm({
       <p className="info-note">
         <Info size={16} aria-hidden="true" />
         When someone drafts test cases from a requirement, TestOps sends {host} the requirement&rsquo;s title and
-        description, any notes they add, the cases already linked to it (title and steps), and the id and title of up
-        to 200 other cases of the project. Nothing else, and nothing from other projects.
+        description, any notes they add, the cases already linked to it (title and steps; the first 50), and the id and
+        title of up to 200 other cases of the project. Nothing else, and nothing from other projects.
       </p>
       <FormError message={error} />
       <div className="form-buttons">
@@ -222,12 +222,16 @@ export function AiSettingsForm({
           : connectionDirty
             ? 'Save your changes first: the test uses the saved settings. It sends one small request with no project data.'
             : 'Sends one small request with no project data.'}
+        {' '}A failed test switches AI off for everyone using this setting, until a later test passes.
       </p>
-      {testResult && (
-        <p className={testResult.ok ? 'note' : 'form-error'} role="status">
-          {testResult.ok ? `Connection works (${testResult.latencyMs} ms).` : `Connection test failed: ${testResult.error ?? 'no reason given'}`}
-        </p>
-      )}
+      {/* On the page before there is a result: a region that appears with its text already in it is often not announced. */}
+      <div role="status">
+        {testResult && (
+          <p className={testResult.ok ? 'note' : 'form-error'}>
+            {testResult.ok ? `Connection works (${testResult.latencyMs} ms).` : `Connection test failed: ${testResult.error ?? 'no reason given'}`}
+          </p>
+        )}
+      </div>
     </form>
   );
 }

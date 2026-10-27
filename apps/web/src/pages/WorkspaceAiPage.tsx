@@ -21,10 +21,12 @@ export function WorkspaceAiPage() {
   const { data: workspace, loading } = useWorkspace(workspaceId);
   usePageTitle(workspace ? `AI (${workspace.name})` : 'AI');
   const isAdmin = workspace?.currentUserRole === 'ADMIN';
+  // A DEMO workspace is for looking around; the server takes no AI settings for it.
+  const isDemo = Boolean(workspace?.isDemo);
   const [removing, setRemoving] = useState(false);
   const settings = useResource(
-    () => (isAdmin ? api.get<{ settings: AiSettingsView | null }>(`/workspaces/${workspaceId}/ai`) : Promise.resolve(undefined)),
-    [workspaceId, isAdmin],
+    () => (isAdmin && !isDemo ? api.get<{ settings: AiSettingsView | null }>(`/workspaces/${workspaceId}/ai`) : Promise.resolve(undefined)),
+    [workspaceId, isAdmin, isDemo],
   );
   const view = settings.data?.settings ?? null;
 
@@ -43,8 +45,15 @@ export function WorkspaceAiPage() {
           </EmptyState>
         </div>
       )}
-      {isAdmin && settings.error && <LoadError message={settings.error} onRetry={settings.reload} />}
-      {isAdmin && settings.data && (
+      {workspace && isAdmin && isDemo && (
+        <div className="surface">
+          <EmptyState icon={Sparkles} title="AI can't be set up in a DEMO workspace">
+            A DEMO workspace is for looking around. Create a workspace of your own to define an AI provider.
+          </EmptyState>
+        </div>
+      )}
+      {isAdmin && !isDemo && settings.error && <LoadError message={settings.error} onRetry={settings.reload} />}
+      {isAdmin && !isDemo && settings.data && (
         <section className="surface integrations-section" aria-labelledby="ai-heading">
           <h2 id="ai-heading" className="section-title">Workspace default</h2>
           <p className="muted">

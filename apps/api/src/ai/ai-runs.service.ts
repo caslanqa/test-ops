@@ -73,10 +73,20 @@ export class AiRunsService {
     if (!requirement || requirement.projectId !== projectId || requirement.archivedAt) {
       throw new NotFoundException("Requirement not found");
     }
-    const run = await this.prisma.$transaction(async (tx) => {
+    const { run, created } = await this.prisma.$transaction(async (tx) => {
       // One start at a time per person: without this, starts that arrive together are all counted before any
       // of them is saved, and the limit lets them all through.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ai-run-start:${userId}`}))`;
+      // The same start twice, such as a double click, is one run: the one that is already queued or working. It
+      // doesn't count against the limit and isn't audited again.
+      const open = await tx.aiWorkflowRun.findMany({
+        where: { createdById: userId, projectId, status: { in: ["QUEUED", "RUNNING"] } },
+      });
+      const same = open.find((candidate) => {
+        const input = candidate.input as { requirementId?: string; extraContext?: string | null };
+        return input.requirementId === dto.requirementId && (input.extraContext ?? null) === (dto.extraContext ?? null);
+      });
+      if (same) return { run: same, created: false };
       // The limit is the person's, across projects: what they started in the last 24 hours.
       const recent = await tx.aiWorkflowRun.count({
         where: { createdById: userId, createdAt: { gte: new Date(Date.now() - DAY_MS) } },
@@ -87,7 +97,7 @@ export class AiRunsService {
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-      return tx.aiWorkflowRun.create({
+      const made = await tx.aiWorkflowRun.create({
         data: {
           type: dto.type,
           projectId,
@@ -96,15 +106,18 @@ export class AiRunsService {
           providerSnapshot: snapshotOf(source, settings),
         },
       });
+      return { run: made, created: true };
     });
-    await this.audit.record({
-      userId,
-      projectId,
-      action: "ai.run.started",
-      entityType: ENTITY,
-      entityId: run.id,
-      metadata: { requirementId: dto.requirementId },
-    });
+    if (created) {
+      await this.audit.record({
+        userId,
+        projectId,
+        action: "ai.run.started",
+        entityType: ENTITY,
+        entityId: run.id,
+        metadata: { requirementId: dto.requirementId },
+      });
+    }
     return { runId: run.id };
   }
 

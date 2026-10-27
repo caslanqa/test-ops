@@ -11,6 +11,15 @@ const NO_STRUCTURED_OUTPUT =
   "The server doesn't support structured output (response_format json_schema); use a model and server that do";
 
 /**
+ * The name of the output limit in the request. OpenAI (and Azure OpenAI) deprecate `max_tokens` and reject it for
+ * their newer model families; local servers such as Ollama and vLLM only know `max_tokens`.
+ */
+export function outputLimitParam(endpointHost: string): "max_completion_tokens" | "max_tokens" {
+  const host = endpointHost.split(":")[0].toLowerCase();
+  return host === "api.openai.com" || host.endsWith(".openai.azure.com") ? "max_completion_tokens" : "max_tokens";
+}
+
+/**
  * Any server that speaks OpenAI's chat completions API, including local ones such as Ollama and vLLM. The
  * answer is asked for as a JSON schema (`response_format`), so the server has to support that.
  */
@@ -24,7 +33,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
       url,
       {
         model: this.input.model,
-        max_tokens: this.input.maxOutputTokens,
+        [outputLimitParam(url.host)]: this.input.maxOutputTokens,
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },

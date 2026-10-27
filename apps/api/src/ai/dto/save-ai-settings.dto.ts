@@ -1,4 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { Transform } from "class-transformer";
 import { AiProviderKind } from "@prisma/client";
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 
@@ -31,6 +32,8 @@ export class SaveAiSettingsDto {
    * endpoint stays the same: pointing the setting at another endpoint drops the saved key.
    */
   @IsOptional()
+  // A key pasted with a trailing line break would otherwise be saved with it and fail later as an invalid header.
+  @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
   @MaxLength(4096)

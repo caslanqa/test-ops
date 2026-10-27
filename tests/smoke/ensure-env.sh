@@ -55,5 +55,8 @@ run
 check "a placeholder JWT_SECRET is replaced" "$(is_true is_hex64 "$(value JWT_SECRET)")"
 check "...while the AI_ENCRYPTION_KEY stays" "$(is_true test "$(value AI_ENCRYPTION_KEY)" = "$fixed")"
 
+# Someone running the API outside Docker copies apps/api/.env.example, so it names the key too.
+check "apps/api/.env.example names AI_ENCRYPTION_KEY" "$(is_true grep -q '^AI_ENCRYPTION_KEY=' "$repo/apps/api/.env.example")"
+
 [ "$failures" -eq 0 ] || { echo "$failures check(s) failed"; exit 1; }
 echo "All checks passed"

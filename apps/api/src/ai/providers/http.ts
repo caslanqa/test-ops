@@ -28,7 +28,7 @@ export async function callProvider(
       url,
       JSON.stringify(body),
       { "content-type": "application/json", accept: "application/json", ...headers },
-      { allowPrivate: true, refuseReserved: true, maxChars: MAX_ANSWER_CHARS, timeoutMs: requestTimeoutMs },
+      { allowPrivate: true, refuseReserved: true, refuseCleartextPublic: true, maxChars: MAX_ANSWER_CHARS, timeoutMs: requestTimeoutMs },
     );
   } catch (error) {
     if (error instanceof WebhookAddressError) throw new AiProviderError(error.message, false);

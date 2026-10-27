@@ -51,11 +51,15 @@ configure one installation-wide row; that is dropped. The questions this left op
     fixed message. Otherwise error text would let a project admin read internal services.
   - Only a connection test and the workflow runs make the request. Its body is the fixed provider shape and the
     endpoint is never taken from project data.
-  - Residual risk, accepted by the owner's decision: an admin can make the server send a fixed JSON `POST` to any
-    internal host and port outside the refused ranges and learn the HTTP status and the connection error it answers
-    with. Every account is an admin of its own DEMO workspace, and registration is open by default, so on a default
-    installation this reaches everyone who can sign in; closing it takes `SELF_REGISTRATION=false` and
-    `DEMO_WORKSPACE=false`. The README and FR-096 say so.
+  - Cloud metadata addresses outside the link-local range (`fd00:ec2::254`, `168.63.129.16`, `100.100.100.200`,
+    `192.0.0.192`) are refused as well, and an `http://` endpoint on a public address is refused (checked on literals
+    when saving and on the resolved address when connecting), so project data and the key aren't sent in clear text.
+  - A DEMO workspace, and the projects in it, take no AI settings: every account is an admin of its own DEMO
+    workspace, so it would otherwise reach everyone who can sign in.
+  - Residual risk, accepted by the owner's decision: an admin of a workspace can make the server send a fixed JSON
+    `POST` to any internal host and port outside the refused ranges and learn the HTTP status or connection error
+    that comes back. With open sign-up (the default) anyone who can register can create such a workspace; closing it
+    takes `SELF_REGISTRATION=false`. The README and FR-096 say so.
 - **Unchanged.** The credential is never returned or logged, and the workflows need write access to the project
   as before. `INSTALLATION_ADMIN_EMAIL` and an `isInstallationAdmin` flag are not built.
 - The role ladder this depends on is in `2026-10-26-role-hierarchy-design.md`.
@@ -125,7 +129,7 @@ interface AiProvider {
 
 - Anthropic: Messages API with a single tool whose `input_schema` is the schema and a forced `tool_choice`; the
   tool input is the output.
-- OpenAI-compatible: chat completions with `response_format: { type: 'json_schema', ... }`. A server without
+- OpenAI-compatible: chat completions with `response_format: { type: 'json_schema', ... }`; the output limit is sent as `max_completion_tokens` to OpenAI and Azure OpenAI and as `max_tokens` to other servers. A server without
   `json_schema` support fails the connection test with a message that says so.
 - Both: timeout from settings, `max_tokens` from settings, no streaming, retries are the workflow's job. Errors
   carry `retryable` (network, 429, 5xx) so the engine can decide.
