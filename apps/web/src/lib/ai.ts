@@ -174,6 +174,9 @@ export interface AiRunSummary {
   createdById: string;
   status: AiRunStatus;
   input: { requirementId: string; extraContext: string | null };
+  /** The comparison this run is a side of, and which side; both null for an ordinary run. */
+  comparisonId: string | null;
+  comparisonSide: 'A' | 'B' | null;
   providerSnapshot: { provider: AiProviderKind; model: string; endpointHost: string; source: AiSource; settingsId: string };
   error: string | null;
   createdAt: string;
@@ -186,6 +189,22 @@ export interface AiRun extends AiRunSummary {
   guidance: RunGuidance | null;
   result: { review: AiReview; drafts: CaseDraft[]; audit: AiAudit; createdCaseIds?: string[] } | null;
   steps: AiRunStep[];
+}
+
+export type ComparisonVerdict = 'A' | 'B' | 'NEITHER';
+
+/** Two runs of one requirement under two selections of guidance, and a person's verdict on which drafted better. */
+export interface AiComparison {
+  id: string;
+  projectId: string;
+  requirementId: string;
+  createdById: string;
+  createdAt: string;
+  preferred: ComparisonVerdict | null;
+  note: string | null;
+  judgedById: string | null;
+  judgedAt: string | null;
+  runs: { A: AiRun; B: AiRun };
 }
 
 /** What each step of the workflow is doing, in words. */

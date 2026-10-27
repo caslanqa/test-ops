@@ -13,6 +13,7 @@ import { WorkspaceMembersPage } from './pages/WorkspaceMembersPage';
 import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
 import { WorkspaceAiPage } from './pages/WorkspaceAiPage';
 import { AiSettingsPage } from './pages/project/AiSettingsPage';
+import { AiComparisonPage } from './pages/project/AiComparisonPage';
 import { AiRunPage } from './pages/project/AiRunPage';
 import { ProjectMembersPage } from './pages/project/ProjectMembersPage';
 import { IntegrationsPage } from './pages/project/IntegrationsPage';
@@ -52,6 +53,7 @@ export default function App() {
               <Route path="runs/:runId" element={<RunDetailPage />} />
               <Route path="defects" element={<DefectsPage />} />
               <Route path="ai/runs/:runId" element={<AiRunPage />} />
+              <Route path="ai/comparisons/:comparisonId" element={<AiComparisonPage />} />
               <Route element={<ProjectRoleRoute roles={MEMBERS_ROLES} />}>
                 <Route path="members" element={<ProjectMembersPage />} />
               </Route>

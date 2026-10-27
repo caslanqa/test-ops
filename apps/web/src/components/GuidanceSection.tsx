@@ -3,8 +3,10 @@ import { FileUp, History, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import {
   GUIDANCE_KIND_LABEL,
+  statsText,
   stepsText,
   type BuiltinGuidanceView,
+  type GuidanceStatsRow,
   type GuidanceList,
   type GuidanceView,
   type ImportPreview,
@@ -35,6 +37,12 @@ export function GuidanceSection({ scope }: { scope: GuidanceScope }) {
   const { notify } = useNotice();
   const headingId = useId();
   const list = useResource(() => api.get<GuidanceList>(base), [base]);
+  // How each guidance did in the project's judged comparisons; only a project has comparisons.
+  const counts = useResource(
+    () => (scope.kind === 'PROJECT' ? api.get<GuidanceStatsRow[]>(`/projects/${scope.id}/ai/guidance/stats`).catch(() => []) : Promise.resolve([])),
+    [scope.kind, scope.id],
+  );
+  const countsText = (ref: string) => statsText((counts.data ?? []).find((row) => row.ref === ref));
   const [editing, setEditing] = useState<GuidanceDraftSource | null>(null);
   const [history, setHistory] = useState<GuidanceView | null>(null);
   const [removing, setRemoving] = useState<GuidanceView | null>(null);
@@ -142,6 +150,7 @@ export function GuidanceSection({ scope }: { scope: GuidanceScope }) {
                         <td>
                           {guidance.title}
                           {guidance.summary && <p className="cell-sub">{guidance.summary}</p>}
+                          {countsText(guidance.id) && <p className="cell-sub">{countsText(guidance.id)}</p>}
                         </td>
                         <td>{GUIDANCE_KIND_LABEL[guidance.kind]}</td>
                         <td>{stepsText(guidance.steps)}</td>
@@ -188,6 +197,7 @@ export function GuidanceSection({ scope }: { scope: GuidanceScope }) {
                           <td>
                             {guidance.title} {!guidance.enabled && <Tag tone="outline">Off in the workspace</Tag>}
                             {guidance.summary && <p className="cell-sub">{guidance.summary}</p>}
+                            {countsText(guidance.id) && <p className="cell-sub">{countsText(guidance.id)}</p>}
                           </td>
                           <td>{stepsText(guidance.steps)}</td>
                           <td>about {guidance.estimatedTokens} tokens</td>
@@ -232,6 +242,7 @@ export function GuidanceSection({ scope }: { scope: GuidanceScope }) {
                       <td>
                         {pack.title}
                         <p className="cell-sub">{pack.summary}</p>
+                        {countsText(`builtin:${pack.key}`) && <p className="cell-sub">{countsText(`builtin:${pack.key}`)}</p>}
                         <details>
                           <summary>Read the text of {pack.title}</summary>
                           {/* Plain text, shown as text. */}

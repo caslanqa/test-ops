@@ -9,17 +9,20 @@ export function GuidanceChoice({
   items,
   value,
   onChange,
+  legend = 'Guidance for this draft',
 }: {
   items: AppliedGuidance[];
   value: RunGuidanceChoice;
   onChange: (next: RunGuidanceChoice) => void;
+  /** Names the group; a comparison has two of them, so each says which side it is. */
+  legend?: string;
 }) {
   const name = useId();
   const chosen = value.mode === 'LIST' ? value.ids : [];
   const toggle = (ref: string, on: boolean) => onChange({ mode: 'LIST', ids: on ? [...chosen, ref] : chosen.filter((id) => id !== ref) });
   return (
     <fieldset className="guidance-steps">
-      <legend className="field-label">Guidance for this draft</legend>
+      <legend className="field-label">{legend}</legend>
       <div className="checkbox-field">
         <input id={`${name}-effective`} type="radio" name={name} checked={value.mode === 'EFFECTIVE'} onChange={() => onChange({ mode: 'EFFECTIVE' })} />
         <label htmlFor={`${name}-effective`}>Use the project’s guidance ({items.length})</label>

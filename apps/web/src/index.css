@@ -3105,6 +3105,16 @@ input[type='checkbox'] {
   padding: 0;
   border: 0;
 }
+/* The two sides of a comparison: side by side where there is room, one under the other on a narrow screen. */
+.comparison-sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(24rem, 100%), 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.comparison-sides > * {
+  min-width: 0;
+}
 .guidance-choose {
   display: grid;
   gap: 0.35rem;

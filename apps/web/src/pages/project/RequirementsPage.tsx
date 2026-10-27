@@ -1,6 +1,6 @@
 import { Fragment, useId, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, ChevronRight, Link2, ListChecks, Pencil, Plus, Sparkles } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronRight, Link2, ListChecks, Pencil, Plus, Scale, Sparkles } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
@@ -324,6 +324,11 @@ export function RequirementsPage() {
   );
   const [choosing, setChoosing] = useState<Requirement | null>(null);
   const [choice, setChoice] = useState<RunGuidanceChoice>({ mode: 'EFFECTIVE' });
+  // Comparing two selections of guidance on one requirement: side A starts without guidance, side B with the project's.
+  const [comparing, setComparing] = useState<Requirement | null>(null);
+  const [sideA, setSideA] = useState<RunGuidanceChoice>({ mode: 'NONE' });
+  const [sideB, setSideB] = useState<RunGuidanceChoice>({ mode: 'EFFECTIVE' });
+  const [compareError, setCompareError] = useState<string | null>(null);
   // The newest runs of the project; a requirement with a run that is going or waiting links to it instead.
   const aiRuns = useResource(
     () => (aiEnabled ? api.get<AiRunSummary[]>(`/projects/${projectId}/ai/runs?limit=100`).catch(() => []) : Promise.resolve([])),
@@ -376,6 +381,24 @@ export function RequirementsPage() {
       return;
     }
     return startRun(r);
+  }
+
+  async function startComparison(r: Requirement) {
+    if (starting) return;
+    setStarting(r.id);
+    setCompareError(null);
+    try {
+      const started = await api.post<{ id: string }>(`/projects/${projectId}/ai/comparisons`, {
+        requirementId: r.id,
+        a: choiceToRequest(sideA),
+        b: choiceToRequest(sideB),
+      });
+      navigate(`/projects/${projectId}/ai/comparisons/${started.id}`);
+    } catch (err) {
+      setCompareError(err instanceof Error ? err.message : "Couldn't start the comparison");
+    } finally {
+      setStarting(null);
+    }
   }
 
   async function startRun(r: Requirement, guidance?: RunGuidanceChoice) {
@@ -524,6 +547,23 @@ export function RequirementsPage() {
                           </button>
                         )
                       )}
+                      {aiEnabled && !r.archivedAt && (applied.data ?? []).length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={starting !== null}
+                          onClick={() => {
+                            setSideA({ mode: 'NONE' });
+                            setSideB({ mode: 'EFFECTIVE' });
+                            setCompareError(null);
+                            setComparing(r);
+                          }}
+                          aria-label={`Compare guidance for ${r.title}`}
+                        >
+                          <Scale size={14} aria-hidden="true" />
+                          Compare guidance
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
@@ -613,6 +653,29 @@ export function RequirementsPage() {
           <div className="dialog-footer">
             <button type="button" className="btn btn-secondary" onClick={() => setChoosing(null)}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={starting !== null}>Draft test cases</button>
+          </div>
+        </form>
+      </Dialog>
+      <Dialog
+        open={comparing !== null}
+        onClose={() => setComparing(null)}
+        wide
+        title="Compare guidance"
+        description={comparing ? `Two drafts for “${comparing.title}”, each under its own guidance, side by side. Each counts as one of your daily runs.` : undefined}
+      >
+        <form
+          className="dialog-body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (comparing) void startComparison(comparing);
+          }}
+        >
+          <GuidanceChoice legend="Guidance for side A" items={applied.data ?? []} value={sideA} onChange={setSideA} />
+          <GuidanceChoice legend="Guidance for side B" items={applied.data ?? []} value={sideB} onChange={setSideB} />
+          <FormError message={compareError} />
+          <div className="dialog-footer">
+            <button type="button" className="btn btn-secondary" onClick={() => setComparing(null)}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={starting !== null}>Compare</button>
           </div>
         </form>
       </Dialog>

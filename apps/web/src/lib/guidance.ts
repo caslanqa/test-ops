@@ -108,6 +108,20 @@ export interface GuidanceAnswer {
 /** What a person picks before drafting: what applies now, nothing, or named guidance. */
 export type RunGuidanceChoice = { mode: 'EFFECTIVE' } | { mode: 'NONE' } | { mode: 'LIST'; ids: string[] };
 
+/** How a guidance did across the judged comparisons it took part in. */
+export interface GuidanceStatsRow {
+  ref: string;
+  title: string;
+  comparisons: number;
+  preferred: number;
+}
+
+/** "Preferred in 3 of 5 comparisons", or nothing for a guidance no judged comparison has used. */
+export function statsText(row: GuidanceStatsRow | undefined): string | null {
+  if (!row || row.comparisons === 0) return null;
+  return `Preferred in ${row.preferred} of ${row.comparisons} ${row.comparisons === 1 ? 'comparison' : 'comparisons'}`;
+}
+
 /** What to send for a choice: a list with nothing in it is the same as none. */
 export function choiceToRequest(choice: RunGuidanceChoice): { mode: 'EFFECTIVE' | 'NONE' | 'LIST'; ids?: string[] } {
   if (choice.mode === 'LIST') return choice.ids.length === 0 ? { mode: 'NONE' } : { mode: 'LIST', ids: choice.ids };
