@@ -9,7 +9,7 @@ import { AiSettingsService } from "./ai-settings.service";
 import { snapshotOf } from "./ai-snapshot";
 import { ApproveRunDto } from "./dto/approve-run.dto";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
-import { StartRunDto } from "./dto/start-run.dto";
+import { GuidanceSelectionDto, StartRunDto } from "./dto/start-run.dto";
 import { GuidanceResolver } from "./guidance/guidance-resolver.service";
 import { buildSnapshot, publicSnapshot, sameSelection, type GuidanceSnapshot } from "./guidance/guidance-snapshot";
 import type { GuidanceSelection } from "./guidance/resolve-guidance";
@@ -41,6 +41,9 @@ const summaryView = (run: AiWorkflowRun) => ({
   createdById: run.createdById,
   status: run.status,
   input: run.input,
+  /** The comparison this run is a side of, and which side; both null for an ordinary run. */
+  comparisonId: run.comparisonId,
+  comparisonSide: run.comparisonSide,
   providerSnapshot: run.providerSnapshot,
   error: run.error,
   createdAt: run.createdAt,
@@ -63,7 +66,11 @@ export class AiRunsService {
     private readonly guidanceResolver: GuidanceResolver,
   ) {}
 
-  async start(userId: string, projectId: string, dto: StartRunDto) {
+  /**
+   * What every start of a run (or of two, for a comparison) has to pass: the right to start, AI switched on with a key
+   * that can be read, and a requirement of this project that is not archived. Returns what the run needs from them.
+   */
+  async prepareStart(userId: string, projectId: string, requirementId: string) {
     const access = await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
     const { source, settings } = await this.settings.resolve(projectId);
     if (!settings || !settings.enabled) throw new ConflictException("AI is not enabled for this project");
@@ -73,15 +80,20 @@ export class AiRunsService {
       );
     }
     const requirement = await this.prisma.requirement.findUnique({
-      where: { id: dto.requirementId },
+      where: { id: requirementId },
       select: { projectId: true, archivedAt: true },
     });
     if (!requirement || requirement.projectId !== projectId || requirement.archivedAt) {
       throw new NotFoundException("Requirement not found");
     }
+    return { access, source, settings };
+  }
+
+  async start(userId: string, projectId: string, dto: StartRunDto) {
+    const { access, source, settings } = await this.prepareStart(userId, projectId, dto.requirementId);
     // The guidance is resolved now, once, and the run keeps what came of it (text included): the steps never read the
     // live guidance. Before the transaction, so a selection that names what the project can't see is refused first.
-    const selection = this.selectionOf(dto);
+    const selection = this.selectionOf(dto.guidance);
     // Only an admin may name guidance that is not in effect: it is a draft, and a run sends all of it to the model.
     const snapshot = await buildSnapshot(this.guidanceResolver, projectId, selection, {
       inEffectOnly: access.role !== ProjectRole.ADMIN,
@@ -91,9 +103,9 @@ export class AiRunsService {
       // of them is saved, and the limit lets them all through.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ai-run-start:${userId}`}))`;
       // The same start twice, such as a double click, is one run: the one that is already queued or working. It
-      // doesn't count against the limit and isn't audited again.
+      // doesn't count against the limit and isn't audited again. A side of a comparison is not an ordinary run.
       const open = await tx.aiWorkflowRun.findMany({
-        where: { createdById: userId, projectId, status: { in: ["QUEUED", "RUNNING"] } },
+        where: { createdById: userId, projectId, comparisonId: null, status: { in: ["QUEUED", "RUNNING"] } },
       });
       const same = open.find((candidate) => {
         const input = candidate.input as { requirementId?: string; extraContext?: string | null };
@@ -156,8 +168,7 @@ export class AiRunsService {
   }
 
   /** The selection a start asks for: what applies now unless it says otherwise; `ids` belong to a list only. */
-  private selectionOf(dto: StartRunDto): GuidanceSelection {
-    const asked = dto.guidance;
+  selectionOf(asked: GuidanceSelectionDto | undefined): GuidanceSelection {
     if (!asked) return { mode: "EFFECTIVE" };
     if (asked.mode !== "LIST") {
       if (asked.ids !== undefined) throw new BadRequestException("ids go with mode LIST");

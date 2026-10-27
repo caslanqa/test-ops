@@ -142,6 +142,7 @@ model Project {
   aiSettings   AiSettings?
   aiGuidance        AiGuidance[]
   aiGuidanceToggles AiGuidanceToggle[]
+  aiComparisons AiRunComparison[]
   aiRuns       AiWorkflowRun[]
 
   @@unique([workspaceId, key])
@@ -772,6 +773,9 @@ model AiWorkflowRun {
   /// The guidance the run was started with: the selection, the budget, and the text of every guidance it used
   /// (guidance/guidance-snapshot.ts). Null for a run from before guidance existed.
   guidance         Json?
+  /// The comparison this run is one side of; null for an ordinary run. Both columns are set or neither (a CHECK).
+  comparisonId     String?
+  comparisonSide   AiComparisonSide?
   /// { review, drafts, audit } once the drafts are ready.
   result           Json?
   error            String?
@@ -781,10 +785,12 @@ model AiWorkflowRun {
   startedAt        DateTime?
   finishedAt       DateTime?
 
-  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  createdBy User             @relation("AiRunCreatedBy", fields: [createdById], references: [id])
-  steps     AiWorkflowStep[]
+  project    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy  User             @relation("AiRunCreatedBy", fields: [createdById], references: [id])
+  steps      AiWorkflowStep[]
+  comparison AiRunComparison? @relation(fields: [comparisonId], references: [id], onDelete: Cascade)
 
+  @@unique([comparisonId, comparisonSide])
   @@index([status, availableAt])
   @@index([projectId, createdAt])
   @@map("ai_workflow_runs")
@@ -896,6 +902,38 @@ model AiGuidanceVersion {
 
   @@unique([guidanceId, version])
   @@map("ai_guidance_versions")
+}
+
+enum AiComparisonSide {
+  A
+  B
+}
+
+enum AiComparisonVerdict {
+  A
+  B
+  NEITHER
+}
+
+/// Two runs of one requirement under two selections of guidance (side A and side B), and a person's verdict on which
+/// drafted better. Both runs are made together or not at all; the verdict, its note and who gave it are set together.
+model AiRunComparison {
+  id            String               @id @default(uuid())
+  projectId     String
+  requirementId String
+  createdById   String
+  createdAt     DateTime             @default(now())
+  preferred     AiComparisonVerdict?
+  /// At most 1000 characters (a CHECK); never put into the audit log.
+  note          String?
+  judgedById    String?
+  judgedAt      DateTime?
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs    AiWorkflowRun[]
+
+  @@index([projectId, createdAt])
+  @@map("ai_run_comparisons")
 }
 
 /// A workspace or a project switching one guidance on or off: a built-in (builtinKey) or a guidance of the

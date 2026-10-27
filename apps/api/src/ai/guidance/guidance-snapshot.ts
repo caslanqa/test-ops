@@ -114,6 +114,15 @@ export function publicSnapshot(snapshot: GuidanceSnapshot | null): PublicGuidanc
   };
 }
 
+/** Whether two selections ask for the same thing: the same mode, and for a list the same ids in any order. */
+export function sameSelections(a: GuidanceSelection, b: GuidanceSelection): boolean {
+  if (a.mode !== b.mode) return false;
+  if (a.mode !== "LIST") return true;
+  const left = [...new Set(a.ids ?? [])].sort();
+  const right = [...new Set(b.ids ?? [])].sort();
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
 /**
  * Whether a run was started with this selection: two starts are the same start only if they ask for the same thing.
  * A list is the same list in whatever order its ids come. A run from before guidance existed used none.

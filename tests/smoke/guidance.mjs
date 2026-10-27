@@ -995,5 +995,130 @@ await ok(admin, 'PATCH', `${WGR}/${R.design}`, { body: body130('WSD') + ' edited
 const afterEdit = await conditional(`${EFFR}?step=DESIGN&format=markdown`, admin, tagged);
 check('after an edit the ETag changes and the new text is sent', afterEdit.status === 200 && afterEdit.etag !== tagged && afterEdit.text.includes('edited'), `${afterEdit.status} ${afterEdit.etag}`);
 
+// ---------------------------------------------------------------------------------------------------------------
+// Comparisons: two runs of one requirement under two selections of guidance, and a person's verdict.
+// ---------------------------------------------------------------------------------------------------------------
+console.log('--- Comparisons: setup ---');
+async function makeR(label, role) {
+  const email = `${label}-r-${sfx}@gd.test`;
+  const invite = await ok(admin, 'POST', `/workspaces/${wsR.id}/invitations`, { email, role: 'MEMBER' });
+  const session = await ok(null, 'POST', '/auth/register', { email, displayName: label, password: PASSWORD, inviteToken: invite.token });
+  await ok(admin, 'PUT', `/workspaces/${wsR.id}/permissions/projects/${projR.id}/users/${session.user.id}`, { role });
+  return { label, token: session.accessToken, id: session.user.id };
+}
+const tester2 = await makeR('tester2', 'TESTER');
+const viewerR = await makeR('viewer', 'VIEWER');
+const automationR = await makeR('automation', 'AUTOMATION');
+const CR = `/projects/${projR.id}/ai/comparisons`;
+const projR2 = await ok(admin, 'POST', `/workspaces/${wsR.id}/projects`, { key: 'GS', name: 'Other runs project' });
+const reqR2 = await ok(admin, 'POST', `/projects/${projR2.id}/requirements`, { title: 'Another project requirement' });
+const reqArchived = await ok(admin, 'POST', `/projects/${projR.id}/requirements`, { title: 'Archived for comparison' });
+await ok(admin, 'DELETE', `/projects/${projR.id}/requirements/${reqArchived.id}`);
+const compare = (a, b, token = runner.token, extra = {}) => call(token, 'POST', CR, { requirementId: reqR.id, a, b, ...extra });
+async function waitComparison(id, seconds = 120) {
+  for (let i = 0; i < seconds * 2; i++) {
+    const view = await ok(admin, 'GET', `${CR}/${id}`);
+    if (finished.includes(view.runs.A.status) && finished.includes(view.runs.B.status)) return view;
+    await sleep(500);
+  }
+  throw new Error(`comparison ${id} did not finish in ${seconds} s`);
+}
+const comparisonCounts = () => [count('ai_run_comparisons', `"projectId" = ${q(projR.id)}`), count('ai_workflow_runs', `"projectId" = ${q(projR.id)}`)];
+const runnerRuns24h = () => Number(psql(`SELECT count(*) FROM ai_workflow_runs WHERE "createdById" = ${q(runnerSession.user.id)} AND "createdAt" > now() - interval '24 hours'`));
+const NONE = { mode: 'NONE' };
+const EFFECTIVE = { mode: 'EFFECTIVE' };
+
+console.log('--- Comparisons: starting one ---');
+setR(`model = 'ok'`);
+fromFake('/__reset', 'POST');
+const started1 = await compare(NONE, EFFECTIVE);
+const cmp = started1.json;
+check('a Tester starts a comparison', started1.status === 201 && typeof cmp?.id === 'string' && cmp.runs?.A && cmp.runs?.B && cmp.runs.A !== cmp.runs.B, started1.text);
+check('...it is two runs of the requirement, side A and side B, each with its own selection', psql(`SELECT string_agg("comparisonSide" || ':' || (guidance->>'mode'), ',' ORDER BY "comparisonSide") FROM ai_workflow_runs WHERE "comparisonId" = ${q(cmp.id)}`) === 'A:NONE,B:EFFECTIVE');
+const finished1 = await waitComparison(cmp.id);
+check('both runs reach approval', finished1.runs.A.status === 'AWAITING_APPROVAL' && finished1.runs.B.status === 'AWAITING_APPROVAL', `${finished1.runs.A.status} ${finished1.runs.A.error ?? ''} / ${finished1.runs.B.status} ${finished1.runs.B.error ?? ''}`);
+check('the comparison shows both runs and what each was sent, and has no verdict yet', finished1.runs.A.guidance?.mode === 'NONE' && finished1.runs.B.guidance?.mode === 'EFFECTIVE' && finished1.preferred === null && finished1.requirementId === reqR.id && finished1.runs.A.id === cmp.runs.A, JSON.stringify([finished1.preferred, finished1.runs.A.guidance?.mode, finished1.runs.B.guidance?.mode]));
+const sentGuidance = callsOfFake().filter((entry) => entry.system.includes('<team_guidance>')).length;
+check('...the model was sent guidance in the three calls of side B and in none of side A', sentGuidance === 3 && callsOfFake().length === 6, String(sentGuidance));
+
+console.log('--- Comparisons: what may be started ---');
+await expectStatus('the same selection on both sides is refused', 400, runner.token, 'POST', CR, { requirementId: reqR.id, a: NONE, b: NONE });
+await expectStatus('...also a list in another order', 400, runner.token, 'POST', CR, { requirementId: reqR.id, a: { mode: 'LIST', ids: [R.design, R.review] }, b: { mode: 'LIST', ids: [R.review, R.design] } });
+await expectStatus('a side without a selection is refused', 400, runner.token, 'POST', CR, { requirementId: reqR.id, a: NONE });
+await expectStatus('an unknown mode is refused', 400, runner.token, 'POST', CR, { requirementId: reqR.id, a: NONE, b: { mode: 'EVERYTHING' } });
+await expectStatus('ids with another mode are refused', 400, runner.token, 'POST', CR, { requirementId: reqR.id, a: NONE, b: { mode: 'EFFECTIVE', ids: [R.design] } });
+await expectStatus('a requirement of another project is not found', 404, runner.token, 'POST', CR, { requirementId: reqR2.id, a: NONE, b: EFFECTIVE });
+await expectStatus('an archived requirement is not found', 404, runner.token, 'POST', CR, { requirementId: reqArchived.id, a: NONE, b: EFFECTIVE });
+await expectStatus('a Tester cannot name a guidance that is switched off', 404, runner.token, 'POST', CR, { requirementId: reqR.id, a: NONE, b: { mode: 'LIST', ids: [R.off] } });
+for (const [label, token] of [['a Viewer', viewerR.token], ['an Automation user', automationR.token], ['an account outside the project', outsider.token]]) {
+  await expectStatus(`${label} cannot start a comparison`, 403, token, 'POST', CR, { requirementId: reqR.id, a: NONE, b: EFFECTIVE });
+}
+
+console.log('--- Comparisons: both runs count, or none ---');
+const base = runnerRuns24h();
+setR(`"maxRunsPerUserPerDay" = ${base + 3}`);
+const beforeLimit = comparisonCounts();
+const fits = await compare(NONE, EFFECTIVE);
+check('a comparison that fits the daily limit is started', fits.status === 201, fits.text);
+const afterFits = comparisonCounts();
+check('...it made one comparison and two runs', afterFits[0] === beforeLimit[0] + 1 && afterFits[1] === beforeLimit[1] + 2, JSON.stringify([beforeLimit, afterFits]));
+const tooMany = await compare(NONE, { mode: 'LIST', ids: [R.design] });
+check('a comparison with room for one run only is refused with 429', tooMany.status === 429, tooMany.text);
+check('...and nothing of it was made, not even one run', same(comparisonCounts(), afterFits), JSON.stringify([afterFits, comparisonCounts()]));
+await waitComparison(fits.json.id);
+setR(`"maxRunsPerUserPerDay" = ${runnerRuns24h() + 2}`);
+const racing = await Promise.all([compare(NONE, EFFECTIVE), compare(NONE, { mode: 'LIST', ids: [R.design] })]);
+const racingStatuses = racing.map((r) => r.status).sort();
+check('two comparisons started at once with room for one: one is made, one is refused', same(racingStatuses, [201, 429]), JSON.stringify(racingStatuses));
+const madeOne = racing.find((r) => r.status === 201);
+check('...and exactly two more runs exist', comparisonCounts()[1] === afterFits[1] + 2, JSON.stringify(comparisonCounts()));
+await waitComparison(madeOne.json.id);
+setR(`"maxRunsPerUserPerDay" = 100`);
+
+console.log('--- Comparisons: the verdict ---');
+const VERDICT = `${CR}/${cmp.id}/verdict`;
+for (const [label, token] of [['a Viewer', viewerR.token], ['an Automation user', automationR.token], ['an account outside the project', outsider.token]]) {
+  await expectStatus(`${label} cannot judge`, 403, token, 'PUT', VERDICT, { preferred: 'A' });
+}
+await expectStatus('an unknown verdict is refused', 400, runner.token, 'PUT', VERDICT, { preferred: 'C' });
+await expectStatus('a note over 1000 characters is refused', 400, runner.token, 'PUT', VERDICT, { preferred: 'B', note: 'x'.repeat(1001) });
+await expectStatus('a Tester judges: B is better', 200, runner.token, 'PUT', VERDICT, { preferred: 'B', note: 'B names the behaviour' });
+const judgedView = await ok(runner.token, 'GET', `${CR}/${cmp.id}`);
+check('...the comparison shows the verdict, the note and who judged', judgedView.preferred === 'B' && judgedView.note === 'B names the behaviour' && judgedView.judgedById === runnerSession.user.id && judgedView.judgedAt, JSON.stringify([judgedView.preferred, judgedView.note, judgedView.judgedById]));
+await expectStatus('another Tester cannot change it', 403, tester2.token, 'PUT', VERDICT, { preferred: 'A' });
+await expectStatus('the one who judged can change it', 200, runner.token, 'PUT', VERDICT, { preferred: 'A' });
+await expectStatus('a project admin can change it', 200, admin, 'PUT', VERDICT, { preferred: 'B' });
+await expectStatus('a comparison of another project is not found', 404, admin, 'GET', `/projects/${projR2.id}/ai/comparisons/${cmp.id}`);
+await expectStatus('...nor can it be judged there', 404, admin, 'PUT', `/projects/${projR2.id}/ai/comparisons/${cmp.id}/verdict`, { preferred: 'B' });
+for (const [label, token] of [['a Viewer', viewerR.token], ['an Automation user', automationR.token]]) {
+  await expectStatus(`${label} can read a comparison`, 200, token, 'GET', `${CR}/${cmp.id}`);
+}
+await expectStatus('an account outside the project cannot', 403, outsider.token, 'GET', `${CR}/${cmp.id}`);
+setR(`model = 'fail500'`);
+const broken = await compare(NONE, EFFECTIVE);
+const brokenView = await waitComparison(broken.json.id);
+check('runs that failed have no drafts to compare', brokenView.runs.A.status === 'FAILED' && brokenView.runs.B.status === 'FAILED', `${brokenView.runs.A.status} / ${brokenView.runs.B.status}`);
+await expectStatus('a verdict before both runs have drafts is refused', 409, runner.token, 'PUT', `${CR}/${broken.json.id}/verdict`, { preferred: 'A' });
+setR(`model = 'ok'`);
+
+console.log('--- Comparisons: what each guidance did ---');
+const second = await compare(NONE, EFFECTIVE);
+await waitComparison(second.json.id);
+await expectStatus('a verdict of neither is accepted', 200, runner.token, 'PUT', `${CR}/${second.json.id}/verdict`, { preferred: 'NEITHER' });
+const STATS = `/projects/${projR.id}/ai/guidance/stats`;
+const stats = await ok(viewerR.token, 'GET', STATS);
+const designStats = stats.find((row) => row.ref === R.design);
+check('a guidance used in two judged comparisons, on the preferred side in one', designStats?.comparisons === 2 && designStats.preferred === 1 && designStats.title === 'WS design rule', JSON.stringify(designStats));
+check('...a built-in pack is counted the same way', stats.find((row) => row.ref === 'builtin:case-design-principles')?.comparisons === 2, JSON.stringify(stats.map((row) => [row.ref, row.comparisons, row.preferred])));
+check('...comparisons that were never judged are not counted', stats.every((row) => row.comparisons <= 2), JSON.stringify(stats.map((row) => row.comparisons)));
+await expectStatus('an API token can read the counts', 200, apiToken, 'GET', STATS);
+await expectStatus('an account outside the project cannot', 403, outsider.token, 'GET', STATS);
+
+console.log('--- Comparisons: the audit log and the cascade ---');
+check('starting and judging are recorded', count('audit_log', `action = 'ai.comparison.started' AND "projectId" = ${q(projR.id)}`) >= 3 && count('audit_log', `action = 'ai.comparison.judged' AND "projectId" = ${q(projR.id)}`) >= 3);
+check('...without the note', count('audit_log', `action LIKE 'ai.comparison.%' AND metadata::text LIKE '%B names the behaviour%'`) === 0);
+psql(`DELETE FROM ai_run_comparisons WHERE id = ${q(broken.json.id)}`);
+check('deleting a comparison deletes its runs', count('ai_workflow_runs', `"comparisonId" = ${q(broken.json.id)}`) === 0 && count('ai_workflow_runs', `id = ${q(broken.json.runs.A)}`) === 0);
+
 console.log(failures === 0 ? '\nAll guidance checks passed.' : `\n${failures} guidance check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
