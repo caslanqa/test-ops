@@ -35,6 +35,8 @@ export interface AiSettingsView {
   maxOutputTokens: number;
   requestTimeoutMs: number;
   maxRunsPerUserPerDay: number;
+  /** The most tokens of the team's guidance in one step's prompt; 0 means no limit. */
+  guidanceBudgetTokens: number;
   /** How an OpenAI-compatible server is asked for a structured answer; AUTO tries ways in turn. */
   outputMode: AiOutputMode;
   /** The way AUTO learned from runs and tests, if any. */
@@ -75,6 +77,7 @@ const toView = (row: AiSettings): AiSettingsView => ({
   maxOutputTokens: row.maxOutputTokens,
   requestTimeoutMs: row.requestTimeoutMs,
   maxRunsPerUserPerDay: row.maxRunsPerUserPerDay,
+  guidanceBudgetTokens: row.guidanceBudgetTokens,
   outputMode: row.outputMode,
   learnedMode: row.learnedMode,
   testedAt: row.testedAt,
@@ -435,6 +438,7 @@ export class AiSettingsService {
       maxOutputTokens: dto.maxOutputTokens,
       requestTimeoutMs: dto.requestTimeoutMs,
       maxRunsPerUserPerDay: dto.maxRunsPerUserPerDay,
+      guidanceBudgetTokens: dto.guidanceBudgetTokens,
       outputMode,
       learnedMode,
       updatedById: userId,
@@ -453,6 +457,7 @@ export class AiSettingsService {
         ["maxOutputTokens", existing?.maxOutputTokens !== row.maxOutputTokens],
         ["requestTimeoutMs", existing?.requestTimeoutMs !== row.requestTimeoutMs],
         ["maxRunsPerUserPerDay", existing?.maxRunsPerUserPerDay !== row.maxRunsPerUserPerDay],
+        ["guidanceBudgetTokens", existing?.guidanceBudgetTokens !== row.guidanceBudgetTokens],
         ["outputMode", (existing?.outputMode ?? AiOutputMode.AUTO) !== row.outputMode],
       ] as const
     )

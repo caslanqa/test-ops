@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
 import { AiOutputMode, AiProviderKind } from "@prisma/client";
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
+import { GUIDANCE_BUDGET_TOKENS } from "../guidance/guidance-limits";
 
 /** The ranges of the numeric settings; the documented defaults are 8192, 120000 and 20. */
 export const AI_MAX_OUTPUT_TOKENS = { min: 256, max: 32000 };
@@ -85,4 +86,14 @@ export class SaveAiSettingsDto {
   @Min(AI_RUNS_PER_USER_PER_DAY.min)
   @Max(AI_RUNS_PER_USER_PER_DAY.max)
   maxRunsPerUserPerDay?: number;
+
+  /**
+   * The most tokens of the team's guidance put into one step's prompt (estimated); 0 means no limit, and the
+   * default is 6000. What does not fit is left out, never cut. Left out of the request, the saved one stays.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(GUIDANCE_BUDGET_TOKENS.min)
+  @Max(GUIDANCE_BUDGET_TOKENS.max)
+  guidanceBudgetTokens?: number;
 }

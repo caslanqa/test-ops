@@ -12,7 +12,12 @@ export const GUIDANCE_LIMITS = {
   priority: { min: 0, max: 1000, default: 500 },
   /** Guidance a workspace, or a project, can hold. */
   perOwner: 100,
+  /** The most guidance a run (or a preview) can name by id. */
+  selectionIds: 20,
 } as const;
+
+/** The most tokens of guidance one step's prompt may carry: an AI setting's `guidanceBudgetTokens`; 0 means no limit. */
+export const GUIDANCE_BUDGET_TOKENS = { min: 0, max: 200_000, default: 6000 } as const;
 
 /** The steps in the order they are shown and stored, whatever order a request names them in. */
 const STEP_ORDER: readonly AiGuidanceStep[] = [
