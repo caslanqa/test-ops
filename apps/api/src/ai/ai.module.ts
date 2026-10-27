@@ -6,12 +6,14 @@ import { AiRunsService } from "./ai-runs.service";
 import { AiSettingsController } from "./ai-settings.controller";
 import { AiSettingsService } from "./ai-settings.service";
 import { AiWorkerService } from "./ai-worker.service";
+import { GuidanceController } from "./guidance/guidance.controller";
+import { GuidanceService } from "./guidance/guidance.service";
 
-/** The embedded AI assistant: where the provider is defined, and the workflows that use it. */
+/** The embedded AI assistant: where the provider is defined, the guidance the team gives it, and the workflows. */
 @Module({
   imports: [TestCasesModule],
-  controllers: [AiSettingsController, AiRunsController],
-  providers: [AiSettingsService, AiRunsService, AiRunExecutor, AiWorkerService],
+  controllers: [AiSettingsController, AiRunsController, GuidanceController],
+  providers: [AiSettingsService, AiRunsService, AiRunExecutor, AiWorkerService, GuidanceService],
   exports: [AiSettingsService],
 })
 export class AiModule {}

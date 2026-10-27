@@ -174,5 +174,212 @@ check('...and its toggles', count('ai_guidance_toggles', `"workspaceId" = ${q(ws
 psql(`DELETE FROM workspaces WHERE id = ${q(ws2.id)}`);
 check('deleting a workspace deletes its AI setting with the budget', count('ai_settings', `"workspaceId" = ${q(ws2.id)}`) === 0);
 
+// ---------------------------------------------------------------------------------------------------------------
+// The API. Its own workspace A (with two projects), a project in a second workspace B, and one account per role.
+// ---------------------------------------------------------------------------------------------------------------
+const PASSWORD = 'GuidanceSmoke123';
+const ghost = '00000000-0000-4000-8000-000000000000';
+async function expectStatus(label, expected, token, method, path, body) {
+  const r = await call(token, method, path, body);
+  check(`[${r.status}] ${label}`, r.status === expected, `(expected ${expected}) ${r.text}`);
+  return r;
+}
+
+console.log('--- API: setup ---');
+const wsA = await ok(admin, 'POST', '/workspaces', { name: 'Guidance API', slug: `gda-${sfx}` });
+const projA = await ok(admin, 'POST', `/workspaces/${wsA.id}/projects`, { key: 'GA', name: 'Guidance API project' });
+const projA2 = await ok(admin, 'POST', `/workspaces/${wsA.id}/projects`, { key: 'GB', name: 'Guidance API project 2' });
+const projLim = await ok(admin, 'POST', `/workspaces/${wsA.id}/projects`, { key: 'GL', name: 'Limit project' });
+const wsB = await ok(admin, 'POST', '/workspaces', { name: 'Guidance API other', slug: `gdb-${sfx}` });
+const projB = await ok(admin, 'POST', `/workspaces/${wsB.id}/projects`, { key: 'GC', name: 'Other project' });
+
+/** An account that joined workspace A by invitation, with `projectRole` in project A (the role comes from the permissions API). */
+async function makeUser(label, projectRole) {
+  const email = `${label}-${sfx}@gd.test`;
+  const invitation = await ok(admin, 'POST', `/workspaces/${wsA.id}/invitations`, { email, role: 'MEMBER' });
+  const session = await ok(null, 'POST', '/auth/register', { email, displayName: label, password: PASSWORD, inviteToken: invitation.token });
+  await ok(admin, 'PUT', `/workspaces/${wsA.id}/permissions/projects/${projA.id}/users/${session.user.id}`, { role: projectRole });
+  return { label, id: session.user.id, token: session.accessToken };
+}
+const pa = await makeUser('pa', 'ADMIN');
+const tester = await makeUser('tester', 'TESTER');
+const automation = await makeUser('automation', 'AUTOMATION');
+const viewer = await makeUser('viewer', 'VIEWER');
+const outsider = {
+  label: 'outsider',
+  token: (await ok(null, 'POST', '/auth/register', { email: `outsider-${sfx}@gd.test`, displayName: 'outsider', password: PASSWORD })).accessToken,
+};
+const apiToken = (await ok(admin, 'POST', '/api-tokens', { name: 'guidance smoke' })).token;
+
+const WG = `/workspaces/${wsA.id}/ai/guidance`;
+const PG = `/projects/${projA.id}/ai/guidance`;
+const PG2 = `/projects/${projA2.id}/ai/guidance`;
+const PGL = `/projects/${projLim.id}/ai/guidance`;
+const WGB = `/workspaces/${wsB.id}/ai/guidance`;
+const PGB = `/projects/${projB.id}/ai/guidance`;
+const MARK = `marker-${sfx}`;
+const rule = (over = {}) => ({
+  title: 'Name cases by behaviour',
+  body: `Name every case after the behaviour it checks. ${MARK}`,
+  kind: 'TEAM_RULE',
+  steps: ['DESIGN'],
+  ...over,
+});
+const tokens = (text) => Math.ceil(text.length / 4) + 30;
+
+console.log('--- API: who may manage guidance ---');
+const routesOf = (base) => [
+  ['GET', base],
+  ['POST', base, rule()],
+  ['PATCH', `${base}/${ghost}`, { enabled: false }],
+  ['DELETE', `${base}/${ghost}`],
+  ['GET', `${base}/${ghost}/versions`],
+  ['PUT', `${base}/toggles`, { builtinKey: 'playwright-e2e', enabled: true }],
+];
+for (const who of [tester, automation, viewer, outsider, { label: 'an API token', token: apiToken }]) {
+  for (const base of [WG, PG]) {
+    for (const [method, path, body] of routesOf(base)) {
+      await expectStatus(`${who.label}: ${method} ${path.replace(ghost, ':id')}`, 403, who.token, method, path, body);
+    }
+  }
+}
+for (const [method, path, body] of routesOf(WG)) {
+  await expectStatus(`a project admin: ${method} ${path.replace(ghost, ':id')} (workspace route)`, 403, pa.token, method, path, body);
+}
+await expectStatus('a project admin lists the guidance of their project', 200, pa.token, 'GET', PG);
+await expectStatus('a project admin cannot list that of another project of the workspace they do not administer', 403, pa.token, 'GET', PG2);
+await expectStatus('a workspace admin lists the guidance of any project of the workspace', 200, admin, 'GET', PG2);
+await expectStatus('a workspace admin lists the workspace guidance', 200, admin, 'GET', WG);
+
+console.log('--- API: writing guidance ---');
+const made = await expectStatus('a workspace admin writes a workspace guidance', 201, admin, 'POST', WG, rule());
+const gw = made.json;
+check('...it is a workspace guidance, on, at priority 500, version 1', gw?.scope === 'WORKSPACE' && gw.enabled === true && gw.priority === 500 && gw.version === 1, made.text);
+check('...written, not uploaded, with the tokens it will cost', gw?.sourceKind === 'WRITTEN' && gw.estimatedTokens === tokens(rule().body), made.text);
+check('...with one version row', count('ai_guidance_versions', `"guidanceId" = ${q(gw.id)}`) === 1);
+const madeP = await expectStatus('a project admin writes a project guidance', 201, pa.token, 'POST', PG, rule({ title: 'Project rule', steps: ['REVIEW', 'AUDIT'], priority: 700, sourceName: 'team.md', license: 'MIT', sourceKind: 'UPLOADED' }));
+const gp = madeP.json;
+check('...it is a project guidance with the fields given', gp?.scope === 'PROJECT' && gp.priority === 700 && gp.sourceKind === 'UPLOADED' && gp.sourceName === 'team.md' && gp.license === 'MIT', madeP.text);
+check('...and keeps its steps', JSON.stringify(gp?.steps) === JSON.stringify(['REVIEW', 'AUDIT']), madeP.text);
+await expectStatus('a workspace admin writes in a project', 201, admin, 'POST', PG2, rule({ title: 'Other project rule' }));
+
+console.log('--- API: what is refused ---');
+for (const [label, body] of [
+  ['a title of 201 characters', rule({ title: 'x'.repeat(201) })],
+  ['an empty title', rule({ title: '  ' })],
+  ['a body of 20001 characters', rule({ body: 'x'.repeat(20001) })],
+  ['an empty body', rule({ body: '' })],
+  ['no steps', rule({ steps: [] })],
+  ['an unknown step', rule({ steps: ['LATER'] })],
+  ['a step twice', rule({ steps: ['DESIGN', 'DESIGN'] })],
+  ['an unknown kind', rule({ kind: 'OTHER' })],
+  ['a priority of 1001', rule({ priority: 1001 })],
+  ['a priority of -1', rule({ priority: -1 })],
+  ['a source address that is not http or https', rule({ sourceUrl: 'ftp://x' })],
+  ['a summary of 501 characters', rule({ summary: 'x'.repeat(501) })],
+  ['a field that does not exist', rule({ owner: 'someone' })],
+]) {
+  await expectStatus(`${label} is refused`, 400, admin, 'POST', WG, body);
+}
+const edge = await expectStatus('a title of 200 and a body of 20000 characters are accepted', 201, admin, 'POST', WG, rule({ title: 'x'.repeat(200), body: 'y'.repeat(20000), steps: ['REVIEW', 'DESIGN', 'AUDIT', 'CODEGEN'], priority: 1000 }));
+await expectStatus('...and can be deleted again', 204, admin, 'DELETE', `${WG}/${edge.json?.id}`);
+
+console.log('--- API: changing guidance and its versions ---');
+const oldBody = rule().body;
+const edited = await expectStatus('a body change is accepted', 200, admin, 'PATCH', `${WG}/${gw.id}`, { body: `A shorter rule. ${MARK}` });
+check('...it makes version 2', edited.json?.version === 2, edited.text);
+const history = await expectStatus('the history is readable', 200, admin, 'GET', `${WG}/${gw.id}/versions`);
+check('...it holds both versions, newest first', Array.isArray(history.json) && history.json.map((v) => v.version).join() === '2,1', history.text);
+check('...version 1 is the text as it was', history.json?.find((v) => v.version === 1)?.body === oldBody, history.text);
+const onlyOff = await expectStatus('switching it off is accepted', 200, admin, 'PATCH', `${WG}/${gw.id}`, { enabled: false });
+check('...it stays at version 2 and is off', onlyOff.json?.version === 2 && onlyOff.json.enabled === false, onlyOff.text);
+await expectStatus('...and on again', 200, admin, 'PATCH', `${WG}/${gw.id}`, { enabled: true });
+const attribution = await expectStatus('changing only the attribution is accepted', 200, admin, 'PATCH', `${WG}/${gw.id}`, { sourceName: 'rules.md', license: 'CC0' });
+check('...it stays at version 2', attribution.json?.version === 2 && attribution.json.license === 'CC0', attribution.text);
+const nothing = await expectStatus('an empty change is accepted', 200, admin, 'PATCH', `${WG}/${gw.id}`, {});
+check('...it changes nothing', nothing.json?.version === 2, nothing.text);
+const sameSteps = await expectStatus('the same steps in another order are accepted', 200, admin, 'PATCH', `${WG}/${gw.id}`, { steps: ['DESIGN'] });
+check('...it stays at version 2', sameSteps.json?.version === 2, sameSteps.text);
+const retitled = await expectStatus('a new title and steps are accepted', 200, admin, 'PATCH', `${WG}/${gw.id}`, { title: 'Name cases', steps: ['AUDIT', 'REVIEW'], priority: 900 });
+check('...it makes version 3 with the steps in their usual order', retitled.json?.version === 3 && JSON.stringify(retitled.json.steps) === JSON.stringify(['REVIEW', 'AUDIT']), retitled.text);
+check('...the tokens follow the body', retitled.json?.estimatedTokens === tokens(`A shorter rule. ${MARK}`), retitled.text);
+await expectStatus('an invalid change is refused', 400, admin, 'PATCH', `${WG}/${gw.id}`, { steps: [] });
+const keptV3 = await call(admin, 'GET', `${WG}/${gw.id}/versions`);
+check('...and writes no version', keptV3.json?.length === 3, keptV3.text);
+const refusedList = await call(admin, 'GET', WG);
+check('the workspace list holds the guidance with its latest version', refusedList.json?.own?.find((g) => g.id === gw.id)?.version === 3, refusedList.text);
+
+console.log('--- API: no more than 100 per owner ---');
+const limitSql = (from, to) =>
+  `INSERT INTO ai_guidance (id, "projectId", title, body, kind, steps, "sourceKind", "createdById", "updatedById", "updatedAt")
+   SELECT 'lim-${sfx}-' || i, ${q(projLim.id)}, 't', 'b', 'TEAM_RULE', ARRAY['DESIGN']::"AiGuidanceStep"[], 'WRITTEN', 'smoke', 'smoke', now() FROM generate_series(${from}, ${to}) i`;
+psql(limitSql(1, 99));
+await expectStatus('the 100th guidance of a project is accepted', 201, admin, 'POST', PGL, rule());
+await expectStatus('the 101st is refused', 409, admin, 'POST', PGL, rule());
+await expectStatus('a project with fewer is not affected', 201, admin, 'POST', PG2, rule({ title: 'Another' }));
+
+console.log('--- API: the workspace guidance a project inherits ---');
+const view = await expectStatus('a project admin lists the project', 200, pa.token, 'GET', PG);
+check('...its own guidance is there', view.json?.own?.some((g) => g.id === gp.id), view.text);
+const inheritedRow = view.json?.inherited?.find((g) => g.id === gw.id);
+check('...the workspace guidance is inherited and applies here', inheritedRow?.enabledHere === true && inheritedRow.scope === 'WORKSPACE', view.text);
+check('...the built-in packs are not there yet', Array.isArray(view.json?.builtin) && view.json.builtin.length === 0, view.text);
+const off = await expectStatus('a project admin switches an inherited guidance off for the project', 200, pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gw.id, enabled: false });
+check('...the answer says it is off', off.json?.enabled === false, off.text);
+const after = await call(pa.token, 'GET', PG);
+check('...the project shows it as not applying here', after.json?.inherited?.find((g) => g.id === gw.id)?.enabledHere === false, after.text);
+const other = await call(admin, 'GET', PG2);
+check('...another project of the workspace still has it', other.json?.inherited?.find((g) => g.id === gw.id)?.enabledHere === true, other.text);
+const wsList = await call(admin, 'GET', WG);
+check('...and the workspace list is unchanged', wsList.json?.own?.find((g) => g.id === gw.id)?.enabled === true, wsList.text);
+await expectStatus('...and the switch can be turned on again', 200, pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gw.id, enabled: true });
+check('...the project applies it again', (await call(pa.token, 'GET', PG)).json?.inherited?.find((g) => g.id === gw.id)?.enabledHere === true);
+check('...with one toggle row for the pair', count('ai_guidance_toggles', `"projectId" = ${q(projA.id)} AND "guidanceId" = ${q(gw.id)}`) === 1);
+await call(admin, 'PATCH', `${WG}/${gw.id}`, { enabled: false });
+check('a workspace guidance that is off applies nowhere', (await call(pa.token, 'GET', PG)).json?.inherited?.find((g) => g.id === gw.id)?.enabledHere === false);
+await call(admin, 'PATCH', `${WG}/${gw.id}`, { enabled: true });
+
+console.log('--- API: ids of another scope ---');
+const gwB = (await ok(admin, 'POST', WGB, rule({ title: 'Workspace B rule' }))).id;
+const gpB = (await ok(admin, 'POST', PGB, rule({ title: 'Project B rule' }))).id;
+for (const [label, token, method, path, body] of [
+  ['a toggle of a guidance of another workspace', pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gwB, enabled: false }],
+  ['a toggle of a project guidance', pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gp.id, enabled: false }],
+  ['a change of another workspace\'s guidance', admin, 'PATCH', `${WG}/${gwB}`, { enabled: false }],
+  ['a delete of another workspace\'s guidance', admin, 'DELETE', `${WG}/${gwB}`],
+  ['the history of another workspace\'s guidance', admin, 'GET', `${WG}/${gwB}/versions`],
+  ['a change of another project\'s guidance', admin, 'PATCH', `${PG}/${gpB}`, { enabled: false }],
+  ['a change of a workspace guidance through a project', admin, 'PATCH', `${PG}/${gw.id}`, { enabled: false }],
+  ['a delete of a workspace guidance through a project', admin, 'DELETE', `${PG}/${gw.id}`],
+  ['a change of a project guidance through the workspace', admin, 'PATCH', `${WG}/${gp.id}`, { enabled: false }],
+  ['the history of a project guidance through the workspace', admin, 'GET', `${WG}/${gp.id}/versions`],
+  ['a change of a project guidance through another project', admin, 'PATCH', `${PG2}/${gp.id}`, { enabled: false }],
+]) {
+  await expectStatus(`${label} answers not found`, 404, token, method, path, body);
+}
+check('...and nothing of workspace B changed', count('ai_guidance', `id = ${q(gwB)} AND enabled`) === 1);
+await expectStatus('a toggle without a target is refused', 400, pa.token, 'PUT', `${PG}/toggles`, { enabled: false });
+await expectStatus('a toggle with two targets is refused', 400, pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gw.id, builtinKey: 'playwright-e2e', enabled: false });
+await expectStatus('a toggle without enabled is refused', 400, pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gw.id });
+await expectStatus('a toggle of a guidance on a workspace route is refused', 400, admin, 'PUT', `${WG}/toggles`, { guidanceId: gw.id, enabled: false });
+await expectStatus('a built-in key that is not a key is refused', 400, admin, 'PUT', `${WG}/toggles`, { builtinKey: 'not a key!', enabled: true });
+
+console.log('--- API: removing guidance ---');
+await ok(pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gw.id, enabled: false });
+await expectStatus('a project admin deletes a project guidance', 204, pa.token, 'DELETE', `${PG}/${gp.id}`);
+check('...its versions go with it', count('ai_guidance_versions', `"guidanceId" = ${q(gp.id)}`) === 0);
+await expectStatus('...and it is gone', 404, pa.token, 'DELETE', `${PG}/${gp.id}`);
+await expectStatus('a workspace admin deletes a workspace guidance', 204, admin, 'DELETE', `${WG}/${gw.id}`);
+check('...its versions and the toggles that switched it off go with it', count('ai_guidance_versions', `"guidanceId" = ${q(gw.id)}`) === 0 && count('ai_guidance_toggles', `"guidanceId" = ${q(gw.id)}`) === 0);
+
+console.log('--- API: the audit log ---');
+const audited = (action) =>
+  count('audit_log', `action = '${action}' AND ("workspaceId" = ${q(wsA.id)} OR "projectId" IN (${q(projA.id)}, ${q(projA2.id)}))`);
+for (const action of ['ai.guidance.created', 'ai.guidance.updated', 'ai.guidance.deleted', 'ai.guidance.toggled']) {
+  check(`${action} is recorded`, audited(action) >= 1);
+}
+check('...with the title and version, never the text', count('audit_log', `action = 'ai.guidance.updated' AND metadata::text LIKE '%Name cases%'`) >= 1);
+check('no guidance audit row holds the text of a guidance', count('audit_log', `action LIKE 'ai.guidance.%' AND metadata::text LIKE '%${MARK}%'`) === 0);
+
 console.log(failures === 0 ? '\nAll guidance checks passed.' : `\n${failures} guidance check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
