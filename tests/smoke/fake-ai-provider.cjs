@@ -12,6 +12,7 @@
 //   redirect                 HTTP 302
 //   slow                     an answer after 20 s
 //   flaky                    the first call (since the last reset) isn't JSON, the rest are valid
+//   many                     thirty cases in the design, five more than the app keeps
 //   revise                   the first coverage audit (since the last reset) asks for a revision
 //   dup                      the coverage audit says draft 0 repeats the first existing case it was given
 //   fenced, prefixed, think, double   a valid answer wrapped in a code fence / after a sentence / after a <think> block / encoded twice
@@ -68,6 +69,8 @@ const DESIGN = {
     },
   ],
 };
+// Thirty cases, five more than the app keeps: what a model that doesn't count sends.
+const MANY = { cases: Array.from({ length: 30 }, (_, i) => ({ ...DESIGN.cases[i % 2], title: `Case number ${i + 1}` })) };
 const audit = (revisionNeeded, duplicates = []) => ({
   coverage: [{ criterion: 0, caseIndexes: [0] }, { criterion: 1, caseIndexes: [1] }],
   uncovered: [],
@@ -79,7 +82,7 @@ function cannedOutput(schemaName, model, userText = '') {
   switch (schemaName) {
     case 'connection_test': return { ok: true };
     case 'requirement_review': return REVIEW;
-    case 'test_design': return DESIGN;
+    case 'test_design': return model === 'many' ? MANY : DESIGN;
     case 'coverage_audit': {
       if (model === 'dup') {
         // The prompt lists the project's existing cases as "<id> | <title>" under this tag; name the first one.

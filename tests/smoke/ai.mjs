@@ -571,7 +571,7 @@ check(`[${started.status}] a Tester starts a run`, started.status === 202 && typ
 const first = await waitForRun(started.json.runId, finished);
 check('the run ends waiting for approval', first.status === 'AWAITING_APPROVAL', `${first.status} ${first.error ?? ''}`);
 check('...after review, design and audit, in that order', stepNames(first) === 'REVIEW,DESIGN,AUDIT', stepNames(first));
-check('...each with a skill version and token usage', first.steps.every((step) => step.skillVersion === 1 && step.usage?.inputTokens === 11 && step.usage?.outputTokens === 7 && step.status === 'COMPLETED' && step.attempt === 1), JSON.stringify(first.steps));
+check('...each with a skill version and token usage', first.steps.every((step) => step.skillVersion === (step.name === 'DESIGN' ? 2 : 1) && step.usage?.inputTokens === 11 && step.usage?.outputTokens === 7 && step.status === 'COMPLETED' && step.attempt === 1), JSON.stringify(first.steps));
 check('...holding the review, the drafts and the audit', first.result?.review?.acceptanceCriteria?.length === 2 && first.result?.drafts?.length === 2 && first.result?.audit?.revisionNeeded === false, JSON.stringify(first.result));
 check('...every draft says what kind of case it is', first.result.drafts.every((draft) => ['positive', 'negative', 'boundary', 'error'].includes(draft.kind)));
 check('the run shows which setting it used', first.providerSnapshot?.source === 'WORKSPACE' && first.providerSnapshot?.endpointHost === '127.0.0.1:8098' && first.providerSnapshot?.model === 'ok', JSON.stringify(first.providerSnapshot));
@@ -648,6 +648,40 @@ resetFake();
 const revising = await waitForRun((await start(tester.token)).json.runId, finished);
 check('a revision follows an audit that asks for one', revising.status === 'AWAITING_APPROVAL' && stepNames(revising) === 'REVIEW,DESIGN,AUDIT,REVISE,AUDIT_REVISED', `${revising.status} ${stepNames(revising)}`);
 check('...with five model calls and the audit after the revision', calls().length === 5 && revising.result?.audit?.revisionNeeded === false, JSON.stringify(revising.result?.audit));
+
+useModel('many');
+resetFake();
+const many = await waitForRun((await start(tester.token)).json.runId, finished);
+check('a model that writes more drafts than the limit does not fail the run', many.status === 'AWAITING_APPROVAL' && stepNames(many) === 'REVIEW,DESIGN,AUDIT', `${many.status} ${many.error ?? ''} ${stepNames(many)}`);
+check('...the first 25 are kept, in the order they were written, and the run says how many were left out', many.result?.drafts?.length === 25 && many.result.drafts[0].title === 'Case number 1' && many.result.drafts[24].title === 'Case number 25' && many.result.omittedDrafts === 5, JSON.stringify([many.result?.drafts?.length, many.result?.omittedDrafts]));
+check('...with no second try: asking again would cost the same model calls for the same answer', calls().length === 3 && many.steps.every((step) => step.attempt === 1), `calls=${calls().length}`);
+check('a run that wrote no more than the limit says nothing was left out', first.result?.omittedDrafts === undefined, JSON.stringify(first.result?.omittedDrafts));
+{
+  const bounds = JSON.parse(
+    inApp(`
+      const { testDesigner } = require('./dist/ai/skills/test-designer');
+      const good = (i) => ({ title: 'C' + i, preconditions: null, steps: [{ action: 'a', expectedResult: null }], priority: 'HIGH', type: 'FUNCTIONAL', kind: 'positive' });
+      const attempt = (fn) => { try { return { ok: fn() }; } catch (error) { return { error: String(error.message) }; } };
+      const thirty = Array.from({ length: 30 }, (_, i) => good(i));
+      const badInTail = thirty.map((c, i) => (i === 27 ? { ...c, priority: 'URGENT' } : c));
+      const badInHead = thirty.map((c, i) => (i === 3 ? { ...c, priority: 'URGENT' } : c));
+      const kept = attempt(() => testDesigner.validate({ cases: thirty }));
+      process.stdout.write(JSON.stringify({
+        kept: kept.ok && [kept.ok.cases.length, kept.ok.omitted],
+        exactly: attempt(() => testDesigner.validate({ cases: thirty.slice(0, 25) })).ok.omitted ?? null,
+        badInTail: badInTail && attempt(() => testDesigner.validate({ cases: badInTail })),
+        badInHead: attempt(() => testDesigner.validate({ cases: badInHead })),
+        notArray: attempt(() => testDesigner.validate({ cases: 'many' })),
+        stepsStillBounded: attempt(() => testDesigner.validate({ cases: [{ ...good(0), steps: Array.from({ length: 31 }, () => ({ action: 'a', expectedResult: null })) }] })),
+        version: testDesigner.version,
+      }));
+    `),
+  );
+  check('the designer keeps 25 of 30 and counts the rest', JSON.stringify(bounds.kept) === '[25,5]' && bounds.exactly === null, JSON.stringify(bounds.kept));
+  check('...an invalid case is still refused, even among those that would be left out', typeof bounds.badInHead.error === 'string' && typeof bounds.badInTail.error === 'string', JSON.stringify([bounds.badInHead, bounds.badInTail]));
+  check('...and nothing else about the shape is loosened', typeof bounds.notArray.error === 'string' && typeof bounds.stepsStillBounded.error === 'string', JSON.stringify([bounds.notArray, bounds.stepsStillBounded]));
+  check('...the wording changed, so its version moved to 2', bounds.version === 2, String(bounds.version));
+}
 
 useModel('flaky');
 resetFake();

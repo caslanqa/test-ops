@@ -103,11 +103,14 @@ export class AiRunExecutor {
     const review: Review = await step("REVIEW", requirementReviewer, context);
     const design = await step("DESIGN", testDesigner, { context, review });
     let drafts: CaseDraft[] = design.cases;
+    // How many drafts the model wrote beyond the limit (see toDrafts); of the revision when there is one.
+    let omittedDrafts = design.omitted ?? 0;
     let audit: Audit = await step("AUDIT", coverageAuditor, { context, review, drafts });
     if (audit.revisionNeeded) {
       // One revision, then one more audit; whatever that audit finds is shown, not acted on.
       const revised = await step("REVISE", testReviser, { context, review, previous: drafts, audit });
       drafts = revised.cases;
+      omittedDrafts = revised.omitted ?? 0;
       audit = await step("AUDIT_REVISED", coverageAuditor, { context, review, drafts });
     }
     audit = sanitizeAudit(audit, review.acceptanceCriteria.length, drafts.length, new Set(context.otherCases.map((c) => c.id)));
@@ -117,7 +120,7 @@ export class AiRunExecutor {
       where: { id: run.id, status: "RUNNING" },
       data: {
         status: "AWAITING_APPROVAL",
-        result: { review, drafts, audit } as unknown as Prisma.InputJsonValue,
+        result: { review, drafts, audit, ...(omittedDrafts > 0 ? { omittedDrafts } : {}) } as unknown as Prisma.InputJsonValue,
         lockedUntil: null,
       },
     });

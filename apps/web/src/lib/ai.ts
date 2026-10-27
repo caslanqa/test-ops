@@ -187,7 +187,14 @@ export interface AiRunSummary {
 export interface AiRun extends AiRunSummary {
   /** The guidance the run was sent; null for a run from before guidance existed. */
   guidance: RunGuidance | null;
-  result: { review: AiReview; drafts: CaseDraft[]; audit: AiAudit; createdCaseIds?: string[] } | null;
+  result: {
+    review: AiReview;
+    drafts: CaseDraft[];
+    audit: AiAudit;
+    /** How many drafts the model wrote beyond the limit of 25; they are not here. Absent when none were left out. */
+    omittedDrafts?: number;
+    createdCaseIds?: string[];
+  } | null;
   steps: AiRunStep[];
 }
 

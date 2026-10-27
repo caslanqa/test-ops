@@ -204,6 +204,13 @@ function RunView({
       {waiting && run.result && (
         <form className="surface integrations-section" aria-labelledby="ai-drafts-heading" onSubmit={approve}>
           <h2 id="ai-drafts-heading" className="section-title" tabIndex={-1}>Drafts</h2>
+          {run.result.omittedDrafts ? (
+            <p className="info-note">
+              <Info size={16} aria-hidden="true" />
+              The model wrote {run.result.omittedDrafts} {run.result.omittedDrafts === 1 ? 'draft' : 'drafts'} more than the limit of 25, so only the
+              first 25 are here. To get the rest, approve these and draft again with notes, such as “cover the error cases”.
+            </p>
+          ) : null}
           {!canEdit && (
             <p className="muted">
               {archived ? 'This project is archived, so drafts can’t be changed or approved.' : 'Only testers and project admins can change and approve drafts.'}
