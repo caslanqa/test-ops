@@ -657,13 +657,13 @@ async function waitRun(runId, statuses = finished, seconds = 90) {
   }
   throw new Error(`run ${runId} did not reach ${statuses.join(' or ')} in ${seconds} s`);
 }
-const startRun = (extra = {}) => call(runner.token, 'POST', RR, { type: 'REQUIREMENT_TO_CASES', requirementId: reqR.id, ...extra });
+const startRun = (extra = {}, token = runner.token) => call(token, 'POST', RR, { type: 'REQUIREMENT_TO_CASES', requirementId: reqR.id, ...extra });
 const callsOfFake = () => JSON.parse(fromFake('/__calls'));
 /** Starts a run under a model, waits for it, and returns it with every request the fake provider saw. */
-async function runOnce(extra, model = 'ok') {
+async function runOnce(extra, model = 'ok', token = runner.token) {
   setR(`model = '${model}'`);
   fromFake('/__reset', 'POST');
-  const started = await startRun(extra);
+  const started = await startRun(extra, token);
   if (started.status !== 202) throw new Error(`a run did not start: ${started.status} ${started.text}`);
   return { run: await waitRun(started.json.runId), calls: callsOfFake() };
 }
@@ -693,7 +693,8 @@ const noGuidance = await runOnce({ guidance: { mode: 'NONE' } });
 check('NONE sends no guidance', noGuidance.run.status === 'AWAITING_APPROVAL' && systemsOf(noGuidance).every((s) => !s.includes('<team_guidance>')), systemsOf(noGuidance).join('|').slice(-200));
 check('...the steps record none, and the run says nothing was used', Object.values(tokensOf(noGuidance.run)).every((t) => t === null) && noGuidance.run.guidance?.mode === 'NONE' && Object.keys(noGuidance.run.guidance.items).length === 0, JSON.stringify([tokensOf(noGuidance.run), noGuidance.run.guidance]));
 
-const listed = await runOnce({ guidance: { mode: 'LIST', ids: [R.off] } });
+// A guidance that is switched off can be tried by an admin (a Tester names only what is in effect: see below).
+const listed = await runOnce({ guidance: { mode: 'LIST', ids: [R.off] } }, 'ok', admin);
 const [lReview, lDesign, lAudit] = systemsOf(listed);
 check('a list sends exactly what it names, though it is switched off', listed.run.status === 'AWAITING_APPROVAL' && lDesign.includes('OFF-') && !lDesign.includes('WSD-') && !lDesign.includes('PRJ-'), lDesign.slice(-300));
 check('...for the steps it is for only', !lReview.includes('<team_guidance>') && !lAudit.includes('<team_guidance>'));
@@ -734,6 +735,21 @@ await expectStatus('ids with another selection are refused', 400, runner.token, 
 await expectStatus('an unknown selection is refused', 400, runner.token, 'POST', RR, withGuidance({ mode: 'EVERYTHING' }));
 await expectStatus('a guidance of another workspace is not found', 404, runner.token, 'POST', RR, withGuidance({ mode: 'LIST', ids: [gwB] }));
 await expectStatus('...nor one that does not exist', 404, runner.token, 'POST', RR, withGuidance({ mode: 'LIST', ids: [ghost] }));
+// Guidance that is not in effect is the admins' to read and to try; a Tester names only what applies already.
+await expectStatus('a Tester cannot name a guidance that is switched off', 404, runner.token, 'POST', RR, withGuidance({ mode: 'LIST', ids: [R.off] }));
+await expectStatus('...nor one among others that are fine', 404, runner.token, 'POST', RR, withGuidance({ mode: 'LIST', ids: [R.design, R.off] }));
+await ok(admin, 'PUT', `${PGR}/toggles`, { guidanceId: R.design, enabled: false });
+await expectStatus('...nor a workspace guidance the project switched off', 404, runner.token, 'POST', RR, withGuidance({ mode: 'LIST', ids: [R.design] }));
+check('...though a project admin may try it', (await startRun({ guidance: { mode: 'LIST', ids: [R.design, R.off] } }, admin)).status === 202);
+await ok(admin, 'PUT', `${PGR}/toggles`, { guidanceId: R.design, enabled: true });
+const waiting = await call(admin, 'GET', RR);
+for (const queued of (waiting.json?.items ?? []).filter((item) => ['QUEUED', 'RUNNING'].includes(item.status))) {
+  await call(admin, 'POST', `${RR}/${queued.id}/cancel`);
+}
+await waitRun((waiting.json?.items ?? [])[0]?.id ?? ghost).catch(() => undefined);
+const named = await startRun({ guidance: { mode: 'LIST', ids: [R.design, R.review] } });
+check('a Tester names guidance that is in effect', named.status === 202, named.text);
+if (named.status === 202) await ok(runner.token, 'POST', `${RR}/${named.json.runId}/cancel`);
 
 console.log('--- Runs: a run keeps what it started with ---');
 fromFake('/__reset', 'POST');
@@ -755,9 +771,9 @@ check('the same start while it is under way is the same run', again.status === 2
 const noneStart = await startRun({ guidance: { mode: 'NONE' } });
 const noneAgain = await startRun({ guidance: { mode: 'NONE' } });
 check('another selection is another run, and the same one twice is one', noneStart.json?.runId !== slowId && noneAgain.json?.runId === noneStart.json?.runId, `${noneStart.text} ${noneAgain.text}`);
-const listA = await startRun({ guidance: { mode: 'LIST', ids: [R.off, R.design] } });
-const listB = await startRun({ guidance: { mode: 'LIST', ids: [R.design, R.off] } });
-const listC = await startRun({ guidance: { mode: 'LIST', ids: [R.off] } });
+const listA = await startRun({ guidance: { mode: 'LIST', ids: [R.review, R.design] } });
+const listB = await startRun({ guidance: { mode: 'LIST', ids: [R.design, R.review] } });
+const listC = await startRun({ guidance: { mode: 'LIST', ids: [R.design] } });
 check('a list is the same start in whatever order its ids come, and another list is another run', listA.json?.runId === listB.json?.runId && listC.json?.runId !== listA.json?.runId && listA.json?.runId !== noneStart.json?.runId, `${listA.text} ${listB.text} ${listC.text}`);
 for (const id of [listA.json.runId, listC.json.runId]) await ok(runner.token, 'POST', `${RR}/${id}/cancel`);
 inApp(`require('fs').writeFileSync('/tmp/fake-ai-fast', '')`);

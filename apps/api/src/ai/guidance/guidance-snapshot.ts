@@ -53,8 +53,12 @@ export async function buildSnapshot(
   resolver: GuidanceResolver,
   projectId: string,
   selection: GuidanceSelection,
+  options: { inEffectOnly?: boolean } = {},
 ): Promise<GuidanceSnapshot> {
-  const [candidates, budgetTokens] = await Promise.all([resolver.candidatesFor(projectId, selection), resolver.budgetFor(projectId)]);
+  const [candidates, budgetTokens] = await Promise.all([
+    resolver.candidatesFor(projectId, selection, options),
+    resolver.budgetFor(projectId),
+  ]);
   const items: GuidanceSnapshot["items"] = {};
   const perStep: GuidanceSnapshot["perStep"] = { REVIEW: [], DESIGN: [], AUDIT: [] };
   const dropped: GuidanceSnapshot["dropped"] = [];

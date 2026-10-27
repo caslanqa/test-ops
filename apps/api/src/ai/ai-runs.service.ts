@@ -64,7 +64,7 @@ export class AiRunsService {
   ) {}
 
   async start(userId: string, projectId: string, dto: StartRunDto) {
-    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
+    const access = await this.accessControl.requireProjectRoleOrWorkspaceAdmin(userId, projectId, WRITE_ROLES);
     const { source, settings } = await this.settings.resolve(projectId);
     if (!settings || !settings.enabled) throw new ConflictException("AI is not enabled for this project");
     if (settings.credentialCipher && this.settings.openCredential(settings) === null) {
@@ -82,7 +82,10 @@ export class AiRunsService {
     // The guidance is resolved now, once, and the run keeps what came of it (text included): the steps never read the
     // live guidance. Before the transaction, so a selection that names what the project can't see is refused first.
     const selection = this.selectionOf(dto);
-    const snapshot = await buildSnapshot(this.guidanceResolver, projectId, selection);
+    // Only an admin may name guidance that is not in effect: it is a draft, and a run sends all of it to the model.
+    const snapshot = await buildSnapshot(this.guidanceResolver, projectId, selection, {
+      inEffectOnly: access.role !== ProjectRole.ADMIN,
+    });
     const { run, created } = await this.prisma.$transaction(async (tx) => {
       // One start at a time per person: without this, starts that arrive together are all counted before any
       // of them is saved, and the limit lets them all through.

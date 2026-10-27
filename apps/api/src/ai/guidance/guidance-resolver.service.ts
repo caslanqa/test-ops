@@ -53,9 +53,15 @@ export class GuidanceResolver {
   /**
    * Everything the selection allows, before the step and the budget narrow it. `EFFECTIVE` is the workspace's
    * guidance that is on and not switched off for this project, and the project's that is on; `LIST` is exactly the
-   * named guidance, switched on or not, as long as the project can see it (its own, or its workspace's).
+   * named guidance, as long as the project can see it (its own, or its workspace's): switched on or not for an
+   * admin, who writes and tries guidance, but only what is in effect for anyone else (`inEffectOnly`), since the
+   * rest is a draft only admins read, and a run sends the model all of what it names.
    */
-  async candidatesFor(projectId: string, selection: GuidanceSelection): Promise<GuidanceCandidate[]> {
+  async candidatesFor(
+    projectId: string,
+    selection: GuidanceSelection,
+    { inEffectOnly = false }: { inEffectOnly?: boolean } = {},
+  ): Promise<GuidanceCandidate[]> {
     if (selection.mode === "NONE") return [];
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
     if (!project) throw new NotFoundException("Project not found");
@@ -66,10 +72,19 @@ export class GuidanceResolver {
       if (ids.length > GUIDANCE_LIMITS.selectionIds) {
         throw new BadRequestException(`Name at most ${GUIDANCE_LIMITS.selectionIds} guidance`);
       }
-      const rows = await this.prisma.aiGuidance.findMany({
+      const found = await this.prisma.aiGuidance.findMany({
         where: { id: { in: ids }, OR: [{ projectId }, { workspaceId: project.workspaceId }] },
       });
-      // Another scope's id answers like a missing one, so ids can't be probed.
+      let rows = found;
+      if (inEffectOnly) {
+        const switchedOff = await this.prisma.aiGuidanceToggle.findMany({
+          where: { projectId, enabled: false, guidanceId: { in: ids } },
+          select: { guidanceId: true },
+        });
+        const off = new Set(switchedOff.map((toggle) => toggle.guidanceId));
+        rows = found.filter((row) => row.enabled && !off.has(row.id));
+      }
+      // Another scope's id, and a draft a person may not name, answer like a missing one, so ids can't be probed.
       if (rows.length !== ids.length) throw new NotFoundException("Guidance not found");
       return rows.map(toCandidate);
     }
