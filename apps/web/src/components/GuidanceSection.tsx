@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import {
   GUIDANCE_KIND_LABEL,
   stepsText,
+  type BuiltinGuidanceView,
   type GuidanceList,
   type GuidanceView,
   type ImportPreview,
@@ -66,6 +67,12 @@ export function GuidanceSection({ scope }: { scope: GuidanceScope }) {
   const setEnabled = (guidance: GuidanceView, enabled: boolean) => {
     setSwitch(guidance.id, enabled);
     return run(() => api.patch(`${base}/${guidance.id}`, { enabled }), `${guidance.title} switched ${enabled ? 'on' : 'off'}.`);
+  };
+  /** A pack on or off for the owner; `null` clears a project's own switch, so it follows the workspace again. */
+  const setPack = (pack: BuiltinGuidanceView, enabled: boolean | null) => {
+    if (enabled !== null) setSwitch(`builtin:${pack.key}`, enabled);
+    const words = enabled === null ? 'follows the workspace again' : `switched ${enabled ? 'on' : 'off'}${scope.kind === 'PROJECT' ? ' for this project' : ''}`;
+    return run(() => api.put(`${base}/toggles`, { builtinKey: pack.key, enabled }), `${pack.title} ${words}.`);
   };
   const setHere = (guidance: InheritedGuidanceView, enabled: boolean) => {
     setSwitch(guidance.id, enabled);
@@ -200,6 +207,69 @@ export function GuidanceSection({ scope }: { scope: GuidanceScope }) {
                 </div>
               </>
             )}
+            <h3 className="section-title">Built-in packs</h3>
+            <p className="muted">
+              Short guidance that ships with TestOps, off until you switch it on
+              {scope.kind === 'PROJECT' ? ' (here, or for the whole workspace)' : ' for every project of this workspace'}. Where one is adapted from
+              elsewhere, its source and licence are shown.
+            </p>
+            <div className="table-wrap">
+              <table className="data-table">
+                <caption className="visually-hidden">Built-in guidance packs</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" className="col-main">Pack</th>
+                    <th scope="col">Kind</th>
+                    <th scope="col">Steps</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Size</th>
+                    <th scope="col">On</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.data.builtin.map((pack) => (
+                    <tr key={pack.key}>
+                      <td>
+                        {pack.title}
+                        <p className="cell-sub">{pack.summary}</p>
+                        <details>
+                          <summary>Read the text of {pack.title}</summary>
+                          {/* Plain text, shown as text. */}
+                          <pre className="guidance-text">{pack.body}</pre>
+                        </details>
+                      </td>
+                      <td>{GUIDANCE_KIND_LABEL[pack.kind]}</td>
+                      <td>{stepsText(pack.steps)}</td>
+                      <td>{pack.origin} · {pack.license}</td>
+                      <td>about {pack.estimatedTokens} tokens</td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={switched[`builtin:${pack.key}`] ?? pack.enabled}
+                          aria-label={scope.kind === 'PROJECT' ? `Use ${pack.title} in this project` : `Use ${pack.title}`}
+                          onChange={(e) => setPack(pack, e.target.checked)}
+                        />
+                        {scope.kind === 'PROJECT' && (
+                          <p className="cell-sub">
+                            {pack.setByProject ? (
+                              <>
+                                Set for this project.{' '}
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPack(pack, null)}>
+                                  Follow the workspace
+                                  <span className="visually-hidden"> for {pack.title}</span>
+                                </button>
+                              </>
+                            ) : (
+                              'Follows the workspace.'
+                            )}
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </section>

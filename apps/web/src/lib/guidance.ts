@@ -49,10 +49,29 @@ export interface GuidanceView {
 /** A workspace guidance seen from a project: `enabledHere` says whether it applies to that project. */
 export type InheritedGuidanceView = GuidanceView & { enabledHere: boolean };
 
+/** A built-in pack that ships with TestOps, with whether it is on for the workspace or project. */
+export interface BuiltinGuidanceView {
+  key: string;
+  title: string;
+  summary: string;
+  kind: GuidanceKind;
+  steps: GuidanceStep[];
+  priority: number;
+  version: number;
+  license: string;
+  origin: string;
+  body: string;
+  estimatedTokens: number;
+  enabled: boolean;
+  /** Projects only: the project has its own switch for the pack, rather than following its workspace. */
+  setByProject?: boolean;
+}
+
 export interface GuidanceList {
   own: GuidanceView[];
   /** Projects only: the guidance of the project's workspace. */
   inherited?: InheritedGuidanceView[];
+  builtin: BuiltinGuidanceView[];
 }
 
 export interface GuidanceVersion {

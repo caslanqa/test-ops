@@ -19,7 +19,11 @@ export function GuidancePreview({ projectId, list }: { projectId: string; list: 
   const [answer, setAnswer] = useState<{ json: GuidanceAnswer; prompt: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const choices = [...list.own, ...(list.inherited ?? [])];
+  // Written guidance by its id, a built-in pack as `builtin:<key>`, which is how the API names it.
+  const choices = [
+    ...[...list.own, ...(list.inherited ?? [])].map((item) => ({ id: item.id, title: item.title, enabled: item.enabled })),
+    ...list.builtin.map((pack) => ({ id: `builtin:${pack.key}`, title: `${pack.title} (built-in)`, enabled: pack.enabled })),
+  ];
 
   async function show() {
     setBusy(true);
