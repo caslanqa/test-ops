@@ -1,4 +1,5 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from "class-validator";
+import { ApiProperty } from "@nestjs/swagger";
+import { IsBoolean, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, ValidateIf } from "class-validator";
 
 export class ToggleGuidanceDto {
   /** A built-in pack, by its key. Name this or `guidanceId`, not both. */
@@ -16,6 +17,9 @@ export class ToggleGuidanceDto {
   @MaxLength(100)
   guidanceId?: string;
 
+  /** On or off; `null` clears this owner's own switch, so a project follows its workspace again. */
+  @ApiProperty({ type: Boolean, nullable: true })
+  @ValidateIf((_, value) => value !== null)
   @IsBoolean()
-  enabled!: boolean;
+  enabled!: boolean | null;
 }

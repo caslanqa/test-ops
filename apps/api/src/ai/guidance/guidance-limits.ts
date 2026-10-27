@@ -16,6 +16,8 @@ export const GUIDANCE_LIMITS = {
   selectionIds: 20,
   /** The largest markdown file that can be read as a guidance, in bytes. */
   uploadBytes: 100_000,
+  /** A built-in pack is short: it is paid for in tokens on every call. */
+  builtinBody: 4000,
 } as const;
 
 /** The most tokens of guidance one step's prompt may carry: an AI setting's `guidanceBudgetTokens`; 0 means no limit. */

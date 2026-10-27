@@ -324,7 +324,7 @@ const view = await expectStatus('a project admin lists the project', 200, pa.tok
 check('...its own guidance is there', view.json?.own?.some((g) => g.id === gp.id), view.text);
 const inheritedRow = view.json?.inherited?.find((g) => g.id === gw.id);
 check('...the workspace guidance is inherited and applies here', inheritedRow?.enabledHere === true && inheritedRow.scope === 'WORKSPACE', view.text);
-check('...the built-in packs are not there yet', Array.isArray(view.json?.builtin) && view.json.builtin.length === 0, view.text);
+check('...the built-in packs are listed too (see below), none of them on', Array.isArray(view.json?.builtin) && view.json.builtin.length === 6 && view.json.builtin.every((p) => p.enabled === false), view.text);
 const off = await expectStatus('a project admin switches an inherited guidance off for the project', 200, pa.token, 'PUT', `${PG}/toggles`, { guidanceId: gw.id, enabled: false });
 check('...the answer says it is off', off.json?.enabled === false, off.text);
 const after = await call(pa.token, 'GET', PG);
@@ -850,6 +850,98 @@ for (const who of [tester, automation, viewer, outsider, { label: 'an API token'
   for (const path of [IW, IP]) await expectStatus(`${who.label} cannot preview a file (${path.startsWith('/work') ? 'workspace' : 'project'})`, 403, who.token, 'POST', path, { fileName: 'x.md', content: '# Title\nText' });
 }
 await expectStatus('a project admin cannot preview on the workspace route', 403, pa.token, 'POST', IW, { fileName: 'x.md', content: '# Title\nText' });
+
+// ---------------------------------------------------------------------------------------------------------------
+// The built-in packs: shipped in the image, off until a workspace or a project switches them on.
+// ---------------------------------------------------------------------------------------------------------------
+console.log('--- Built-in packs: the loader ---');
+const packs = JSON.parse(
+  inApp(`
+    const fs = require('fs');
+    const { loadBuiltinGuidance } = require('./dist/ai/guidance/builtin-guidance');
+    const attempt = (fn) => { try { return { ok: fn() }; } catch (error) { return { error: String(error.message) }; } };
+    const real = loadBuiltinGuidance();
+    const make = (files) => { const dir = fs.mkdtempSync('/tmp/builtin-'); for (const [name, text] of Object.entries(files)) fs.writeFileSync(dir + '/' + name, text); return dir; };
+    const head = (over) => {
+      const f = Object.assign({ key: 'x', title: 'T', summary: 'S', kind: 'TEAM_RULE', steps: '[DESIGN]', priority: '500', version: '1', license: 'MIT', origin: 'TestOps' }, over);
+      return '---\\n' + Object.entries(f).filter(([, v]) => v !== null).map(([k, v]) => k + ': ' + v).join('\\n') + '\\n---\\nBody text';
+    };
+    const out = {
+      keys: real.map((p) => p.key),
+      sizes: real.every((p) => p.body.length > 0 && p.body.length <= 4000),
+      meta: real.every((p) => p.license && p.origin && p.summary && p.title && p.version >= 1 && p.steps.length >= 1),
+      adapted: real.filter((p) => /ECC/.test(p.origin)).map((p) => p.key),
+      playwright: (({ key, kind, steps, priority, version }) => ({ key, kind, steps, priority, version }))(real.find((p) => p.key === 'playwright-e2e')),
+      good: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({}) })).length),
+      noLicense: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({ license: null }) }))),
+      keyMismatch: attempt(() => loadBuiltinGuidance(make({ 'other.md': head({}) }))),
+      longBody: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({}) + 'y'.repeat(4001) }))),
+      maxBody: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({}).replace('Body text', 'y'.repeat(4000)) })).length),
+      badKind: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({ kind: 'OTHER' }) }))),
+      noSteps: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({ steps: '[]' }) }))),
+      badStep: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({ steps: '[DESIGN, LATER]' }) }))),
+      badPriority: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({ priority: '1001' }) }))),
+      badKey: attempt(() => loadBuiltinGuidance(make({ 'Bad_Key.md': head({ key: 'Bad_Key' }) }))),
+      none: attempt(() => loadBuiltinGuidance(make({})).length),
+      otherFiles: attempt(() => loadBuiltinGuidance(make({ 'x.md': head({}), 'NOTES.txt': 'ignored' })).length),
+    };
+    process.stdout.write(JSON.stringify(out));
+  `),
+);
+check('the six packs are there, by key', same(packs.keys, ['browser-qa-checks', 'case-design-principles', 'playwright-e2e', 'regression-coverage', 'requirement-review-checklist', 'tdd-for-test-code']), JSON.stringify(packs.keys));
+check('...each short, with a licence, an origin, a summary and its steps', packs.sizes === true && packs.meta === true, JSON.stringify([packs.sizes, packs.meta]));
+check('...the ones adapted from ECC say so in their origin', same(packs.adapted, ['browser-qa-checks', 'playwright-e2e', 'regression-coverage', 'tdd-for-test-code']), JSON.stringify(packs.adapted));
+check('...a pack\'s fields are read from its header', same(packs.playwright, { key: 'playwright-e2e', kind: 'AUTOMATION_CODE', steps: ['DESIGN', 'CODEGEN'], priority: 500, version: 1 }), JSON.stringify(packs.playwright));
+check('a well-formed file is accepted, and a body of exactly 4000 characters', packs.good.ok === 1 && packs.maxBody.ok === 1, JSON.stringify([packs.good, packs.maxBody]));
+check('a file without a licence is refused, naming the file and the field', /x\.md/.test(packs.noLicense.error) && /license/.test(packs.noLicense.error), JSON.stringify(packs.noLicense));
+check('a key that is not the file name is refused', /key/.test(packs.keyMismatch.error ?? '') && /other\.md/.test(packs.keyMismatch.error ?? ''), JSON.stringify(packs.keyMismatch));
+check('a body of 4001 characters is refused', /4,?000/.test(packs.longBody.error ?? ''), JSON.stringify(packs.longBody));
+check('an unknown kind, no steps, an unknown step, a priority of 1001 and a key with capitals are each refused', [packs.badKind, packs.noSteps, packs.badStep, packs.badPriority, packs.badKey].every((r) => typeof r.error === 'string' && /x\.md|Bad_Key\.md/.test(r.error)), JSON.stringify([packs.badKind, packs.noSteps, packs.badStep, packs.badPriority, packs.badKey]));
+check('a folder with no packs, and files that are not markdown, are fine', packs.none.ok === 0 && packs.otherFiles.ok === 1, JSON.stringify([packs.none, packs.otherFiles]));
+check('the image carries the packs and their notice', /playwright-e2e\.md/.test(inApp(`process.stdout.write(require('fs').readdirSync('/app/apps/api/guidance/builtin').join(' '))`)) && inApp(`process.stdout.write(String(require('fs').existsSync('/app/apps/api/guidance/NOTICE.md')))`) === 'true');
+
+console.log('--- Built-in packs: the catalogue and its switches ---');
+const catalogueOf = async (path) => (await ok(admin, 'GET', path)).builtin;
+const wsPacks = await catalogueOf(WGR);
+check('the workspace lists the six packs, all off', wsPacks?.length === 6 && wsPacks.every((p) => p.enabled === false), JSON.stringify(wsPacks?.map((p) => [p.key, p.enabled])));
+check('...each with its title, summary, kind, steps, source, licence, version, size and text', wsPacks.every((p) => p.title && p.summary && p.kind && p.steps.length && p.origin && p.license && p.version === 1 && p.estimatedTokens > 30 && p.body.length > 100), JSON.stringify(wsPacks[0]));
+const prPacks = await catalogueOf(PGR);
+check('the project lists them too, following the workspace', prPacks.length === 6 && prPacks.every((p) => p.enabled === false && p.setByProject === false), JSON.stringify(prPacks.map((p) => [p.key, p.enabled, p.setByProject])));
+const on = await expectStatus('a workspace switches a pack on', 200, admin, 'PUT', `${WGR}/toggles`, { builtinKey: 'case-design-principles', enabled: true });
+check('...the answer says it is on', on.json?.enabled === true, on.text);
+check('...the workspace shows it on, and a project follows', (await catalogueOf(WGR)).find((p) => p.key === 'case-design-principles').enabled === true && (await catalogueOf(PGR)).find((p) => p.key === 'case-design-principles').enabled === true);
+const effDesign = (await ok(admin, 'GET', `/projects/${projR.id}/ai/guidance/effective?step=DESIGN`)).used;
+check('...and it applies to the projects of the workspace, before the workspace\'s own guidance', effDesign[0]?.ref === 'builtin:case-design-principles' && effDesign[0].scope === 'BUILTIN' && effDesign[0].version === 1 && effDesign.length >= 2, JSON.stringify(effDesign.map((u) => [u.ref, u.scope])));
+check('...for the steps it is for only', (await ok(admin, 'GET', `/projects/${projR.id}/ai/guidance/effective?step=CODEGEN`)).used.every((u) => u.ref !== 'builtin:case-design-principles'));
+await ok(admin, 'PUT', `${PGR}/toggles`, { builtinKey: 'case-design-principles', enabled: false });
+const own = (await catalogueOf(PGR)).find((p) => p.key === 'case-design-principles');
+check('a project switches it off for itself, and says so', own.enabled === false && own.setByProject === true, JSON.stringify(own));
+check('...it no longer applies there, and the workspace still has it on', !(await ok(admin, 'GET', `/projects/${projR.id}/ai/guidance/effective?step=DESIGN`)).used.some((u) => u.ref === 'builtin:case-design-principles') && (await catalogueOf(WGR)).find((p) => p.key === 'case-design-principles').enabled === true);
+await ok(admin, 'PUT', `${PGR}/toggles`, { builtinKey: 'playwright-e2e', enabled: true });
+check('a project switches on a pack the workspace left off', (await ok(admin, 'GET', `/projects/${projR.id}/ai/guidance/effective?step=DESIGN`)).used.some((u) => u.ref === 'builtin:playwright-e2e') && (await catalogueOf(WGR)).find((p) => p.key === 'playwright-e2e').enabled === false);
+await expectStatus('a project follows the workspace again when it clears its own switch', 200, admin, 'PUT', `${PGR}/toggles`, { builtinKey: 'case-design-principles', enabled: null });
+const following = (await catalogueOf(PGR)).find((p) => p.key === 'case-design-principles');
+check('...it is on again, as the workspace has it', following.enabled === true && following.setByProject === false, JSON.stringify(following));
+await expectStatus('a switch with no value at all is still refused', 400, admin, 'PUT', `${PGR}/toggles`, { builtinKey: 'case-design-principles' });
+await expectStatus('a key that names no pack is not found (workspace)', 404, admin, 'PUT', `${WGR}/toggles`, { builtinKey: 'no-such-pack', enabled: true });
+await expectStatus('...nor on a project', 404, admin, 'PUT', `${PGR}/toggles`, { builtinKey: 'no-such-pack', enabled: true });
+
+console.log('--- Built-in packs: in a run ---');
+const withPacks = await runOnce({});
+const [pReview, pDesign, pAudit] = systemsOf(withPacks);
+check('a run sends a pack that is on, after the step\'s own prompt and before the workspace\'s guidance', withPacks.run.status === 'AWAITING_APPROVAL' && pDesign.indexOf('test designer') < pDesign.indexOf('One behaviour per case') && pDesign.indexOf('One behaviour per case') < pDesign.indexOf('WSD-'), pDesign.slice(0, 200));
+check('...the packs in order of priority, and each only for its steps', pDesign.indexOf('One behaviour per case') < pDesign.indexOf('getByRole with a name') && pReview.includes('One behaviour per case') && !pReview.includes('getByRole with a name') && pAudit.includes('One behaviour per case') && !pAudit.includes('getByRole with a name'), pReview.slice(-200));
+const packItem = withPacks.run.guidance?.items['builtin:case-design-principles'];
+check('...the run says it was a built-in pack, with its version and size', packItem?.scope === 'BUILTIN' && packItem.version === 1 && packItem.tokens > 100 && packItem.title === 'Test case design principles', JSON.stringify(packItem));
+check('...and keeps its text, never showing it', !JSON.stringify(withPacks.run).includes('One behaviour per case') && psql(`SELECT guidance->'items'->'builtin:case-design-principles'->>'text' FROM ai_workflow_runs WHERE id = ${q(withPacks.run.id)}`).includes('One behaviour per case'));
+check('a pack that is switched on counts in a step\'s tokens', tokensOf(withPacks.run).DESIGN > 500, JSON.stringify(tokensOf(withPacks.run)));
+const listedPack = await previewed(admin, PGR, '?step=DESIGN&selection=LIST&ids=builtin:regression-coverage');
+check('an admin can preview a pack that is off by naming it', listedPack.used.length === 1 && listedPack.used[0].ref === 'builtin:regression-coverage' && listedPack.used[0].scope === 'BUILTIN', JSON.stringify(listedPack.used));
+await expectStatus('a Tester cannot name a pack that is off', 404, runner.token, 'POST', RR, withGuidance({ mode: 'LIST', ids: ['builtin:regression-coverage'] }));
+await expectStatus('...nor one that does not exist', 404, runner.token, 'POST', RR, withGuidance({ mode: 'LIST', ids: ['builtin:no-such-pack'] }));
+const namedPack = await startRun({ guidance: { mode: 'LIST', ids: ['builtin:case-design-principles'] } });
+check('a Tester can name a pack that is on', namedPack.status === 202, namedPack.text);
+if (namedPack.status === 202) await ok(runner.token, 'POST', `${RR}/${namedPack.json.runId}/cancel`);
 
 console.log(failures === 0 ? '\nAll guidance checks passed.' : `\n${failures} guidance check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

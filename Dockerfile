@@ -48,6 +48,8 @@ COPY --from=prod-deps /app/node_modules /app/node_modules
 COPY --from=prod-deps /app/apps/api/node_modules /app/apps/api/node_modules
 COPY --from=build /app/apps/api/dist /app/apps/api/dist
 COPY --from=build /app/apps/api/prisma /app/apps/api/prisma
+# The built-in AI guidance packs (and the notice their licences ask for): read at start-up, next to dist.
+COPY --from=build /app/apps/api/guidance /app/apps/api/guidance
 COPY --from=build /app/apps/api/package.json /app/apps/api/package.json
 # SPA files are copied next to dist (ServeStaticModule rootPath = dist/../web)
 COPY --from=build /app/apps/web/dist /app/apps/api/web

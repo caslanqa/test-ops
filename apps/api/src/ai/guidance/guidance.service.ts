@@ -11,6 +11,7 @@ import {
 import { AuditService } from "../../audit/audit.service";
 import { AccessControlService } from "../../common/access-control.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { BuiltinGuidanceService, type BuiltinGuidance } from "./builtin-guidance";
 import { ImportPreviewDto } from "./dto/import-preview.dto";
 import { SaveGuidanceDto, UpdateGuidanceDto } from "./dto/save-guidance.dto";
 import { ToggleGuidanceDto } from "./dto/toggle-guidance.dto";
@@ -46,12 +47,20 @@ export interface GuidanceView {
 /** A workspace guidance seen from a project: `enabledHere` says whether it applies to that project. */
 export type InheritedGuidanceView = GuidanceView & { enabledHere: boolean };
 
+/** A built-in pack with whether it is on for the owner: a workspace's own switch, or a project's (else its workspace's). */
+export interface BuiltinGuidanceView extends BuiltinGuidance {
+  estimatedTokens: number;
+  enabled: boolean;
+  /** Projects only: the project has its own switch for this pack, rather than following its workspace. */
+  setByProject?: boolean;
+}
+
 export interface GuidanceList {
   own: GuidanceView[];
   /** Projects only: the guidance of the project's workspace. */
   inherited?: InheritedGuidanceView[];
-  /** The packs that ship with the app; filled in once there are any. */
-  builtin: never[];
+  /** The packs that ship with the app, each with its switch. */
+  builtin: BuiltinGuidanceView[];
 }
 
 /** One earlier (or the current) state of a guidance. */
@@ -117,6 +126,7 @@ export class GuidanceService {
     private readonly accessControl: AccessControlService,
     private readonly audit: AuditService,
     private readonly resolver: GuidanceResolver,
+    private readonly builtin: BuiltinGuidanceService,
   ) {}
 
   /**
@@ -157,7 +167,7 @@ export class GuidanceService {
   async list(userId: string, owner: GuidanceOwner): Promise<GuidanceList> {
     await this.requireAdmin(userId, owner, true);
     const own = await this.prisma.aiGuidance.findMany({ where: whereOwner(owner), orderBy: LIST_ORDER });
-    if (owner.kind === "WORKSPACE") return { own: own.map(toView), builtin: [] };
+    if (owner.kind === "WORKSPACE") return { own: own.map(toView), builtin: await this.builtinViews(owner, owner.id) };
 
     const workspaceId = await this.workspaceOf(owner.id);
     const [shared, switches] = await Promise.all([
@@ -169,8 +179,25 @@ export class GuidanceService {
       own: own.map(toView),
       // A workspace guidance applies unless it is off itself or the project switched it off.
       inherited: shared.map((row) => ({ ...toView(row), enabledHere: row.enabled && switched.get(row.id) !== false })),
-      builtin: [],
+      builtin: await this.builtinViews(owner, workspaceId),
     };
+  }
+
+  /** The packs with their switches: a workspace's own; for a project its own switch where it has one, else its workspace's. */
+  private async builtinViews(owner: GuidanceOwner, workspaceId: string): Promise<BuiltinGuidanceView[]> {
+    const switches = await this.prisma.aiGuidanceToggle.findMany({
+      where: { builtinKey: { not: null }, OR: [{ workspaceId }, ...(owner.kind === "PROJECT" ? [{ projectId: owner.id }] : [])] },
+      select: { projectId: true, builtinKey: true, enabled: true },
+    });
+    const ofProject = new Map<string, boolean>();
+    const ofWorkspace = new Map<string, boolean>();
+    for (const toggle of switches) (toggle.projectId ? ofProject : ofWorkspace).set(toggle.builtinKey!, toggle.enabled);
+    return this.builtin.all().map((pack) => ({
+      ...pack,
+      estimatedTokens: estimateTokens(pack.body),
+      enabled: (owner.kind === "PROJECT" ? ofProject.get(pack.key) : undefined) ?? ofWorkspace.get(pack.key) ?? false,
+      ...(owner.kind === "PROJECT" ? { setByProject: ofProject.has(pack.key) } : {}),
+    }));
   }
 
   async create(userId: string, owner: GuidanceOwner, dto: SaveGuidanceDto): Promise<GuidanceView> {
@@ -313,11 +340,12 @@ export class GuidanceService {
    * Switches one guidance on or off for the owner. A workspace switches built-in packs; a project switches built-in
    * packs and the guidance of its workspace (for itself alone: the workspace's own list is unchanged).
    */
-  async toggle(userId: string, owner: GuidanceOwner, dto: ToggleGuidanceDto): Promise<{ enabled: boolean }> {
+  async toggle(userId: string, owner: GuidanceOwner, dto: ToggleGuidanceDto): Promise<{ enabled: boolean | null }> {
     await this.requireAdmin(userId, owner, false);
     if ((dto.builtinKey === undefined) === (dto.guidanceId === undefined)) {
       throw new BadRequestException("Name exactly one of builtinKey and guidanceId");
     }
+    if (dto.builtinKey !== undefined && !this.builtin.byKey(dto.builtinKey)) throw new NotFoundException("Built-in guidance not found");
     let title: string | undefined;
     if (dto.guidanceId !== undefined) {
       if (owner.kind === "WORKSPACE") {
@@ -337,7 +365,10 @@ export class GuidanceService {
       // write, one at a time per owner.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ai-guidance-toggle:${owner.kind}:${owner.id}`}))`;
       const existing = await tx.aiGuidanceToggle.findFirst({ where: { ...whereOwner(owner), ...target } });
-      if (existing) await tx.aiGuidanceToggle.update({ where: { id: existing.id }, data: { enabled: dto.enabled } });
+      // `null` clears the owner's own switch: a project then follows its workspace again.
+      if (dto.enabled === null) {
+        if (existing) await tx.aiGuidanceToggle.delete({ where: { id: existing.id } });
+      } else if (existing) await tx.aiGuidanceToggle.update({ where: { id: existing.id }, data: { enabled: dto.enabled } });
       else await tx.aiGuidanceToggle.create({ data: { ...whereOwner(owner), ...target, enabled: dto.enabled } });
     });
     await this.audit.record({

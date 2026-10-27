@@ -6,6 +6,7 @@ import { AiRunsService } from "./ai-runs.service";
 import { AiSettingsController } from "./ai-settings.controller";
 import { AiSettingsService } from "./ai-settings.service";
 import { AiWorkerService } from "./ai-worker.service";
+import { BuiltinGuidanceService } from "./guidance/builtin-guidance";
 import { GuidanceEffectiveController } from "./guidance/guidance-effective.controller";
 import { GuidanceResolver } from "./guidance/guidance-resolver.service";
 import { GuidanceController } from "./guidance/guidance.controller";
@@ -15,7 +16,7 @@ import { GuidanceService } from "./guidance/guidance.service";
 @Module({
   imports: [TestCasesModule],
   controllers: [AiSettingsController, AiRunsController, GuidanceController, GuidanceEffectiveController],
-  providers: [AiSettingsService, AiRunsService, AiRunExecutor, AiWorkerService, GuidanceService, GuidanceResolver],
+  providers: [AiSettingsService, AiRunsService, AiRunExecutor, AiWorkerService, GuidanceService, GuidanceResolver, BuiltinGuidanceService],
   exports: [AiSettingsService],
 })
 export class AiModule {}
