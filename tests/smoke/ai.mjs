@@ -431,6 +431,11 @@ try {
         rawNewline: attempt('{"a":"first line\\nsecond line","b":"tab\\there"}'),
         commaInString: attempt('{"a":"x,}","b":1}'),
         brokenHint: answerHint('{"a": "b" "c": 1}', false, null),
+        // Answers built to make a pattern search run for ever: many openings and no closing.
+        slowThink: (() => { const t = Date.now(); try { parseModelJson('<think>'.repeat(30000)); } catch { /* expected */ } return Date.now() - t; })(),
+        slowFence: (() => { const t = Date.now(); try { parseModelJson('\\u0060\\u0060\\u0060\\nx'.repeat(30000)); } catch { /* expected */ } return Date.now() - t; })(),
+        slowBrace: (() => { const t = Date.now(); try { parseModelJson('{'.repeat(200000)); } catch { /* expected */ } return Date.now() - t; })(),
+        bigPlain: (() => { const big = JSON.stringify({ a: 'x'.repeat(1500000) }); const t = Date.now(); const ok = JSON.stringify(parseModelJson(big)).length === big.length; return ok ? Date.now() - t : -1; })(),
         publicHint: answerHint('Sorry, I cannot help with sk-1 or this.', false, 'sk-1'),
         privateHint: answerHint('Sorry, I cannot help.', true, null),
         longHint: answerHint('x'.repeat(2000), false, null).length,
@@ -443,6 +448,10 @@ try {
   check('...and JSON inside a JSON string', parsed.double === '{"a":1}', JSON.stringify(parsed));
   check('plain and nested JSON are read as before', parsed.plain === '{"a":1}' && parsed.nested === '{"a":{"b":[1,2]}}', JSON.stringify(parsed));
   check('text without JSON is still refused', parsed.text === 'THROWS' && parsed.empty === 'THROWS', JSON.stringify(parsed));
+  check('many <think> openings without a closing are read in well under a second', parsed.slowThink < 500, `${parsed.slowThink} ms`);
+  check('...and so are many code fences without a closing', parsed.slowFence < 500, `${parsed.slowFence} ms`);
+  check('...and a long run of braces', parsed.slowBrace < 500, `${parsed.slowBrace} ms`);
+  check('a large plain answer is still read whole', parsed.bigPlain >= 0 && parsed.bigPlain < 1000, `${parsed.bigPlain} ms`);
   check('trailing commas are tolerated', parsed.trailingComma === '{"a":[1,2],"b":{"c":1}}', JSON.stringify(parsed));
   check('...and a line break or tab inside a string', parsed.rawNewline === '{"a":"first line\\nsecond line","b":"tab\\there"}', JSON.stringify(parsed));
   check('...without touching a comma inside a string', parsed.commaInString === '{"a":"x,}","b":1}', JSON.stringify(parsed));

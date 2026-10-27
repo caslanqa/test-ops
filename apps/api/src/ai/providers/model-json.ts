@@ -51,30 +51,71 @@ function repairJson(text: string): string {
   return out;
 }
 
+/** The most of an answer the fallback readings work on; a longer one is only read as plain JSON. */
+const MAX_FALLBACK_CHARS = 256 * 1024;
+/** The longest tag after an opening code fence ("json") that is skipped. */
+const MAX_FENCE_TAG_CHARS = 30;
+
+/**
+ * Removes `<think>…</think>` blocks: what a reasoning model thought is not the answer, and may contain braces of its
+ * own. Plain scans for the two markers, each moving forward, so the work is linear however many openings the answer
+ * has (a pattern search for an opening with no closing would start over at every opening).
+ */
+function stripThinkBlocks(raw: string): string {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const open = raw.indexOf("<think>", at);
+    if (open === -1) break;
+    const close = raw.indexOf("</think>", open + "<think>".length);
+    if (close === -1) break;
+    out += raw.slice(at, open);
+    at = close + "</think>".length;
+  }
+  return out + raw.slice(at);
+}
+
+/** What is between the first code fence's opening line and the next fence, or null when there is no such fence. */
+function fenceContents(text: string): string | null {
+  const open = text.indexOf("```");
+  if (open === -1) return null;
+  const newline = text.indexOf("\n", open + 3);
+  if (newline === -1 || newline - (open + 3) > MAX_FENCE_TAG_CHARS) return null;
+  const close = text.indexOf("```", newline + 1);
+  if (close === -1) return null;
+  return text.slice(newline + 1, close).trim();
+}
+
 /**
  * Reads the JSON a model answered with. A model that was asked for a JSON schema should answer with exactly the
  * JSON, but many servers and models don't keep to it: they wrap it in a code fence, put a sentence before it, think
  * out loud in a `<think>` block first, or encode it twice; and by hand they slip on line breaks inside strings and
  * on trailing commas. The plain text is tried first; only if that isn't JSON are those wrappings undone and the slips
- * mended. Throws when no JSON can be found. What comes back may still be a string, array or
- * number: the caller decides whether that is usable.
+ * mended. The answer comes from a server somebody configured, so nothing here may take longer than a few passes over
+ * it: plain scans instead of patterns that start over, and no fallbacks for an answer longer than MAX_FALLBACK_CHARS.
+ * Throws when no JSON can be found. What comes back may still be a string, array or number: the caller decides
+ * whether that is usable.
  */
 export function parseModelJson(raw: string): unknown {
-  // What a reasoning model thought is not the answer, and may contain braces of its own.
-  const text = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const candidates = [text];
-  const wholeFence = /^```[\w-]*[ \t]*\r?\n?([\s\S]*?)\r?\n?```$/.exec(text);
-  if (wholeFence) candidates.push(wholeFence[1].trim());
-  const innerFence = /```[\w-]*[ \t]*\r?\n([\s\S]*?)\r?\n```/.exec(text);
-  if (innerFence) candidates.push(innerFence[1].trim());
-  const first = text.indexOf("{");
-  const last = text.lastIndexOf("}");
-  if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1));
-  for (const candidate of [...candidates, ...candidates.map(repairJson)]) {
-    try {
-      return unwrapString(JSON.parse(candidate));
-    } catch {
-      // Not JSON as it stands; try the next reading.
+  try {
+    return unwrapString(JSON.parse(raw.trim()));
+  } catch {
+    // Not plain JSON; undo the wrappings below.
+  }
+  if (raw.length <= MAX_FALLBACK_CHARS) {
+    const text = stripThinkBlocks(raw).trim();
+    const candidates = [text];
+    const fenced = fenceContents(text);
+    if (fenced) candidates.push(fenced);
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1));
+    for (const candidate of [...candidates, ...candidates.map(repairJson)]) {
+      try {
+        return unwrapString(JSON.parse(candidate));
+      } catch {
+        // Not JSON as it stands; try the next reading.
+      }
     }
   }
   throw new SyntaxError("The answer contains no JSON");
