@@ -64,6 +64,8 @@ model Workspace {
   projects    Project[]
   auditLog    AuditLog[]
   aiSettings  AiSettings?
+  aiGuidance        AiGuidance[]
+  aiGuidanceToggles AiGuidanceToggle[]
 
   @@map("workspaces")
 }
@@ -138,6 +140,8 @@ model Project {
   webhook      ProjectWebhook?
   invitations  WorkspaceInvitation[]
   aiSettings   AiSettings?
+  aiGuidance        AiGuidance[]
+  aiGuidanceToggles AiGuidanceToggle[]
   aiRuns       AiWorkflowRun[]
 
   @@unique([workspaceId, key])
@@ -720,6 +724,9 @@ model AiSettings {
   /// Set by a passing connection test, cleared by any change to provider, model, endpoint or key.
   /// AI can only be switched on while it is set.
   testedAt             DateTime?
+  /// The most tokens of guidance put into one step's prompt (estimated as ceil(characters / 4) + 30 each);
+  /// 0 means no limit. The migration adds a CHECK for 0 to 200000.
+  guidanceBudgetTokens Int            @default(6000)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
   updatedById          String?
@@ -762,6 +769,9 @@ model AiWorkflowRun {
   input            Json
   /// Which setting the run was started with: provider, model, endpoint host, source, settings id. Never the key.
   providerSnapshot Json
+  /// The guidance the run was started with: the selection, the budget, and the text of every guidance it used
+  /// (guidance/guidance-snapshot.ts). Null for a run from before guidance existed.
+  guidance         Json?
   /// { review, drafts, audit } once the drafts are ready.
   result           Json?
   error            String?
@@ -791,6 +801,8 @@ model AiWorkflowStep {
   attempt      Int
   /// How the provider was asked for the answer (an AiOutputMode other than AUTO).
   mode         String?
+  /// Estimated tokens of guidance in this step's prompt; null when none was added.
+  guidanceTokens Int?
   /// What was sent to the provider; project data, so it is never part of an API answer.
   input        Json
   output       Json?
@@ -803,4 +815,108 @@ model AiWorkflowStep {
 
   @@unique([runId, name, attempt])
   @@map("ai_workflow_steps")
+}
+
+// ---------------------------------------------------------------------------
+// AI guidance (docs/superpowers/specs/2026-10-27-ai-guidance-design.md)
+// ---------------------------------------------------------------------------
+
+/// A label for the lists and for filtering; it doesn't change how a guidance is used.
+enum AiGuidanceKind {
+  CASE_CONTENT
+  AUTOMATION_CODE
+  TEAM_RULE
+}
+
+/// Where a guidance is put in the prompt. CODEGEN is reserved for code generation: only the export API reads it.
+enum AiGuidanceStep {
+  REVIEW
+  DESIGN
+  AUDIT
+  CODEGEN
+}
+
+enum AiGuidanceSource {
+  WRITTEN
+  UPLOADED
+}
+
+/// Advice the team gives the assistant: written or uploaded by a workspace admin (the workspace's guidance) or a
+/// project admin (the project's). Exactly one of workspaceId and projectId is set, and steps is never empty;
+/// the migration adds both as CHECKs, which Prisma doesn't model.
+model AiGuidance {
+  id          String           @id @default(uuid())
+  workspaceId String?
+  projectId   String?
+  title       String
+  summary     String?
+  body        String
+  kind        AiGuidanceKind
+  steps       AiGuidanceStep[]
+  /// 0 to 1000. A higher one comes first in the prompt and is kept longest when the budget is short.
+  priority    Int              @default(500)
+  enabled     Boolean          @default(true)
+  /// Counts up whenever title, summary, body, kind, steps or priority change; ai_guidance_versions keeps each.
+  version     Int              @default(1)
+  sourceKind  AiGuidanceSource @default(WRITTEN)
+  sourceName  String?
+  sourceUrl   String?
+  /// Free text, shown with the guidance as attribution.
+  license     String?
+  createdById String
+  updatedById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  workspace Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions  AiGuidanceVersion[]
+  toggles   AiGuidanceToggle[]
+
+  @@index([workspaceId])
+  @@index([projectId])
+  @@map("ai_guidance")
+}
+
+/// Every version of a guidance as it was, the current one included.
+model AiGuidanceVersion {
+  id         String           @id @default(uuid())
+  guidanceId String
+  version    Int
+  title      String
+  summary    String?
+  body       String
+  kind       AiGuidanceKind
+  steps      AiGuidanceStep[]
+  priority   Int
+  editedById String
+  createdAt  DateTime         @default(now())
+
+  guidance AiGuidance @relation(fields: [guidanceId], references: [id], onDelete: Cascade)
+
+  @@unique([guidanceId, version])
+  @@map("ai_guidance_versions")
+}
+
+/// A workspace or a project switching one guidance on or off: a built-in (builtinKey) or a guidance of the
+/// workspace for one project (guidanceId). Exactly one owner and exactly one target (CHECKs), and one row per
+/// owner and target (a unique index over COALESCE of the four columns, since NULLs are distinct to a plain one).
+model AiGuidanceToggle {
+  id          String   @id @default(uuid())
+  workspaceId String?
+  projectId   String?
+  guidanceId  String?
+  builtinKey  String?
+  enabled     Boolean
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  guidance  AiGuidance? @relation(fields: [guidanceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([projectId])
+  @@index([guidanceId])
+  @@map("ai_guidance_toggles")
 }
