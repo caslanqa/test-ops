@@ -4,6 +4,7 @@ import { AuthenticatedUser, CurrentUser } from "../common/decorators/current-use
 import { WebSessionOnly } from "../common/decorators/web-session-only.decorator";
 import { AiSettingsService } from "./ai-settings.service";
 import { SaveAiSettingsDto } from "./dto/save-ai-settings.dto";
+import { TestAiSettingsDto } from "./dto/test-ai-settings.dto";
 
 /**
  * Who defines the AI provider, and where. The workspace default is for workspace admins; a project's own
@@ -47,12 +48,19 @@ export class AiSettingsController {
     await this.settings.removeWorkspace(user.id, workspaceId);
   }
 
-  /** One small request to the saved workspace default, with no project content; says whether it worked. */
+  /**
+   * One small request with no project content; says whether it worked. With the form's values in the body it tests
+   * those before they are saved (a pass returns a `proof` for saving them as tested); without a body, the saved default.
+   */
   @Post("workspaces/:workspaceId/ai/test")
   @WebSessionOnly()
   @HttpCode(200)
-  testWorkspace(@CurrentUser() user: AuthenticatedUser, @Param("workspaceId") workspaceId: string) {
-    return this.settings.test(user.id, { workspaceId });
+  testWorkspace(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("workspaceId") workspaceId: string,
+    @Body() dto: TestAiSettingsDto,
+  ) {
+    return this.settings.test(user.id, { workspaceId }, dto);
   }
 
   /** The project's own setting and the workspace default it would use without one (project admins). */
@@ -81,11 +89,15 @@ export class AiSettingsController {
     await this.settings.removeProject(user.id, projectId);
   }
 
-  /** One small request to the project's own saved setting, with no project content; says whether it worked. */
+  /** The same for the project's own setting: the form's values in the body, or the saved setting without one. */
   @Post("projects/:projectId/ai/settings/test")
   @WebSessionOnly()
   @HttpCode(200)
-  testProject(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.settings.test(user.id, { projectId });
+  testProject(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() dto: TestAiSettingsDto,
+  ) {
+    return this.settings.test(user.id, { projectId }, dto);
   }
 }

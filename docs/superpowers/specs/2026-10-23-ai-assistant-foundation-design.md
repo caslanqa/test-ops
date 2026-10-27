@@ -228,10 +228,17 @@ Runs are visible to members of the project.
 - All of them return settings without the credential and are web-session-only. `PUT` accepts an optional
   `credential` (omitted keeps the saved one, unless the endpoint changed, see the decided change) and
   `clearCredential`.
-- `POST …/test`: one minimal request with no project content; returns `{ ok, latencyMs, error? }` and sets or
-  clears `testedAt`.
+- `POST …/test`: one minimal request with no project content; returns `{ ok, latencyMs, error?, proof? }`. With the
+  form's values in the body (`provider`, `model`, `endpoint?`, `credential?`, `clearCredential?`) it tests those before
+  anything is saved and changes nothing that is saved, except that a pass of exactly what is saved sets `testedAt`;
+  a pass returns a `proof`. Without a body it tests the saved setting, sets or clears `testedAt` and, on a failure,
+  switches AI off. The key of a draft test is the typed one, else the saved one when the endpoint is the saved
+  endpoint, else none.
+- The `proof` is `expires.HMAC` over the owner, provider, model, endpoint and a hash of the key, signed with a key
+  derived from `JWT_SECRET`, valid for ten minutes. A `PUT` that carries a valid `testProof` for exactly the values it
+  saves counts as tested, so a form can test, then save and switch on in one request; anything else ignores it.
 - `enabled` can only be turned on when provider, model and credential (or a keyless local endpoint) are set and the
-  last connection test passed with the current settings (`testedAt`).
+  connection has passed a test: of the saved values (`testedAt`) or, through its proof, of the values being saved.
 
 ### 7. Web
 

@@ -44,10 +44,20 @@ export class SaveAiSettingsDto {
   @IsBoolean()
   clearCredential?: boolean;
 
-  /** Only possible after a passing connection test of the saved settings. */
+  /** Only possible after a passing connection test: of the saved settings, or of these values (see `testProof`). */
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  /**
+   * The `proof` a passing test of exactly these values returned. It lets the values be saved as tested, so a form
+   * can test first and save and switch on afterwards. It is bound to the workspace or project, the provider, model,
+   * endpoint and key, and expires after ten minutes; anything else ignores it.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  testProof?: string;
 
   @IsOptional()
   @IsInt()

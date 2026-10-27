@@ -50,12 +50,25 @@ export interface SaveAiSettings {
   maxOutputTokens: number;
   requestTimeoutMs: number;
   maxRunsPerUserPerDay: number;
+  /** The proof of a passing test of exactly these values (see AiTestResult). */
+  testProof?: string;
 }
 
 export interface AiTestResult {
   ok: boolean;
   latencyMs: number;
   error?: string;
+  /** Returned by a passing test of the form's values: saving exactly those values with it counts as tested. */
+  proof?: string;
+}
+
+/** The values of the form to test before they are saved. */
+export interface TestAiSettings {
+  provider: AiProviderKind;
+  model: string;
+  endpoint?: string;
+  credential?: string;
+  clearCredential?: boolean;
 }
 
 /** The host a setting sends project data to, for the disclosure; the public API when an Anthropic setting has no endpoint. */

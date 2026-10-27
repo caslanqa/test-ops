@@ -295,6 +295,44 @@ await expectStatus('an API token cannot test a project setting', 403, adminToken
 const emptyWorkspace = await ok(admin, 'POST', '/workspaces', { name: 'AI empty', slug: `ai-empty-${sfx}` });
 await expectStatus('a workspace default that was never saved has nothing to test', 404, admin, 'POST', `/workspaces/${emptyWorkspace.id}/ai/test`);
 
+console.log('--- Testing before saving ---');
+const EWS = `/workspaces/${emptyWorkspace.id}/ai`;
+const draft = (extra = {}) => ({ provider: 'OPENAI_COMPATIBLE', model: 'ok', endpoint: ENDPOINT, credential: SECRET, ...extra });
+const drafted = await call(admin, 'POST', `${EWS}/test`, draft());
+check(`[${drafted.status}] the values of a form are tested before anything is saved`, drafted.status === 200 && drafted.json?.ok === true && typeof drafted.json?.proof === 'string', drafted.text);
+check('...with the key that was typed', (await lastRequest()).headers.authorization === `Bearer ${SECRET}`);
+check('...and nothing was saved', (await ok(admin, 'GET', EWS)).settings === null);
+await expectStatus('a test without a model is refused', 400, admin, 'POST', `${EWS}/test`, { provider: 'OPENAI_COMPATIBLE', endpoint: ENDPOINT });
+await expectStatus('an OpenAI-compatible test without an endpoint is refused', 400, admin, 'POST', `${EWS}/test`, draft({ endpoint: undefined }));
+await expectStatus('a link-local endpoint is refused', 400, admin, 'POST', `${EWS}/test`, draft({ endpoint: 'http://169.254.169.254/v1' }));
+await expectStatus('a Tester cannot test values either', 403, tester.token, 'POST', `${PS}/test`, draft());
+await expectStatus('...nor an API token', 403, adminToken, 'POST', `${EWS}/test`, draft());
+const failedDraft = await call(admin, 'POST', `${EWS}/test`, draft({ model: 'fail500' }));
+check('values that do not work say so and give no proof', failedDraft.json?.ok === false && failedDraft.json?.proof === undefined && String(failedDraft.json?.error).includes('500'), failedDraft.text);
+check('...and still nothing was saved', (await ok(admin, 'GET', EWS)).settings === null);
+
+const proof = drafted.json.proof;
+await expectStatus('a changed model does not ride on the proof', 409, admin, 'PUT', EWS, draft({ model: 'other', enabled: true, testProof: proof }));
+await expectStatus('...nor a changed key', 409, admin, 'PUT', EWS, draft({ credential: 'sk-other', enabled: true, testProof: proof }));
+await expectStatus('...nor another workspace', 409, admin, 'PUT', WS, draft({ model: 'ok-3', enabled: true, testProof: proof }));
+await expectStatus('...nor a made-up proof', 409, admin, 'PUT', EWS, draft({ enabled: true, testProof: '9999999999999.AAAA' }));
+const savedDraft = await call(admin, 'PUT', EWS, draft({ enabled: true, testProof: proof }));
+check(`[${savedDraft.status}] values that were tested can be saved and switched on in one go`, savedDraft.status === 200 && savedDraft.json?.enabled === true && savedDraft.json?.testedAt !== null, savedDraft.text);
+
+const badDraft = await call(admin, 'POST', `${EWS}/test`, draft({ model: 'fail500' }));
+const stillSaved = (await ok(admin, 'GET', EWS)).settings;
+check('a failing test of other values leaves what is saved alone', badDraft.json?.ok === false && stillSaved.enabled === true && stillSaved.testedAt !== null, JSON.stringify(stillSaved));
+await call(admin, 'POST', `${EWS}/test`, { provider: 'OPENAI_COMPATIBLE', model: 'ok', endpoint: ENDPOINT });
+check('without a key typed, the saved key is used for the same endpoint', (await lastRequest()).headers.authorization === `Bearer ${SECRET}`);
+await call(admin, 'POST', `${EWS}/test`, { provider: 'OPENAI_COMPATIBLE', model: 'ok', endpoint: 'http://localhost:8098/v1' });
+check('...but not for another endpoint', (await lastRequest()).headers.authorization === undefined);
+await call(admin, 'POST', `${EWS}/test`, { provider: 'OPENAI_COMPATIBLE', model: 'ok', endpoint: ENDPOINT, clearCredential: true });
+check('...and not when the key is being removed', (await lastRequest()).headers.authorization === undefined);
+psql(`update ai_settings set "testedAt" = null where "workspaceId" = '${emptyWorkspace.id}'`);
+await call(admin, 'POST', `${EWS}/test`, { provider: 'OPENAI_COMPATIBLE', model: 'ok', endpoint: ENDPOINT });
+check('a passing test of exactly what is saved records it', (await ok(admin, 'GET', EWS)).settings.testedAt !== null);
+
+
 console.log('--- Address and error helpers, inside the app ---');
 try {
   const reservedYes = ['169.254.169.254', 'fe80::1', '0.0.0.0', '224.0.0.1', '255.255.255.255', '::ffff:169.254.169.254', '::ffff:a9fe:a9fe', '::', 'ff02::1', '100.100.100.200', '168.63.129.16', '192.0.0.192', 'fd00:ec2::254'];

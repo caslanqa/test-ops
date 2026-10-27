@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { AiSettingsForm } from '../components/AiSettingsForm';
 import { ConfirmDialog } from '../components/Members';
 import { EmptyState, LoadError, Loading, PageHeader } from '../components/Page';
-import type { AiSettingsView, AiTestResult, SaveAiSettings } from '../lib/ai';
+import type { AiSettingsView, AiTestResult, SaveAiSettings, TestAiSettings } from '../lib/ai';
 import { useNotice } from '../lib/notice';
 import { useWorkspace } from '../lib/projectInfo';
 import { usePageTitle, useResource } from '../lib/useResource';
@@ -64,7 +64,7 @@ export function WorkspaceAiPage() {
             key={view?.id ?? 'new'}
             view={view}
             onSave={(body: SaveAiSettings) => api.put(`/workspaces/${workspaceId}/ai`, body)}
-            onTest={() => api.post<AiTestResult>(`/workspaces/${workspaceId}/ai/test`)}
+            onTest={(values: TestAiSettings) => api.post<AiTestResult>(`/workspaces/${workspaceId}/ai/test`, values)}
             onChanged={settings.reload}
             extra={
               view && (

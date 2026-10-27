@@ -9,6 +9,7 @@ import {
   type AiSettingsView,
   type AiTestResult,
   type SaveAiSettings,
+  type TestAiSettings,
 } from '../lib/ai';
 import { useNotice } from '../lib/notice';
 
@@ -16,9 +17,10 @@ const trimSlashes = (value: string) => value.trim().replace(/\/+$/, '');
 
 /**
  * The form of one AI setting, a workspace's default or a project's own. The provider key is write-only: the
- * field is never filled in, and the page only says whether one is saved. AI can be switched on only while the
- * saved settings have passed a connection test, and the test runs on the saved settings, so a change has to be
- * saved and tested again first (the server enforces both; this only says so up front).
+ * field is never filled in, and the page only says whether one is saved. The connection test checks the values in
+ * the form, saved or not, and a pass hands back a proof that goes with the next save of exactly those values; AI can
+ * be switched on while the values on the form have passed a test. Saving without testing is fine: AI then stays off
+ * until a test passes. The server enforces all of this; the form only says so up front.
  */
 export function AiSettingsForm({
   view,
@@ -29,7 +31,7 @@ export function AiSettingsForm({
 }: {
   view: AiSettingsView | null;
   onSave: (body: SaveAiSettings) => Promise<unknown>;
-  onTest: () => Promise<AiTestResult>;
+  onTest: (values: TestAiSettings) => Promise<AiTestResult>;
   onChanged: () => void;
   /** More buttons next to the form's own, such as removing the setting. */
   extra?: ReactNode;
@@ -49,6 +51,8 @@ export function AiSettingsForm({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<AiTestResult | null>(null);
+  // The proof of a passing test, with the values it was for: it only counts while the form still holds them.
+  const [passed, setPassed] = useState<{ values: string; proof: string } | null>(null);
   const ids = {
     provider: useId(), model: useId(), endpoint: useId(), endpointHint: useId(), key: useId(), keyHint: useId(),
     remove: useId(), enabled: useId(), enabledHint: useId(), tokens: useId(), timeout: useId(), runs: useId(), testHint: useId(),
@@ -62,8 +66,12 @@ export function AiSettingsForm({
     endpointValue !== (view.endpoint ?? '') ||
     credential !== '' ||
     removeKey;
-  // What the server would accept: the saved settings passed a test and nothing that was tested has changed.
-  const tested = Boolean(view?.testedAt) && !connectionDirty;
+  const connectionValues = JSON.stringify([provider, model.trim(), endpointValue, credential, removeKey]);
+  const provedByTest = passed?.values === connectionValues ? passed.proof : undefined;
+  // What the server would accept: the saved settings passed a test and nothing that was tested has changed, or the
+  // values on the form passed a test just now.
+  const tested = (Boolean(view?.testedAt) && !connectionDirty) || provedByTest !== undefined;
+  const canTest = Boolean(model.trim()) && (provider !== 'OPENAI_COMPATIBLE' || Boolean(endpointValue));
   const enabled = tested && (enabledDraft ?? view?.enabled ?? false);
   const dropsKey = Boolean(view?.hasCredential) && !credential && endpointValue !== (view?.endpoint ?? '');
   const host = aiEndpointHost(provider, endpointValue);
@@ -80,6 +88,7 @@ export function AiSettingsForm({
         endpoint: endpointValue || undefined,
         ...(credential ? { credential } : removeKey ? { clearCredential: true } : {}),
         enabled,
+        ...(provedByTest ? { testProof: provedByTest } : {}),
         maxOutputTokens: Number(maxOutputTokens),
         requestTimeoutMs: Math.round(Number(requestTimeoutSeconds) * 1000),
         maxRunsPerUserPerDay: Number(maxRunsPerUserPerDay),
@@ -87,6 +96,7 @@ export function AiSettingsForm({
       setCredential('');
       setRemoveKey(false);
       setEnabledDraft(null);
+      setPassed(null);
       notify('AI settings saved.');
       onChanged();
     } catch (err) {
@@ -101,7 +111,15 @@ export function AiSettingsForm({
     setError(null);
     setTestResult(null);
     try {
-      setTestResult(await onTest());
+      const values = connectionValues;
+      const result = await onTest({
+        provider,
+        model: model.trim(),
+        endpoint: endpointValue || undefined,
+        ...(credential ? { credential } : removeKey ? { clearCredential: true } : {}),
+      });
+      setTestResult(result);
+      setPassed(result.ok && result.proof ? { values, proof: result.proof } : null);
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't run the connection test");
@@ -190,10 +208,8 @@ export function AiSettingsForm({
       </div>
       <p id={ids.enabledHint} className="field-hint">
         {tested
-          ? 'The connection test passed. Save to apply the switch.'
-          : view?.testedAt
-            ? 'You changed the connection. Save, then run the connection test again, to switch AI on.'
-            : 'First save the settings, then run the connection test; AI can be switched on after it passes.'}
+          ? 'The connection test passed for these values. Save to apply the switch.'
+          : 'AI can be switched on once a connection test of these values has passed. You can also save without testing: AI then stays off.'}
       </p>
       <p className="info-note">
         <Info size={16} aria-hidden="true" />
@@ -207,7 +223,7 @@ export function AiSettingsForm({
         <button
           type="button"
           className="btn btn-secondary"
-          disabled={!view || connectionDirty || testing}
+          disabled={!canTest || testing}
           aria-describedby={ids.testHint}
           onClick={test}
         >
@@ -217,12 +233,9 @@ export function AiSettingsForm({
         {extra}
       </div>
       <p id={ids.testHint} className="field-hint">
-        {!view
-          ? 'Save the settings to test them.'
-          : connectionDirty
-            ? 'Save your changes first: the test uses the saved settings. It sends one small request with no project data.'
-            : 'Sends one small request with no project data.'}
-        {' '}A failed test switches AI off for everyone using this setting, until a later test passes.
+        {canTest
+          ? 'Test connection checks the values above without saving them, with one small request that has no project data. It never changes what is saved.'
+          : 'Enter a model' + (provider === 'OPENAI_COMPATIBLE' ? ' and an endpoint' : '') + ' to test the connection.'}
       </p>
       {/* On the page before there is a result: a region that appears with its text already in it is often not announced. */}
       <div role="status">

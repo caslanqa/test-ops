@@ -12,6 +12,7 @@ import {
   type AiTestResult,
   type ProjectAiSettings,
   type SaveAiSettings,
+  type TestAiSettings,
 } from '../../lib/ai';
 import { useNotice } from '../../lib/notice';
 import { useProjectInfo } from '../../lib/projectInfo';
@@ -79,7 +80,7 @@ export function AiSettingsPage() {
               key={data.own?.id ?? 'new'}
               view={data.own}
               onSave={(body: SaveAiSettings) => api.put(`/projects/${projectId}/ai/settings`, body)}
-              onTest={() => api.post<AiTestResult>(`/projects/${projectId}/ai/settings/test`)}
+              onTest={(values: TestAiSettings) => api.post<AiTestResult>(`/projects/${projectId}/ai/settings/test`, values)}
               onChanged={reload}
               extra={
                 data.own && (

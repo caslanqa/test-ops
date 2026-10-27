@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { createHash, createHmac, hkdfSync, timingSafeEqual } from "crypto";
 import { ConfigService } from "@nestjs/config";
 import { AiProviderKind, ProjectRole, WorkspaceRole, type AiSettings } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
@@ -14,6 +15,7 @@ import { SecretBox } from "../common/secret-box";
 import { PrismaService } from "../prisma/prisma.service";
 import { AiEndpointError, assertAiEndpoint } from "../webhooks/safe-post";
 import { SaveAiSettingsDto } from "./dto/save-ai-settings.dto";
+import { TestAiSettingsDto } from "./dto/test-ai-settings.dto";
 import { AiProviderError, scrubProviderError } from "./provider-error";
 import { createAiProvider } from "./providers/provider";
 
@@ -43,6 +45,8 @@ export type InheritedAiSettings = Pick<AiSettingsView, "provider" | "model" | "e
 const TEST_TIMEOUT_MS = 30_000;
 /** The most output a connection test asks for: its answer is one small object. */
 const TEST_MAX_OUTPUT_TOKENS = 256;
+/** How long a passing test of a form's values stays good for saving them as tested. */
+const TEST_PROOF_TTL_MS = 10 * 60 * 1000;
 const TEST_SCHEMA = {
   type: "object",
   properties: { ok: { type: "boolean" } },
@@ -91,6 +95,7 @@ const toInherited = (row: AiSettings): InheritedAiSettings => ({
 export class AiSettingsService {
   private readonly logger = new Logger(AiSettingsService.name);
   private readonly box: SecretBox | null;
+  private readonly proofKey: Buffer;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -100,6 +105,8 @@ export class AiSettingsService {
   ) {
     const key = config.get<Buffer | null>("ai.encryptionKey") ?? null;
     this.box = key ? new SecretBox(key) : null;
+    // Signs the proof of a passing test; derived from JWT_SECRET, apart from the keys that sign and encrypt other things.
+    this.proofKey = Buffer.from(hkdfSync("sha256", config.get<string>("jwt.secret")!, "testops", "ai-test-proof v1", 32));
   }
 
   /** The setting a project uses, with where it comes from. The row still holds the encrypted key: server side only. */
@@ -170,36 +177,62 @@ export class AiSettingsService {
   }
 
   /**
-   * Sends one small request to the saved provider, with no project content, and says whether it answered in
-   * the shape asked for. A pass records it (AI can then be switched on); a failure clears it and switches AI
-   * off. The answer never carries more of the provider's reply than a public endpoint's error text.
+   * Sends one small request to a provider, with no project content, and says whether it answered in the shape
+   * asked for. Without a body it tests the saved settings: a pass records it (AI can then be switched on), a
+   * failure clears it and switches AI off. With the values of the form in the body it tests those instead, before
+   * anything is saved: it changes nothing that is saved, except that a pass of exactly what is saved records it.
+   * A pass of a form's values returns a `proof`, which lets a later save of exactly those values count as tested.
+   * The answer never carries more of the provider's reply than a public endpoint's error text.
    */
   async test(
     userId: string,
     scope: { workspaceId: string } | { projectId: string },
-  ): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+    dto?: TestAiSettingsDto,
+  ): Promise<{ ok: boolean; latencyMs: number; error?: string; proof?: string }> {
     const owner: Owner =
       "workspaceId" in scope ? { kind: "WORKSPACE", id: scope.workspaceId } : { kind: "PROJECT", id: scope.projectId };
     if (owner.kind === "WORKSPACE") await this.requireWorkspaceAdmin(userId, owner.id);
     else await this.requireProjectAdmin(userId, owner.id, false);
     await this.assertNotDemo(owner);
     const row = await this.prisma.aiSettings.findUnique({ where: whereOwner(owner) });
-    if (!row) throw new NotFoundException("Save the AI settings before testing them");
 
+    const draft = dto && (dto.provider !== undefined || dto.model !== undefined);
+    if (!draft && !row) throw new NotFoundException("Save the AI settings before testing them");
+    if (draft && (dto.provider === undefined || !dto.model?.trim())) {
+      throw new BadRequestException("Send both a provider and a model to test, or nothing to test what is saved");
+    }
+
+    // What is tested: the form's values, or the saved row.
+    const provider = draft ? dto.provider! : row!.provider;
+    const model = draft ? dto.model!.trim() : row!.model;
+    const endpoint = draft ? this.parseEndpoint(dto.endpoint) : row!.endpoint;
+    if (draft && provider === AiProviderKind.OPENAI_COMPATIBLE && !endpoint) {
+      throw new BadRequestException("An OpenAI-compatible provider needs an endpoint");
+    }
+    // The key follows the same rule as saving: a typed one, else the saved one for the saved endpoint, else none.
     let credential: string | null = null;
+    let unreadable = false;
+    if (draft && dto.credential !== undefined) credential = dto.credential;
+    else if (!draft || (!dto.clearCredential && row && row.endpoint === endpoint)) {
+      if (row?.credentialCipher) {
+        credential = this.openCredential(row);
+        unreadable = credential === null;
+      }
+    }
+
     let failure: string | null = null;
     const started = Date.now();
-    if (row.credentialCipher && (credential = this.openCredential(row)) === null) {
+    if (unreadable) {
       failure = "The saved provider key can't be read, probably because AI_ENCRYPTION_KEY changed; enter the key again";
     } else {
       try {
         const { output } = await createAiProvider({
-          provider: row.provider,
-          model: row.model,
-          endpoint: row.endpoint,
+          provider,
+          model,
+          endpoint,
           credential,
-          maxOutputTokens: Math.min(row.maxOutputTokens, TEST_MAX_OUTPUT_TOKENS),
-          requestTimeoutMs: Math.min(row.requestTimeoutMs, TEST_TIMEOUT_MS),
+          maxOutputTokens: Math.min(row?.maxOutputTokens ?? TEST_MAX_OUTPUT_TOKENS, TEST_MAX_OUTPUT_TOKENS),
+          requestTimeoutMs: Math.min(row?.requestTimeoutMs ?? TEST_TIMEOUT_MS, TEST_TIMEOUT_MS),
         }).generate({
           system: 'This is a connection test. Answer with the JSON object {"ok": true}.',
           user: "Reply now.",
@@ -218,20 +251,57 @@ export class AiSettingsService {
       }
     }
     const latencyMs = Date.now() - started;
-    // Only if the connection settings are still the ones that were tested: a save during the test wins.
-    const unchanged = {
-      id: row.id,
-      provider: row.provider,
-      model: row.model,
-      endpoint: row.endpoint,
-      credentialCipher: row.credentialCipher,
-    };
-    if (failure) {
-      await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: null, enabled: false } });
-      return { ok: false, latencyMs, error: failure };
+
+    // A test of other values says nothing about what is saved. Only a test of exactly what is saved records itself,
+    // and only if the saved connection is still the one that was tested: a save during the test wins.
+    const savedIsTested =
+      row !== null &&
+      row.provider === provider &&
+      row.model === model &&
+      row.endpoint === endpoint &&
+      (row.credentialCipher ? this.openCredential(row) : null) === credential;
+    if (row && savedIsTested) {
+      const unchanged = {
+        id: row.id,
+        provider: row.provider,
+        model: row.model,
+        endpoint: row.endpoint,
+        credentialCipher: row.credentialCipher,
+      };
+      if (failure && !draft) {
+        await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: null, enabled: false } });
+      } else if (!failure) {
+        await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: new Date() } });
+      }
     }
-    await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: new Date() } });
-    return { ok: true, latencyMs };
+    if (failure) return { ok: false, latencyMs, error: failure };
+    return {
+      ok: true,
+      latencyMs,
+      ...(draft ? { proof: this.signProof(owner, provider, model, endpoint, credential, Date.now() + TEST_PROOF_TTL_MS) } : {}),
+    };
+  }
+
+  /** What a proof vouches for: this owner, and exactly this connection. The key is in it only as a hash. */
+  private proofMac(owner: Owner, provider: string, model: string, endpoint: string | null, credential: string | null, expires: number) {
+    const keyHash = createHash("sha256").update(credential ?? "").digest("hex");
+    return createHmac("sha256", this.proofKey)
+      .update(JSON.stringify([owner.kind, owner.id, provider, model, endpoint ?? "", keyHash, expires]))
+      .digest("base64url");
+  }
+
+  private signProof(owner: Owner, provider: string, model: string, endpoint: string | null, credential: string | null, expires: number) {
+    return `${expires}.${this.proofMac(owner, provider, model, endpoint, credential, expires)}`;
+  }
+
+  private proofHolds(proof: string | undefined, owner: Owner, provider: string, model: string, endpoint: string | null, credential: string | null) {
+    if (!proof) return false;
+    const [expiresText, mac] = proof.split(".");
+    const expires = Number(expiresText);
+    if (!mac || !Number.isFinite(expires) || expires < Date.now()) return false;
+    const expected = Buffer.from(this.proofMac(owner, provider, model, endpoint, credential, expires));
+    const given = Buffer.from(mac);
+    return given.length === expected.length && timingSafeEqual(given, expected);
   }
 
   private requireWorkspaceAdmin(userId: string, workspaceId: string) {
@@ -306,8 +376,12 @@ export class AiSettingsService {
       existing.model !== model ||
       endpointChanged ||
       credentialChanged;
-    // A passing connection test only vouches for the settings it ran with.
-    const testedAt = existing && !connectionChanged ? existing.testedAt : null;
+    // A passing connection test only vouches for the settings it ran with: the saved ones, or, through its proof,
+    // exactly the values being saved now.
+    const effectiveCredential =
+      dto.credential !== undefined ? dto.credential : credentialCipher && existing?.credentialCipher === credentialCipher ? this.openCredential(existing) : null;
+    const proven = this.proofHolds(dto.testProof, owner, dto.provider, model, endpoint, effectiveCredential);
+    const testedAt = proven ? new Date() : existing && !connectionChanged ? existing.testedAt : null;
 
     if (dto.enabled === true) {
       if (dto.provider === AiProviderKind.ANTHROPIC && !credentialCipher) {
