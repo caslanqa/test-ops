@@ -70,7 +70,7 @@ export function WorkspaceAiPage() {
       <ConfirmDialog
         open={removing}
         title="Remove the workspace default?"
-        message="Projects without a setting of their own can no longer use AI. Their runs in progress fail."
+        message="Projects without a setting of their own can no longer use AI. Their runs that are waiting or in progress fail."
         confirmLabel="Remove the default"
         onClose={() => setRemoving(false)}
         onConfirm={async () => {

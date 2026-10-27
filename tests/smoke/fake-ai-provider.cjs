@@ -16,8 +16,13 @@
 //   slow-after-review        the requirement review is instant, every later call answers after 20 s
 // Control: GET /__last (the last request: path, headers, body), GET /__calls (every request: path, model),
 // POST /__reset, POST /__quit. Start it with `docker compose exec -T app node -` and the file on stdin.
+const fs = require('fs');
 const http = require('http');
 
+// Delayed answers (slow, slow-after-review) wait 20 s unless this file exists; a test that kills the app and
+// restarts it creates it, so the resumed run doesn't have to wait again.
+const FAST_FILE = '/tmp/fake-ai-fast';
+const delay = () => (fs.existsSync(FAST_FILE) ? 0 : 20000);
 let last = null;
 let calls = [];
 let flakyCalls = 0;
@@ -149,10 +154,10 @@ const server = http.createServer((req, res) => {
         return res.end('"}');
       }
       case 'slow':
-        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), 20000);
+        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), delay());
       case 'slow-after-review':
         if (schemaName === 'requirement_review') return validAnswer(res, anthropic, model, schemaName, REVIEW);
-        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), 20000);
+        return void setTimeout(() => validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model)), delay());
       case 'flaky':
         if (flakyCalls++ === 0) return notJson(res, anthropic, model);
         return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model));

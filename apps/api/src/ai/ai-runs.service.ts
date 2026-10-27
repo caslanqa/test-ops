@@ -6,6 +6,7 @@ import { pageArgs } from "../common/pagination";
 import { PrismaService } from "../prisma/prisma.service";
 import { TestCasesService } from "../test-cases/test-cases.service";
 import { AiSettingsService } from "./ai-settings.service";
+import { snapshotOf } from "./ai-snapshot";
 import { ApproveRunDto } from "./dto/approve-run.dto";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
 import { StartRunDto } from "./dto/start-run.dto";
@@ -92,13 +93,7 @@ export class AiRunsService {
           projectId,
           createdById: userId,
           input: { requirementId: dto.requirementId, extraContext: dto.extraContext ?? null },
-          providerSnapshot: {
-            provider: settings.provider,
-            model: settings.model,
-            endpointHost: settings.endpoint ? new URL(settings.endpoint).hostname : "api.anthropic.com",
-            source,
-            settingsId: settings.id,
-          },
+          providerSnapshot: snapshotOf(source, settings),
         },
       });
     });

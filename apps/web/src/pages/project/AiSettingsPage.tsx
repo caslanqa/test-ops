@@ -85,7 +85,7 @@ export function AiSettingsPage() {
       <ConfirmDialog
         open={removing}
         title="Use the workspace default?"
-        message="This project's own setting, with its key, is deleted. Runs in progress use the default from now on."
+        message="This project's own setting, with its key, is deleted. Runs that are waiting or in progress fail and have to be started again."
         confirmLabel="Use the workspace default"
         onClose={() => setRemoving(false)}
         onConfirm={async () => {

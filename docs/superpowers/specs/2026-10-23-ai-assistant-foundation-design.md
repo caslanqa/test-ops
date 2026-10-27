@@ -51,8 +51,11 @@ configure one installation-wide row; that is dropped. The questions this left op
     fixed message. Otherwise error text would let a project admin read internal services.
   - Only a connection test and the workflow runs make the request. Its body is the fixed provider shape and the
     endpoint is never taken from project data.
-  - Residual risk, accepted by the owner's decision: a project admin can make the server send a fixed JSON `POST` to
-    any internal host and port outside the refused ranges and learn the HTTP status it answered with.
+  - Residual risk, accepted by the owner's decision: an admin can make the server send a fixed JSON `POST` to any
+    internal host and port outside the refused ranges and learn the HTTP status and the connection error it answers
+    with. Every account is an admin of its own DEMO workspace, and registration is open by default, so on a default
+    installation this reaches everyone who can sign in; closing it takes `SELF_REGISTRATION=false` and
+    `DEMO_WORKSPACE=false`. The README and FR-096 say so.
 - **Unchanged.** The credential is never returned or logged, and the workflows need write access to the project
   as before. `INSTALLATION_ADMIN_EMAIL` and an `isInstallationAdmin` flag are not built.
 - The role ladder this depends on is in `2026-10-26-role-hierarchy-design.md`.

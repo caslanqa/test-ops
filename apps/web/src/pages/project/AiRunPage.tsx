@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import { AiDraftCard } from '../../components/AiDraftCard';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { Select } from '../../components/Select';
+import { useFocusFallback } from '../../lib/focus';
 import { Tag } from '../../components/StatusChip';
 import { AI_STEP_LABEL, aiRunStatusText, type AiRun, type CaseDraft } from '../../lib/ai';
 import { useNotice } from '../../lib/notice';
@@ -19,11 +20,14 @@ function RunView({
   run,
   requirementTitle,
   canEdit,
+  refreshError,
   reload,
 }: {
   run: AiRun;
   requirementTitle: string | undefined;
   canEdit: boolean;
+  /** Why the last refresh of a run that is still going failed; the page keeps trying. */
+  refreshError: string | null;
   reload: () => void;
 }) {
   const { projectId } = run;
@@ -38,10 +42,18 @@ function RunView({
   const suiteFieldId = useId();
   const suites = useResource(() => api.get<Suite[]>(`/projects/${projectId}/suites`), [projectId]);
   const drafts = edited ?? run.result?.drafts ?? [];
+  // Said, out of sight, when a draft is deleted: the button that was pressed is gone with it.
+  const [announcement, setAnnouncement] = useState('');
+  // Deleting a draft, approving and cancelling remove the control that was used; focus goes to the drafts, or else
+  // to the status, rather than to the top of the page.
+  const requestFocus = useFocusFallback(`${run.status}:${drafts.length}`, () =>
+    document.getElementById('ai-drafts-heading') ?? document.getElementById('ai-run-status-heading'),
+  );
   const waiting = run.status === 'AWAITING_APPROVAL';
   const snapshot = run.providerSnapshot;
 
   async function act(action: () => Promise<unknown>, fallback: string) {
+    requestFocus();
     setBusy(true);
     setError(null);
     try {
@@ -91,13 +103,14 @@ function RunView({
 
   return (
     <>
+      <p role="status" className="visually-hidden">{announcement}</p>
       <PageHeader
         title="Draft test cases"
         description={requirementTitle ? <>For the requirement <strong>{requirementTitle}</strong>.</> : undefined}
         actions={<Link to={`/projects/${projectId}/requirements`} className="btn btn-secondary">Back to requirements</Link>}
       />
       <section className="surface integrations-section" aria-labelledby="ai-run-status-heading">
-        <h2 id="ai-run-status-heading" className="section-title">Status</h2>
+        <h2 id="ai-run-status-heading" className="section-title" tabIndex={-1}>Status</h2>
         <p role="status" className="ai-run-status">
           <Tag tone={run.status === 'FAILED' || run.status === 'CANCELLED' ? 'outline' : 'strong'}>{run.status.replace('_', ' ').toLowerCase()}</Tag>{' '}
           {aiRunStatusText(run)}
@@ -114,6 +127,7 @@ function RunView({
           </ol>
         )}
         {run.error && <p className="form-error" role="alert">{run.error}</p>}
+        {refreshError && <p className="form-error" role="alert">Couldn't refresh this run ({refreshError}). Trying again…</p>}
         <p className="info-note">
           <Info size={16} aria-hidden="true" />
           Sent to {snapshot.endpointHost} ({snapshot.model}), using {snapshot.source === 'PROJECT' ? 'this project’s AI setting' : 'the workspace default'}:
@@ -171,7 +185,7 @@ function RunView({
 
       {waiting && run.result && (
         <form className="surface integrations-section" aria-labelledby="ai-drafts-heading" onSubmit={approve}>
-          <h2 id="ai-drafts-heading" className="section-title">Drafts</h2>
+          <h2 id="ai-drafts-heading" className="section-title" tabIndex={-1}>Drafts</h2>
           {!canEdit && <p className="muted">Only testers and project admins can change and approve drafts.</p>}
           <fieldset disabled={!canEdit} className="ai-drafts">
             <legend className="visually-hidden">Draft test cases</legend>
@@ -185,7 +199,11 @@ function RunView({
                     index={i}
                     draft={draft}
                     onChange={(next) => setEdited(drafts.map((d, at) => (at === i ? next : d)))}
-                    onDelete={() => setEdited(drafts.filter((_, at) => at !== i))}
+                    onDelete={() => {
+                      requestFocus();
+                      setEdited(drafts.filter((_, at) => at !== i));
+                      setAnnouncement(`Draft ${i + 1} deleted.`);
+                    }}
                   />
                 ))}
               </ol>
@@ -239,13 +257,24 @@ export function AiRunPage() {
   usePageTitle(requirement.data ? `AI drafts for ${requirement.data.title}` : 'AI drafts');
   const working = run?.status === 'QUEUED' || run?.status === 'RUNNING';
   const { reload } = runRes;
+  // A steady interval, not one timeout per answer: when a refresh fails the data does not change, so a timeout
+  // that is re-armed by new data would never be set again and the page would stay at "Working" for good.
   useEffect(() => {
     if (!working) return;
-    const timer = setTimeout(reload, POLL_MS);
-    return () => clearTimeout(timer);
-  }, [working, run, reload]);
+    const timer = setInterval(reload, POLL_MS);
+    return () => clearInterval(timer);
+  }, [working, reload]);
 
   if (runRes.error && !run) return <LoadError message={runRes.error} onRetry={reload} />;
   if (!run) return <Loading />;
-  return <RunView key={run.id} run={run} requirementTitle={requirement.data?.title} canEdit={editRepository} reload={reload} />;
+  return (
+    <RunView
+      key={run.id}
+      run={run}
+      requirementTitle={requirement.data?.title}
+      canEdit={editRepository}
+      refreshError={runRes.error}
+      reload={reload}
+    />
+  );
 }

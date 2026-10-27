@@ -3,6 +3,7 @@ import type { AiWorkflowRun, Prisma } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AiSettingsService } from "./ai-settings.service";
+import { settingChanged } from "./ai-snapshot";
 import { AiProviderError, scrubProviderError } from "./provider-error";
 import { createAiProvider, type AiProvider } from "./providers/provider";
 import { coverageAuditor, sanitizeAudit } from "./skills/coverage-auditor";
@@ -73,27 +74,12 @@ export class AiRunExecutor {
       data: { status: "FAILED", error: "Interrupted by a restart", endedAt: new Date() },
     });
 
-    const { settings } = await this.settings.resolve(run.projectId);
-    if (!settings || !settings.enabled) throw new RunFailure("AI is not enabled for this project");
-    let credential: string | null = null;
-    if (settings.credentialCipher) {
-      credential = this.settings.openCredential(settings);
-      rememberCredential(credential);
-      if (credential === null) {
-        throw new RunFailure("The saved provider key can't be read, probably because AI_ENCRYPTION_KEY changed");
-      }
-    }
-    const provider = createAiProvider({
-      provider: settings.provider,
-      model: settings.model,
-      endpoint: settings.endpoint,
-      credential,
-      maxOutputTokens: settings.maxOutputTokens,
-      requestTimeoutMs: settings.requestTimeoutMs,
-    });
+    // The setting is read again before every model call (see currentProvider), not once per claim: AI can be
+    // switched off, removed or pointed elsewhere while a run waits or works, and the run must not go on sending.
+    const getProvider = () => this.currentProvider(run, rememberCredential);
     const context = await this.loadContext(run);
     const step = <I, O>(name: StepName, skill: AiSkill<I, O>, input: I) =>
-      this.runStep(run.id, provider, settings.requestTimeoutMs, credential, name, skill, input);
+      this.runStep(run.id, getProvider, name, skill, input);
 
     const review: Review = await step("REVIEW", requirementReviewer, context);
     const design = await step("DESIGN", testDesigner, { context, review });
@@ -116,6 +102,41 @@ export class AiRunExecutor {
         lockedUntil: null,
       },
     });
+  }
+
+  /**
+   * The provider for the next model call, from the setting the project uses right now. The run fails here when
+   * that setting is gone or switched off, or is no longer the one the run was started with.
+   */
+  private async currentProvider(
+    run: AiWorkflowRun,
+    rememberCredential: (value: string | null) => void,
+  ): Promise<{ provider: AiProvider; timeoutMs: number; credential: string | null }> {
+    const { settings } = await this.settings.resolve(run.projectId);
+    if (!settings || !settings.enabled) throw new RunFailure("AI is not enabled for this project");
+    if (settingChanged(run.providerSnapshot, settings)) {
+      throw new RunFailure("The AI setting changed while the run was waiting or in progress; start it again");
+    }
+    let credential: string | null = null;
+    if (settings.credentialCipher) {
+      credential = this.settings.openCredential(settings);
+      rememberCredential(credential);
+      if (credential === null) {
+        throw new RunFailure("The saved provider key can't be read, probably because AI_ENCRYPTION_KEY changed");
+      }
+    }
+    return {
+      provider: createAiProvider({
+        provider: settings.provider,
+        model: settings.model,
+        endpoint: settings.endpoint,
+        credential,
+        maxOutputTokens: settings.maxOutputTokens,
+        requestTimeoutMs: settings.requestTimeoutMs,
+      }),
+      timeoutMs: settings.requestTimeoutMs,
+      credential,
+    };
   }
 
   /** What the run may tell the provider about the project: the requirement, what is linked to it, other case titles. */
@@ -157,9 +178,7 @@ export class AiRunExecutor {
    */
   private async runStep<I, O>(
     runId: string,
-    provider: AiProvider,
-    timeoutMs: number,
-    credential: string | null,
+    getProvider: () => Promise<{ provider: AiProvider; timeoutMs: number; credential: string | null }>,
     name: StepName,
     skill: AiSkill<I, O>,
     input: I,
@@ -174,6 +193,8 @@ export class AiRunExecutor {
         throw new RunFailure("Model call limit reached");
       }
 
+      // Before the step is recorded: a run that must stop here has no step for a call that was never made.
+      const { provider, timeoutMs, credential } = await getProvider();
       const user = skill.user(input);
       const row = await this.prisma.aiWorkflowStep.create({
         data: { runId, name, skillVersion: skill.version, attempt: (rows[rows.length - 1]?.attempt ?? 0) + 1, input: { user } },

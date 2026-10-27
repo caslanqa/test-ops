@@ -132,13 +132,13 @@ export function AiSettingsForm({
           required={provider === 'OPENAI_COMPATIBLE'}
           value={endpoint}
           aria-describedby={ids.endpointHint}
-          placeholder={provider === 'ANTHROPIC' ? 'Leave empty for the public API' : 'http://localhost:11434/v1'}
+          placeholder={provider === 'ANTHROPIC' ? 'Leave empty for the public API' : 'http://host.docker.internal:11434/v1'}
           onChange={(e) => setEndpoint(e.target.value)}
         />
         <p id={ids.endpointHint} className="field-hint">
           {provider === 'ANTHROPIC'
             ? 'The base address; leave it empty to use Anthropic’s public API.'
-            : 'The base address of the server, including /v1. Local and private network addresses work.'}
+            : 'The base address of the server, including /v1. Local and private network addresses work; with the Docker install, reach a model on the same machine as host.docker.internal, since localhost is the app’s own container.'}
           {' '}Link-local addresses such as 169.254.169.254 are refused.
         </p>
       </div>

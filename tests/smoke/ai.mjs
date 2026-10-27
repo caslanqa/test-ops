@@ -357,6 +357,18 @@ try {
   );
   check('a name that resolves to a link-local address is refused when connecting', /link-local/.test(connect.metadata), JSON.stringify(connect));
   check('a name that resolves to loopback is reached', connect.local === 200, JSON.stringify(connect));
+
+  // A model on the host is reached as host.docker.internal from inside the container (docker-compose.yml maps it
+  // for Linux, Docker Desktop provides it); its address must not be one the helper refuses.
+  const hostName = JSON.parse(
+    inApp(`
+      const { isReservedAddress } = require('./dist/webhooks/safe-post');
+      require('dns').lookup('host.docker.internal', { all: true }, (error, found) =>
+        console.log(JSON.stringify(error ? { error: error.code } : { addresses: found.map((a) => [a.address, isReservedAddress(a.address)]) })));
+    `),
+  );
+  check('host.docker.internal resolves inside the app container', Array.isArray(hostName.addresses), JSON.stringify(hostName));
+  check('...to an address the AI helper allows', hostName.addresses?.every(([, reserved]) => reserved === false) === true, JSON.stringify(hostName));
 } catch (error) {
   check('the helper checks ran', false, String(error.message).slice(0, 300));
 }
@@ -415,7 +427,7 @@ check('...after review, design and audit, in that order', stepNames(first) === '
 check('...each with a skill version and token usage', first.steps.every((step) => step.skillVersion === 1 && step.usage?.inputTokens === 11 && step.usage?.outputTokens === 7 && step.status === 'COMPLETED' && step.attempt === 1), JSON.stringify(first.steps));
 check('...holding the review, the drafts and the audit', first.result?.review?.acceptanceCriteria?.length === 2 && first.result?.drafts?.length === 2 && first.result?.audit?.revisionNeeded === false, JSON.stringify(first.result));
 check('...every draft says what kind of case it is', first.result.drafts.every((draft) => ['positive', 'negative', 'boundary', 'error'].includes(draft.kind)));
-check('the run shows which setting it used', first.providerSnapshot?.source === 'WORKSPACE' && first.providerSnapshot?.endpointHost === '127.0.0.1' && first.providerSnapshot?.model === 'ok', JSON.stringify(first.providerSnapshot));
+check('the run shows which setting it used', first.providerSnapshot?.source === 'WORKSPACE' && first.providerSnapshot?.endpointHost === '127.0.0.1:8098' && first.providerSnapshot?.model === 'ok', JSON.stringify(first.providerSnapshot));
 check('...and what was asked', first.input?.requirementId === requirement.id && first.input?.extraContext === 'Mention the mobile app.', JSON.stringify(first.input));
 check('a step shows no prompt and no answer, only how it went', keys(first.steps[0]) === 'attempt,endedAt,error,name,skillVersion,startedAt,status,usage', keys(first.steps[0]));
 check('the run carries no provider key', !JSON.stringify(first).includes(SECRET) && !JSON.stringify(first).includes('credential'));
@@ -579,6 +591,57 @@ check('a waiting run fails when AI was switched off before it started', orphaned
 check('...without calling the provider', orphaned.steps.length === 0);
 setting('enabled = true');
 
+console.log('--- A setting that changes while a run is under way ---');
+// The review answers at once and the design takes 20 s, so there is time to change the setting during the design.
+async function startSlowRun() {
+  useModel('slow-after-review');
+  resetFake();
+  const runId = (await start(tester.token)).json.runId;
+  for (let i = 0; i < 60; i++) {
+    const run = await ok(admin, 'GET', `${RUNS}/${runId}`);
+    if (run.steps.some((step) => step.name === 'DESIGN' && step.status === 'RUNNING')) return runId;
+    await sleep(500);
+  }
+  throw new Error(`run ${runId} never reached its design step`);
+}
+const restoreDefault = async () => {
+  await ok(admin, 'PUT', WS, openAi('ok', { credential: SECRET, maxRunsPerUserPerDay: 100 }));
+  await ok(admin, 'POST', `${WS}/test`);
+  await ok(admin, 'PUT', WS, openAi('ok', { enabled: true, maxRunsPerUserPerDay: 100 }));
+};
+
+const midOff = await startSlowRun();
+setting('enabled = false');
+const midOffEnd = await waitForRun(midOff, finished, 60);
+check('a run whose AI is switched off meanwhile fails at its next step', midOffEnd.status === 'FAILED' && String(midOffEnd.error).includes('AI is not enabled'), `${midOffEnd.status} ${midOffEnd.error}`);
+check('...without asking the provider again', calls().length === 2 && stepNames(midOffEnd) === 'REVIEW,DESIGN', `${calls().length} ${stepNames(midOffEnd)}`);
+setting('enabled = true');
+
+const midMoved = await startSlowRun();
+setting(`endpoint = 'http://localhost:8098/v1'`);
+const midMovedEnd = await waitForRun(midMoved, finished, 60);
+check('a run whose endpoint is changed meanwhile fails at its next step', midMovedEnd.status === 'FAILED' && String(midMovedEnd.error).includes('setting changed'), `${midMovedEnd.status} ${midMovedEnd.error}`);
+check('...without sending anything more to the new endpoint', calls().length === 2, String(calls().length));
+setting(`endpoint = '${ENDPOINT}'`);
+
+const midRemoved = await startSlowRun();
+await expectStatus('the workspace default is removed during a run', 204, admin, 'DELETE', WS);
+const midRemovedEnd = await waitForRun(midRemoved, finished, 60);
+check('...and the run fails at its next step', midRemovedEnd.status === 'FAILED' && String(midRemovedEnd.error).includes('AI is not enabled') && calls().length === 2, `${midRemovedEnd.status} ${midRemovedEnd.error} calls=${calls().length}`);
+await restoreDefault();
+
+const queuedCopy = psql(`insert into ai_workflow_runs (id, type, "projectId", "createdById", status, input, "providerSnapshot", "availableAt", "createdAt")
+  select gen_random_uuid()::text, type, "projectId", "createdById", 'QUEUED', input, "providerSnapshot", timezone('utc', now()) + interval '1 hour', timezone('utc', now())
+  from ai_workflow_runs where id = '${first.id}' returning id`).split('\n')[0];
+const settingsNow = psql(`select id from ai_settings where "workspaceId" = '${ws.id}'`);
+psql(`update ai_workflow_runs set "providerSnapshot" = jsonb_set("providerSnapshot", '{settingsId}', to_jsonb('${settingsNow}'::text)) where id = '${queuedCopy}'`);
+setting(`endpoint = 'http://localhost:8098/v1'`);
+psql(`update ai_workflow_runs set "availableAt" = timezone('utc', now()) where id = '${queuedCopy}'`);
+const queuedEnd = await waitForRun(queuedCopy, finished, 30);
+check('a waiting run fails when its setting was pointed elsewhere before it started', queuedEnd.status === 'FAILED' && String(queuedEnd.error).includes('setting changed') && queuedEnd.steps.length === 0, `${queuedEnd.status} ${queuedEnd.error}`);
+setting(`endpoint = '${ENDPOINT}'`);
+useModel('ok');
+
 console.log('--- A crash in the middle of a run ---');
 useModel('slow-after-review');
 resetFake();
@@ -589,14 +652,16 @@ for (let i = 0; i < 40; i++) {
   await sleep(500);
 }
 execFileSync('docker', ['compose', 'kill', 'app'], { stdio: 'ignore' });
-useModel('ok');
 execFileSync('docker', ['compose', 'up', '-d', '--wait', '--wait-timeout', '120', 'app'], { stdio: 'ignore' });
+// The restarted container keeps its files: from now on the fake answers at once, so the resumed run finishes.
+inApp("require('fs').writeFileSync('/tmp/fake-ai-fast', '')");
 await startFakeProvider();
 psql(`update ai_workflow_runs set "lockedUntil" = timezone('utc', now()) - interval '1 minute' where id = '${crashed}'`);
 const recovered = await waitForRun(crashed, finished, 60);
 check('a run left behind by a crash is taken over and finished', recovered.status === 'AWAITING_APPROVAL', `${recovered.status} ${recovered.error ?? ''}`);
 check('...the review that was done before the crash was not asked again', recovered.steps.filter((step) => step.name === 'REVIEW').length === 1, JSON.stringify(recovered.steps));
 check('...the interrupted design is recorded as failed, then done', recovered.steps.filter((step) => step.name === 'DESIGN').map((step) => step.status).join() === 'FAILED,COMPLETED', JSON.stringify(recovered.steps));
+inApp("require('fs').rmSync('/tmp/fake-ai-fast', { force: true })");
 useModel('ok');
 
 console.log('--- What the runs left in the audit log ---');
