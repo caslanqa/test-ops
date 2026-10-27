@@ -7,6 +7,7 @@ import {
   AI_OUTPUT_MODE_LABEL,
   AI_PROVIDER_LABEL,
   aiEndpointHost,
+  GUIDANCE_BUDGET,
   type AiOutputMode,
   type AiProviderKind,
   type AiSettingsView,
@@ -51,6 +52,7 @@ export function AiSettingsForm({
   const [maxOutputTokens, setMaxOutputTokens] = useState(String(view?.maxOutputTokens ?? 8192));
   const [requestTimeoutSeconds, setRequestTimeoutSeconds] = useState(String((view?.requestTimeoutMs ?? 120000) / 1000));
   const [maxRunsPerUserPerDay, setMaxRunsPerUserPerDay] = useState(String(view?.maxRunsPerUserPerDay ?? 20));
+  const [guidanceBudget, setGuidanceBudget] = useState(String(view?.guidanceBudgetTokens ?? GUIDANCE_BUDGET.default));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -60,6 +62,7 @@ export function AiSettingsForm({
   const ids = {
     provider: useId(), mode: useId(), modeHint: useId(), model: useId(), endpoint: useId(), endpointHint: useId(), key: useId(), keyHint: useId(),
     remove: useId(), enabled: useId(), enabledHint: useId(), tokens: useId(), timeout: useId(), runs: useId(), testHint: useId(),
+    budget: useId(), budgetHint: useId(),
   };
 
   const endpointValue = trimSlashes(endpoint);
@@ -97,6 +100,7 @@ export function AiSettingsForm({
         maxOutputTokens: Number(maxOutputTokens),
         requestTimeoutMs: Math.round(Number(requestTimeoutSeconds) * 1000),
         maxRunsPerUserPerDay: Number(maxRunsPerUserPerDay),
+        guidanceBudgetTokens: Number(guidanceBudget),
       });
       setCredential('');
       setRemoveKey(false);
@@ -215,6 +219,23 @@ export function AiSettingsForm({
       <div className="field">
         <label htmlFor={ids.runs} className="field-label">Runs per person per day</label>
         <input id={ids.runs} type="number" required min={1} max={1000} value={maxRunsPerUserPerDay} onChange={(e) => setMaxRunsPerUserPerDay(e.target.value)} />
+      </div>
+      <div className="field">
+        <label htmlFor={ids.budget} className="field-label">Guidance budget per step (tokens)</label>
+        <input
+          id={ids.budget}
+          type="number"
+          required
+          min={GUIDANCE_BUDGET.min}
+          max={GUIDANCE_BUDGET.max}
+          value={guidanceBudget}
+          aria-describedby={ids.budgetHint}
+          onChange={(e) => setGuidanceBudget(e.target.value)}
+        />
+        <p id={ids.budgetHint} className="field-hint">
+          The most the team&rsquo;s guidance may add to the prompt of one step, estimated at about a token per four characters. What does not fit is
+          left out, the built-in packs first and the lowest priority first, and the run page says so. 0 means no limit.
+        </p>
       </div>
       <div className="checkbox-field">
         <input

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../api/client';
 import { AiSettingsForm } from '../../components/AiSettingsForm';
+import { GuidanceSection } from '../../components/GuidanceSection';
 import { ConfirmDialog } from '../../components/Members';
 import { EmptyState, LoadError, Loading, PageHeader } from '../../components/Page';
 import { Sparkles } from 'lucide-react';
@@ -93,6 +94,7 @@ export function AiSettingsPage() {
           </section>
         </>
       )}
+      {info && !isDemo && <GuidanceSection scope={{ kind: 'PROJECT', id: projectId }} />}
       <ConfirmDialog
         open={removing}
         title="Use the workspace default?"

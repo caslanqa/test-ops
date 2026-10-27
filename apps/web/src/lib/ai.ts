@@ -1,3 +1,5 @@
+import type { RunGuidance } from './guidance';
+
 export type AiProviderKind = 'ANTHROPIC' | 'OPENAI_COMPATIBLE';
 
 /** How an OpenAI-compatible server is asked for a structured answer. */
@@ -22,6 +24,9 @@ export const AI_OUTPUT_MODE_HINT: Record<AiOutputMode, string> = {
 /** Which AI setting a project uses: its own, its workspace's default, or none. */
 export type AiSource = 'PROJECT' | 'WORKSPACE' | 'NONE';
 
+/** The most tokens of the team's guidance in one step's prompt: the default, and the range the server accepts. */
+export const GUIDANCE_BUDGET = { default: 6000, min: 0, max: 200000 };
+
 export const AI_PROVIDER_LABEL: Record<AiProviderKind, string> = {
   OPENAI_COMPATIBLE: 'OpenAI-compatible (OpenAI, Ollama, vLLM, …)',
   ANTHROPIC: 'Anthropic',
@@ -39,6 +44,8 @@ export interface AiSettingsView {
   maxOutputTokens: number;
   requestTimeoutMs: number;
   maxRunsPerUserPerDay: number;
+  /** The most tokens of the team's guidance in one step's prompt; 0 means no limit. */
+  guidanceBudgetTokens: number;
   outputMode: AiOutputMode;
   /** What Automatic learned from runs and tests, if anything. */
   learnedMode: AiOutputMode | null;
@@ -73,6 +80,7 @@ export interface SaveAiSettings {
   maxOutputTokens: number;
   requestTimeoutMs: number;
   maxRunsPerUserPerDay: number;
+  guidanceBudgetTokens: number;
   /** The proof of a passing test of exactly these values (see AiTestResult). */
   testProof?: string;
 }
@@ -120,6 +128,8 @@ export interface AiRunStep {
   attempt: number;
   /** How the answer was asked for on this try. */
   mode: AiOutputMode | null;
+  /** Estimated tokens of the team's guidance in this step's prompt; null when there was none. */
+  guidanceTokens: number | null;
   usage: { inputTokens: number; outputTokens: number } | null;
   error: string | null;
   startedAt: string;
@@ -172,6 +182,8 @@ export interface AiRunSummary {
 }
 
 export interface AiRun extends AiRunSummary {
+  /** The guidance the run was sent; null for a run from before guidance existed. */
+  guidance: RunGuidance | null;
   result: { review: AiReview; drafts: CaseDraft[]; audit: AiAudit; createdCaseIds?: string[] } | null;
   steps: AiRunStep[];
 }

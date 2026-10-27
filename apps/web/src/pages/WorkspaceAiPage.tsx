@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { api } from '../api/client';
 import { AiSettingsForm } from '../components/AiSettingsForm';
+import { GuidanceSection } from '../components/GuidanceSection';
 import { ConfirmDialog } from '../components/Members';
 import { EmptyState, LoadError, Loading, PageHeader } from '../components/Page';
 import type { AiSettingsView, AiTestResult, SaveAiSettings, TestAiSettings } from '../lib/ai';
@@ -76,6 +77,7 @@ export function WorkspaceAiPage() {
           />
         </section>
       )}
+      {isAdmin && !isDemo && <GuidanceSection scope={{ kind: 'WORKSPACE', id: workspaceId }} />}
       <ConfirmDialog
         open={removing}
         title="Remove the workspace default?"

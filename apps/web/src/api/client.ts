@@ -43,7 +43,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, asText = false): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     // FormData sets its own multipart Content-Type with the boundary.
@@ -72,11 +72,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   // Endpoints such as DELETE may return 200/204 without a body; an empty body is not JSON.
   const text = await res.text();
+  if (asText) return text as T;
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  /** For the few endpoints that answer plain text rather than JSON. */
+  getText: (path: string) => request<string>(path, {}, true),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, {
       method: "POST",

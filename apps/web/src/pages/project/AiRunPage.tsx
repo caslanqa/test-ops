@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../api/client';
 import { AiDraftCard } from '../../components/AiDraftCard';
+import { GuidanceUsed } from '../../components/GuidanceUsed';
 import { FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { Select } from '../../components/Select';
 import { useFocusFallback } from '../../lib/focus';
@@ -136,13 +137,15 @@ function RunView({
                 {step.attempt > 1 || (step.mode && step.mode !== 'JSON_SCHEMA')
                   ? ` (${step.attempt > 1 ? `try ${step.attempt}` : 'first try'}${step.mode ? `, ${AI_OUTPUT_MODE_LABEL[step.mode].toLowerCase()}` : ''})`
                   : ''}: {step.status === 'COMPLETED' ? 'done' : step.status === 'RUNNING' ? 'running' : 'failed'}
+                {step.guidanceTokens ? <span className="muted"> · guidance, about {step.guidanceTokens} tokens</span> : null}
                 {step.error && <span className="muted"> — {step.error}</span>}
               </li>
             ))}
           </ol>
         )}
+        {run.guidance && <GuidanceUsed guidance={run.guidance} />}
         {run.error && <p className="form-error" role="alert">{run.error}</p>}
-        {refreshError && <p className="form-error" role="alert">Couldn't refresh this run ({refreshError}). Trying again…</p>}
+        {refreshError &&<p className="form-error" role="alert">Couldn't refresh this run ({refreshError}). Trying again…</p>}
         <p className="info-note">
           <Info size={16} aria-hidden="true" />
           Sent to {snapshot.endpointHost} ({snapshot.model}), using {snapshot.source === 'PROJECT' ? 'this project’s AI setting' : 'the workspace default'}:

@@ -3095,6 +3095,41 @@ input[type='checkbox'] {
 .ai-run-status {
   font-weight: 600;
 }
+
+/* Guidance (the team's advice for the assistant): fieldsets of checkboxes, lists, and plain text in a box. */
+.guidance-steps {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.guidance-choose {
+  display: grid;
+  gap: 0.35rem;
+  margin-left: 1.5rem;
+}
+.guidance-list {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  font-size: var(--text-sm);
+}
+.guidance-list li + li {
+  margin-top: 0.5rem;
+}
+/* A guidance is plain text, shown as written: pre-wrap keeps its lines and long lines wrap instead of scrolling the page. */
+.guidance-text {
+  max-height: 20rem;
+  margin: 0.5rem 0;
+  padding: 0.75rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  font-size: var(--text-sm);
+}
 .ai-steps {
   margin: 0.5rem 0;
   padding-left: 1.25rem;

@@ -6,6 +6,7 @@ import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
 import { ClickableRow } from '../../components/ClickableRow';
 import { Dialog } from '../../components/Dialog';
+import { GuidanceChoice } from '../../components/GuidanceChoice';
 import { ConfirmDialog } from '../../components/Members';
 import { useNotice } from '../../lib/notice';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
@@ -14,6 +15,7 @@ import { StatusChip, Tag } from '../../components/StatusChip';
 import { OPEN_RUN_STATUSES, type AiRunSummary } from '../../lib/ai';
 import { changedFields, hasChanges } from '../../lib/changes';
 import { useFocusFallback } from '../../lib/focus';
+import { choiceToRequest, loadAppliedGuidance, type RunGuidanceChoice } from '../../lib/guidance';
 import { removeLink } from '../../lib/links';
 import { useProjectPermissions } from '../../lib/permissions';
 import { useProjectInfo } from '../../lib/projectInfo';
@@ -315,6 +317,13 @@ export function RequirementsPage() {
     [projectId],
   );
   const aiEnabled = Boolean(aiStatus.data?.enabled);
+  // The guidance that applies to the project: when there is some, drafting asks which of it to use first.
+  const applied = useResource(
+    () => (aiEnabled ? loadAppliedGuidance(projectId).catch(() => []) : Promise.resolve([])),
+    [projectId, aiEnabled],
+  );
+  const [choosing, setChoosing] = useState<Requirement | null>(null);
+  const [choice, setChoice] = useState<RunGuidanceChoice>({ mode: 'EFFECTIVE' });
   // The newest runs of the project; a requirement with a run that is going or waiting links to it instead.
   const aiRuns = useResource(
     () => (aiEnabled ? api.get<AiRunSummary[]>(`/projects/${projectId}/ai/runs?limit=100`).catch(() => []) : Promise.resolve([])),
@@ -358,7 +367,18 @@ export function RequirementsPage() {
     action();
   }
 
-  async function draftWithAi(r: Requirement) {
+  /** With guidance in the project the person chooses which of it to use first; without any the run just starts. */
+  function draftWithAi(r: Requirement) {
+    if (starting) return;
+    if ((applied.data ?? []).length > 0) {
+      setChoice({ mode: 'EFFECTIVE' });
+      setChoosing(r);
+      return;
+    }
+    return startRun(r);
+  }
+
+  async function startRun(r: Requirement, guidance?: RunGuidanceChoice) {
     if (starting) return;
     setStarting(r.id);
     setActionError(null);
@@ -366,10 +386,12 @@ export function RequirementsPage() {
       const started = await api.post<{ runId: string }>(`/projects/${projectId}/ai/runs`, {
         type: 'REQUIREMENT_TO_CASES',
         requirementId: r.id,
+        ...(guidance ? { guidance: choiceToRequest(guidance) } : {}),
       });
       navigate(`/projects/${projectId}/ai/runs/${started.runId}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't start the AI run");
+      setChoosing(null);
     } finally {
       setStarting(null);
     }
@@ -574,6 +596,26 @@ export function RequirementsPage() {
         }}
         onClose={() => setArchiving(null)}
       />
+      <Dialog
+        open={choosing !== null}
+        onClose={() => setChoosing(null)}
+        title="Draft test cases"
+        description={choosing ? `For “${choosing.title}”. The run keeps the guidance you choose; editing guidance later does not change it.` : undefined}
+      >
+        <form
+          className="dialog-body"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (choosing) void startRun(choosing, choice);
+          }}
+        >
+          <GuidanceChoice items={applied.data ?? []} value={choice} onChange={setChoice} />
+          <div className="dialog-footer">
+            <button type="button" className="btn btn-secondary" onClick={() => setChoosing(null)}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={starting !== null}>Draft test cases</button>
+          </div>
+        </form>
+      </Dialog>
       <LinkCasesDialog
         projectId={projectId}
         requirement={linking}
