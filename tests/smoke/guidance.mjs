@@ -313,6 +313,7 @@ await expectStatus('a change made from an older version is refused, not merged',
 await expectStatus('...also a switch made from an older version', 409, admin, 'PATCH', `${WG}/${gw.id}`, { enabled: false, expectedVersion: 2 });
 check('...and nothing of the stale change was written', (await call(admin, 'GET', WG)).json?.own?.find((g) => g.id === gw.id)?.title === 'Name cases', 'the title changed');
 await expectStatus('a change that names the current version is accepted', 200, admin, 'PATCH', `${WG}/${gw.id}`, { priority: 910, expectedVersion: 3 });
+check('...and made the next version', (await call(admin, 'GET', `${WG}/${gw.id}/versions`)).json?.length === 4);
 await expectStatus('an expected version that is not a whole number is refused', 400, admin, 'PATCH', `${WG}/${gw.id}`, { priority: 900, expectedVersion: 'last' });
 await expectStatus('a new guidance cannot carry one', 400, admin, 'POST', WG, rule({ expectedVersion: 1 }));
 check('the workspace list holds the guidance with its latest version', refusedList.json?.own?.find((g) => g.id === gw.id)?.version === 3, refusedList.text);

@@ -59,7 +59,7 @@ function Verdict({ comparison, canJudge, reload }: { comparison: AiComparison; c
 
   async function save(e: FormEvent) {
     e.preventDefault();
-    if (!preferred) return;
+    if (!preferred || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -106,7 +106,8 @@ function Verdict({ comparison, canJudge, reload }: { comparison: AiComparison; c
           </div>
           <FormError message={error} />
           <div className="form-buttons">
-            <button type="submit" className="btn btn-primary" disabled={busy || !preferred}>
+            {/* Not disabled while saving: a button that is disabled loses the focus and does not get it back. */}
+            <button type="submit" className="btn btn-primary" disabled={!preferred} aria-busy={busy}>
               {comparison.preferred ? 'Change the verdict' : 'Save verdict'}
             </button>
           </div>
@@ -153,7 +154,8 @@ export function AiComparisonPage() {
         <Side side="A" run={comparison.runs.A} projectId={projectId} />
         <Side side="B" run={comparison.runs.B} projectId={projectId} />
       </div>
-      <Verdict key={`${comparison.id}:${comparison.preferred}:${comparison.judgedAt}`} comparison={comparison} canJudge={editRepository} reload={reload} />
+      {/* Keyed by the comparison only: saving a verdict reloads it, and a new key would drop the focus on the button that was pressed. */}
+      <Verdict key={comparison.id} comparison={comparison} canJudge={editRepository} reload={reload} />
     </>
   );
 }

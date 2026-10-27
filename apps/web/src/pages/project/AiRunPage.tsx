@@ -143,6 +143,13 @@ function RunView({
             ))}
           </ol>
         )}
+        {run.comparisonId && (
+          <p className="info-note">
+            <Info size={16} aria-hidden="true" />
+            This run is side {run.comparisonSide} of a comparison of guidance.{' '}
+            <Link to={`/projects/${projectId}/ai/comparisons/${run.comparisonId}`}>Open the comparison</Link>
+          </p>
+        )}
         {run.guidance && <GuidanceUsed guidance={run.guidance} />}
         {run.error && <p className="form-error" role="alert">{run.error}</p>}
         {refreshError &&<p className="form-error" role="alert">Couldn't refresh this run ({refreshError}). Trying again…</p>}

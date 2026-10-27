@@ -115,7 +115,7 @@ export function GuidancePreview({ projectId, list }: { projectId: string; list: 
       {answer && answer.prompt !== '' && (
         <>
           <h3 className="section-title">The text added to the prompt</h3>
-          <pre className="guidance-text">{answer.prompt}</pre>
+          <pre className="guidance-text" tabIndex={0} role="region" aria-label="Guidance text">{answer.prompt}</pre>
         </>
       )}
     </section>

@@ -94,7 +94,8 @@ function GuidanceForm({
     };
     try {
       if (guidance) {
-        await api.patch(`${base}/${guidance.id}`, fields);
+        // The version this form was opened at: a change made after someone else saved is refused, not merged over theirs.
+        await api.patch(`${base}/${guidance.id}`, { ...fields, expectedVersion: guidance.version });
         onSaved(`“${fields.title}” saved.`);
       } else {
         await api.post(base, {

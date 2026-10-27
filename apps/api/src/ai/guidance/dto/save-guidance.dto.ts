@@ -93,5 +93,13 @@ export class SaveGuidanceDto {
   license?: string;
 }
 
-/** The same fields, each optional; only what is sent changes. */
-export class UpdateGuidanceDto extends PartialType(SaveGuidanceDto) {}
+/**
+ * The same fields, each optional; only what is sent changes. `expectedVersion` is the version the person was looking at:
+ * a change made from an older one is refused (409), not merged over what someone saved meanwhile.
+ */
+export class UpdateGuidanceDto extends PartialType(SaveGuidanceDto) {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number;
+}

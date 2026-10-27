@@ -154,26 +154,23 @@ export class ComparisonsService {
   /** Per guidance: the judged comparisons it was sent in, and how many of them preferred a side it was sent on. */
   async stats(userId: string, projectId: string): Promise<GuidanceStats[]> {
     await this.accessControl.requireProjectAccessOrWorkspaceAdmin(userId, projectId);
-    const judged = await this.prisma.aiRunComparison.findMany({
-      where: { projectId, preferred: { not: null } },
-      select: { preferred: true, runs: { select: { comparisonSide: true, guidance: true } } },
-    });
-    const totals = new Map<string, GuidanceStats>();
-    for (const comparison of judged) {
-      const sent = new Map<"A" | "B", Set<string>>();
-      const titles = new Map<string, string>();
-      for (const run of comparison.runs) {
-        const items = ((run.guidance as unknown as GuidanceSnapshot | null)?.items ?? {}) as GuidanceSnapshot["items"];
-        for (const [ref, item] of Object.entries(items)) titles.set(ref, item.title);
-        if (run.comparisonSide) sent.set(run.comparisonSide, new Set(Object.keys(items)));
-      }
-      for (const [ref, title] of titles) {
-        const row = totals.get(ref) ?? { ref, title, comparisons: 0, preferred: 0 };
-        row.comparisons += 1;
-        if ((comparison.preferred === "A" || comparison.preferred === "B") && sent.get(comparison.preferred)?.has(ref)) row.preferred += 1;
-        totals.set(ref, row);
-      }
-    }
-    return [...totals.values()].sort((x, y) => y.comparisons - x.comparisons || (x.title < y.title ? -1 : 1));
+    // Counted in the database: a run's snapshot holds the text of every guidance it was sent, and reading all of that
+    // for every judged comparison to count titles would grow without bound. A guidance sent on both sides of a
+    // comparison says nothing about which side drafted better, so only one that was on exactly one side counts there.
+    const rows = await this.prisma.$queryRaw<{ ref: string; title: string; comparisons: bigint; preferred: bigint }[]>`
+      WITH sent AS (
+        SELECT c.id AS cid, c.preferred::text AS preferred, r."comparisonSide"::text AS side,
+               item.key AS ref, item.value->>'title' AS title
+        FROM ai_run_comparisons c
+        JOIN ai_workflow_runs r ON r."comparisonId" = c.id
+        CROSS JOIN LATERAL jsonb_each(COALESCE(r.guidance->'items', '{}'::jsonb)) AS item
+        WHERE c."projectId" = ${projectId} AND c.preferred IS NOT NULL
+      ), on_one_side AS (
+        SELECT cid, ref, max(title) AS title, max(preferred) AS preferred, min(side) AS side
+        FROM sent GROUP BY cid, ref HAVING count(*) = 1
+      )
+      SELECT ref, max(title) AS title, count(*) AS comparisons, count(*) FILTER (WHERE preferred = side) AS preferred
+      FROM on_one_side GROUP BY ref ORDER BY count(*) DESC, max(title) ASC`;
+    return rows.map((row) => ({ ref: row.ref, title: row.title, comparisons: Number(row.comparisons), preferred: Number(row.preferred) }));
   }
 }

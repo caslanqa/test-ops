@@ -251,6 +251,9 @@ export class GuidanceService {
   async update(userId: string, owner: GuidanceOwner, guidanceId: string, dto: UpdateGuidanceDto): Promise<GuidanceView> {
     await this.requireAdmin(userId, owner, false);
     const current = await this.findOwned(owner, guidanceId);
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== current.version) {
+      throw new ConflictException("This guidance was changed by someone else after you opened it; reload it and make your change again");
+    }
     const next = {
       title: dto.title ?? current.title,
       summary: optionalText(dto.summary, current.summary),
@@ -270,6 +273,9 @@ export class GuidanceService {
       ...VERSIONED.filter((field) => !sameValue(current[field], next[field])),
       ...(Object.keys(asIs) as (keyof typeof asIs)[]).filter((field) => asIs[field] !== current[field]),
     ];
+    // What is written is only what was sent: a field that was not sent keeps whatever it is by then, so a change of the
+    // text can't put back a guidance that someone switched off between this read and this write.
+    const sent = Object.fromEntries(Object.entries(asIs).filter(([field]) => dto[field as keyof typeof asIs] !== undefined));
     if (changed.length === 0) return toView(current);
 
     const versioned = VERSIONED.some((field) => changed.includes(field));
@@ -278,7 +284,7 @@ export class GuidanceService {
           // The version is the lock: a change made from a state that has since moved on is refused, not merged.
           const claimed = await tx.aiGuidance.updateMany({
             where: { id: current.id, version: current.version },
-            data: { ...next, ...asIs, version: current.version + 1, updatedById: userId },
+            data: { ...next, ...sent, version: current.version + 1, updatedById: userId },
           });
           if (claimed.count === 0) throw new ConflictException("This guidance was changed meanwhile; reload it and try again");
           await tx.aiGuidanceVersion.create({
@@ -286,7 +292,7 @@ export class GuidanceService {
           });
           return tx.aiGuidance.findUniqueOrThrow({ where: { id: current.id } });
         })
-      : await this.prisma.aiGuidance.update({ where: { id: current.id }, data: { ...asIs, updatedById: userId } });
+      : await this.prisma.aiGuidance.update({ where: { id: current.id }, data: { ...sent, updatedById: userId } });
     await this.audit.record({
       userId,
       ...auditOwner(owner),

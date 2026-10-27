@@ -32,7 +32,7 @@ function Versions({ base, guidance }: { base: string; guidance: GuidanceView }) 
               <details>
                 <summary>Show the text</summary>
                 {/* Plain text, shown as text: a guidance is never rendered as HTML or markdown. */}
-                <pre className="guidance-text">{version.body}</pre>
+                <pre className="guidance-text" tabIndex={0} role="region" aria-label="Guidance text">{version.body}</pre>
               </details>
             </li>
           ))}

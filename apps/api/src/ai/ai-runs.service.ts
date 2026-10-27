@@ -33,8 +33,25 @@ const stepView = (step: AiWorkflowStep) => ({
   endedAt: step.endedAt,
 });
 
+/** The columns of a run that its summary shows. */
+const SUMMARY_FIELDS = {
+  id: true,
+  type: true,
+  projectId: true,
+  createdById: true,
+  status: true,
+  input: true,
+  comparisonId: true,
+  comparisonSide: true,
+  providerSnapshot: true,
+  error: true,
+  createdAt: true,
+  startedAt: true,
+  finishedAt: true,
+} as const satisfies Prisma.AiWorkflowRunSelect;
+
 /** A run without its steps and result: enough to list it and to find the one to open. */
-const summaryView = (run: AiWorkflowRun) => ({
+const summaryView = (run: Pick<AiWorkflowRun, keyof typeof SUMMARY_FIELDS>) => ({
   id: run.id,
   type: run.type,
   projectId: run.projectId,
@@ -188,6 +205,8 @@ export class AiRunsService {
       this.prisma.aiWorkflowRun.findMany({
         where,
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        // Not the guidance snapshot or the result: a list of up to a hundred runs needs neither, and each holds text.
+        select: SUMMARY_FIELDS,
         ...pageArgs(query),
       }),
       this.prisma.aiWorkflowRun.count({ where }),

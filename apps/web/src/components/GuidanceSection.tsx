@@ -246,7 +246,7 @@ export function GuidanceSection({ scope }: { scope: GuidanceScope }) {
                         <details>
                           <summary>Read the text of {pack.title}</summary>
                           {/* Plain text, shown as text. */}
-                          <pre className="guidance-text">{pack.body}</pre>
+                          <pre className="guidance-text" tabIndex={0} role="region" aria-label="Guidance text">{pack.body}</pre>
                         </details>
                       </td>
                       <td>{GUIDANCE_KIND_LABEL[pack.kind]}</td>

@@ -63,21 +63,31 @@ export function pickForStep(
   budgetTokens: number,
 ): PickedGuidance {
   const ordered = candidates.filter((candidate) => candidate.steps.includes(step)).sort(promptOrder);
-  const cost = new Map(ordered.map((candidate) => [candidate.ref, estimateTokens(candidate.body)]));
-  let usedTokens = [...cost.values()].reduce((sum, tokens) => sum + tokens, 0);
+  const costs = new Map(ordered.map((candidate) => [candidate.ref, estimateTokens(candidate.body)]));
+  let usedTokens = [...costs.values()].reduce((sum, tokens) => sum + tokens, 0);
   const given = new Set<string>();
   if (budgetTokens > 0) {
     for (const victim of [...ordered].sort(dropOrder)) {
       if (usedTokens <= budgetTokens) break;
       given.add(victim.ref);
-      usedTokens -= cost.get(victim.ref) ?? 0;
+      usedTokens -= costs.get(victim.ref) ?? 0;
+    }
+  }
+  // A guidance bigger than the whole budget is given up last and takes the smaller ones with it on the way: go back
+  // through what was given up, the last given first, and keep each that fits what is left.
+  for (const victim of [...ordered].sort(dropOrder).reverse()) {
+    if (!given.has(victim.ref)) continue;
+    const cost = costs.get(victim.ref) ?? 0;
+    if (budgetTokens > 0 && usedTokens + cost <= budgetTokens) {
+      given.delete(victim.ref);
+      usedTokens += cost;
     }
   }
   return {
     used: ordered.filter((candidate) => !given.has(candidate.ref)),
     dropped: ordered
       .filter((candidate) => given.has(candidate.ref))
-      .map((candidate) => ({ ref: candidate.ref, title: candidate.title, tokens: cost.get(candidate.ref) ?? 0 })),
+      .map((candidate) => ({ ref: candidate.ref, title: candidate.title, tokens: costs.get(candidate.ref) ?? 0 })),
     usedTokens,
   };
 }
@@ -90,9 +100,11 @@ const PREAMBLE = [
 
 /**
  * A guidance is the team's text, but it must not be able to end the block it sits in and speak as the prompt
- * itself: any `<team_guidance` or `</team_guidance` in it is written as `&lt;…`.
+ * itself: any `<team_guidance` or `</team_guidance` in it (with spaces or slashes between) is written as `&lt;…`.
+ * One character class, not whitespace around an optional slash: that pattern is quadratic on a long run of spaces,
+ * and this text is a stranger's.
  */
-const neutralise = (text: string): string => text.replace(/<(\s*\/?\s*team_guidance)/gi, "&lt;$1");
+const neutralise = (text: string): string => text.replace(/<([\s/]*team_guidance)/gi, "&lt;$1");
 
 /** The block appended to a step's system prompt, or nothing when no guidance applies. */
 export function renderTeamGuidance(items: readonly { title: string; body: string }[]): string {

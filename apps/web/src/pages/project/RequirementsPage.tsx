@@ -335,7 +335,10 @@ export function RequirementsPage() {
     [projectId, aiEnabled],
   );
   const openRunOf = (requirementId: string) =>
-    (aiRuns.data ?? []).find((run) => run.input.requirementId === requirementId && OPEN_RUN_STATUSES.includes(run.status));
+    // A side of a comparison is not a draft of its own: it must not take the row's "Draft test cases" away.
+    (aiRuns.data ?? []).find(
+      (run) => run.input.requirementId === requirementId && run.comparisonId === null && OPEN_RUN_STATUSES.includes(run.status),
+    );
   const reqRes = useResource(
     () => api.get<Requirement[]>(`/projects/${projectId}/requirements${showArchived ? '?includeArchived=true' : ''}`),
     [projectId, showArchived],
