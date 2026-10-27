@@ -111,6 +111,14 @@ jobs:
           docker compose up -d --force-recreate --wait --wait-timeout 120 app
           node tests/smoke/ai.mjs
 
+      # Guidance for the AI assistant: the tables, who may write it, what each step is sent, a run keeping its own snapshot,
+      # the built-in packs, the export and comparisons. It uses the same fake AI provider; recreating the app resets the
+      # in-memory sign-up limit that the suites above have used up.
+      - name: AI guidance smoke test
+        run: |
+          docker compose up -d --force-recreate --wait --wait-timeout 120 app
+          node tests/smoke/guidance.mjs
+
       # Without an AI_ENCRYPTION_KEY a provider key can't be saved. The steps below recreate the app, which
       # brings the key from .env back.
       - name: AI assistant without an encryption key

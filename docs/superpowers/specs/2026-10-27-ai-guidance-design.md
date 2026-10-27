@@ -57,8 +57,8 @@ nothing is dropped quietly: what was left out is named on the run page.
 - **Steps**: `REVIEW` (requirement review), `DESIGN` (case design, also the revision), `AUDIT` (coverage audit),
   `CODEGEN` (reserved for C; read by the export API only).
 - **Kinds** (labels for the lists and for filtering): `CASE_CONTENT`, `AUTOMATION_CODE`, `TEAM_RULE`.
-- **Selection of a run**: `EFFECTIVE` (default: what applies to the project now), `NONE`, or `LIST` (named ids,
-  disabled ones included; used by comparisons and for trying a guidance).
+- **Selection of a run**: `EFFECTIVE` (default: what applies to the project now), `NONE`, or `LIST` (named ids or built-in
+  packs as `builtin:<key>`; an admin may name guidance that is switched off, to try it; anyone else only what is in effect).
 - **Comparison**: two runs of one requirement, side A and side B, with different selections, and a verdict.
 
 ## Data
@@ -110,7 +110,8 @@ case, steps in the user's words, expected results that can be checked), and shor
 
 1. Candidates: the built-ins that are on for the project (a project toggle wins over a workspace toggle; with none,
    off); the workspace's guidance that is on and not switched off for this project; the project's guidance that is
-   on. `NONE` gives nothing; `LIST` gives exactly the listed guidance the project can see, whatever its switch.
+   on. `NONE` gives nothing; `LIST` gives exactly the listed guidance the project can see: whatever its switch for an admin,
+   only what is in effect for anyone else (a draft is the admins' to read, and a run sends all of it to the model).
 2. Keep those whose `steps` include the step.
 3. Order for the prompt: built-ins, then workspace, then project; inside a group by priority (highest first), then
    title.
@@ -145,7 +146,8 @@ Guidance text is never taken from project data.
 - The selection is resolved **when the run is started** and kept in `ai_workflow_runs.guidance`:
   `{ mode, used: [{ id | builtinKey, scope, title, version, steps }], dropped: [{ title, tokens }], budgetTokens }`.
   Every step of the run uses that snapshot (filtered by its step) in the order above, so a run is reproducible and a
-  guidance edited during a run does not change it. The text comes from the stored versions.
+  guidance edited during a run does not change it. The snapshot also keeps the text it sent (a guidance deleted later takes its versions with it, and
+  a run page opened later must still say what was used); the run view shows titles, versions and sizes, never the text.
 - Each step records `guidanceTokens`. The run view and the run page show "Guidance used" (titles and versions) and
   "Left out: ... (over the budget of N tokens)".
 - Starting the same run twice is still one run: the selection is part of what makes two starts the same.
@@ -164,10 +166,11 @@ is instructed).
 | `PATCH /workspaces/:id/ai/guidance/:guidanceId` | workspace admin | edit (new version); `enabled` too |
 | `DELETE /workspaces/:id/ai/guidance/:guidanceId` | workspace admin | delete (versions go with it; runs keep their snapshot) |
 | `GET …/guidance/:guidanceId/versions` | same | the versions |
-| `PUT /workspaces/:id/ai/guidance/toggles` | workspace admin | `{ builtinKey, enabled }` or `{ guidanceId, enabled }` |
+| `PUT /workspaces/:id/ai/guidance/toggles` | workspace admin | `{ builtinKey, enabled }` or `{ guidanceId, enabled }` (project only for `guidanceId`); `enabled: null` clears the owner's own switch, so a project follows its workspace again |
 | `POST …/guidance/import/preview` | same | `{ fileName, content }` of a markdown file: returns the title, summary and body it would make, nothing saved |
 | the same under `/projects/:projectId/ai/guidance` | project admin (workspace admin counts) | project guidance and the project's toggles |
 | `GET /projects/:projectId/ai/guidance/effective?step=&selection=&format=` | any project member, API token too | what applies to the project: `format=json` (default) the used and dropped guidance with texts; `markdown` one document (for a coding agent); `prompt` the exact `<team_guidance>` block for the step. `step` is one of the four; `selection` is `EFFECTIVE` (default) or `NONE`. |
+| `GET /projects/:projectId/ai/guidance/preview?step=&selection=&ids=&format=` | project admin (workspace admin counts), web session only | the same as `effective`, and also `selection=LIST` with `ids` (guidance or `builtin:<key>`), switched on or not: the text of guidance that is not in effect is for admins alone, so it is not on `effective` |
 | `GET /projects/:projectId/ai/guidance/stats` | project member | per guidance: comparisons it took part in and in how many it was on the preferred side |
 | `POST /projects/:projectId/ai/comparisons` | Tester and above | `{ requirementId, extraContext?, a: selection, b: selection }`: makes two runs (one transaction; both count against the daily limit), returns the comparison |
 | `GET /projects/:projectId/ai/comparisons/:id` | project member | both runs as run views, and the verdict |
@@ -265,11 +268,14 @@ Adds FR-097 to FR-101 when implemented: the guidance model and scope (097), reso
 prompt placement and the data-versus-instructions boundary (099), the export (100), comparisons (101). FR-084
 ("versioned skills/agent definitions") is met for guidance by its versions and the run snapshot.
 
-## To verify during implementation
+## Checked during implementation
 
-- That `COPY apps/api apps/api` in the Dockerfile's build stage and the runtime copy bring
-  `apps/api/guidance/builtin` next to `dist`, and where the loader finds it in development and in the image.
-- The frontmatter of the ECC files we adapt (nested `metadata`) against the small parser.
-- That a transaction that makes both runs of a comparison works with the advisory lock the run start already takes
-  (the daily limit is per person).
-- The token estimate against two real tokenizers on a sample of guidance, to confirm `characters / 4` over-estimates.
+- The Dockerfile's build stage copies `apps/api` whole, so `apps/api/guidance` reaches the build; the runtime stage copies
+  it next to `dist` (`/app/apps/api/guidance`), and the loader finds it from `src` and from `dist` alike. The smoke
+  test lists the folder inside the image.
+- The small frontmatter reader copes with the nested `metadata` of the ECC files (nested keys are ignored) and with
+  inline lists; unit checks cover CRLF, a byte-order mark, a header that never ends and a long single line.
+- A transaction that makes both runs of a comparison works with the advisory lock the run start takes (the same key);
+  two comparisons started at once with room for one give one comparison and one `429`.
+- Not checked: the token estimate (`characters / 4 + 30`) against real tokenizers. It over-estimates for plain English by
+  design, and the budget is a number the admin can change.
