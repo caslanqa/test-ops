@@ -21,7 +21,7 @@ export class AnthropicProvider implements AiProvider {
   async generate({ system, user, schemaName, schema }: AiGenerateRequest): Promise<AiGenerateResult> {
     if (!this.input.credential) throw new AiProviderError("Anthropic needs a provider key", false);
     const base = (this.input.endpoint ?? PUBLIC_API).replace(/\/+$/, "");
-    const answer = (await callProvider(
+    const { answer: envelope } = await callProvider(
       new URL(`${base}/v1/messages`),
       {
         model: this.input.model,
@@ -33,7 +33,8 @@ export class AnthropicProvider implements AiProvider {
       },
       { "x-api-key": this.input.credential, "anthropic-version": API_VERSION },
       { credential: this.input.credential, requestTimeoutMs: this.input.requestTimeoutMs },
-    )) as MessagesAnswer;
+    );
+    const answer = envelope as MessagesAnswer;
 
     if (answer?.stop_reason === "max_tokens") {
       throw new AiProviderError("The model ran out of output tokens before it finished; raise the output limit", false);

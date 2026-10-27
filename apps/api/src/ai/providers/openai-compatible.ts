@@ -1,5 +1,6 @@
 import { AiProviderError } from "../provider-error";
 import { callProvider, tokenCount } from "./http";
+import { answerHint, kindOf, parseModelJson } from "./model-json";
 import type { AiGenerateRequest, AiGenerateResult, AiProvider, AiProviderInput } from "./provider";
 
 interface ChatCompletion {
@@ -29,7 +30,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
   async generate({ system, user, schemaName, schema }: AiGenerateRequest): Promise<AiGenerateResult> {
     if (!this.input.endpoint) throw new AiProviderError("An OpenAI-compatible provider needs an endpoint", false);
     const url = new URL(`${this.input.endpoint.replace(/\/+$/, "")}/chat/completions`);
-    const answer = (await callProvider(
+    const { answer: envelope, endpointIsPrivate } = await callProvider(
       url,
       {
         model: this.input.model,
@@ -48,7 +49,8 @@ export class OpenAiCompatibleProvider implements AiProvider {
         explainFailure: (status, body) =>
           (status === 400 || status === 422) && /json_schema|response_format/i.test(body) ? NO_STRUCTURED_OUTPUT : null,
       },
-    )) as ChatCompletion;
+    );
+    const answer = envelope as ChatCompletion;
 
     const choice = answer?.choices?.[0];
     if (choice?.finish_reason === "length") {
@@ -58,9 +60,15 @@ export class OpenAiCompatibleProvider implements AiProvider {
     if (typeof content !== "string") throw new AiProviderError("The provider's answer has no message content", true);
     let output: unknown;
     try {
-      output = JSON.parse(content);
+      output = parseModelJson(content);
     } catch {
-      throw new AiProviderError("The model's answer isn't valid JSON", true);
+      throw new AiProviderError(`The model's answer isn't valid JSON${answerHint(content, endpointIsPrivate, this.input.credential)}`, true);
+    }
+    if (typeof output !== "object" || output === null || Array.isArray(output)) {
+      throw new AiProviderError(
+        `The model's answer isn't a JSON object (it is ${kindOf(output)})${answerHint(content, endpointIsPrivate, this.input.credential)}`,
+        true,
+      );
     }
     return {
       output,

@@ -14,6 +14,8 @@
 //   flaky                    the first call (since the last reset) isn't JSON, the rest are valid
 //   revise                   the first coverage audit (since the last reset) asks for a revision
 //   dup                      the coverage audit says draft 0 repeats the first existing case it was given
+//   fenced, prefixed, think, double   a valid answer wrapped in a code fence / after a sentence / after a <think> block / encoded twice
+//   array                    the answer is a JSON array, not an object
 //   slow-after-review        the requirement review is instant, every later call answers after 20 s
 // Control: GET /__last (the last request: path, headers, body), GET /__calls (every request: path, model),
 // POST /__reset, POST /__quit. Start it with `docker compose exec -T app node -` and the file on stdin.
@@ -105,6 +107,17 @@ function validAnswer(res, anthropic, model, schemaName, output) {
         },
   );
 }
+/** The answer as given text, the way models that don't keep to the schema send it. */
+function wrapped(res, anthropic, model, schemaName, text) {
+  if (anthropic) return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model));
+  json(res, 200, {
+    id: 'chatcmpl-fake',
+    object: 'chat.completion',
+    model,
+    choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+  });
+}
 function notJson(res, anthropic, model) {
   const text = 'this is not json';
   json(
@@ -146,6 +159,16 @@ const server = http.createServer((req, res) => {
     switch (model) {
       case 'bad-json':
         return notJson(res, anthropic, model);
+      case 'fenced':
+        return wrapped(res, anthropic, model, schemaName, '```json\n' + JSON.stringify(cannedOutput(schemaName, model, userText), null, 2) + '\n```');
+      case 'prefixed':
+        return wrapped(res, anthropic, model, schemaName, 'Here is the JSON you asked for:\n' + JSON.stringify(cannedOutput(schemaName, model, userText)) + '\nLet me know if you need anything else.');
+      case 'think':
+        return wrapped(res, anthropic, model, schemaName, '<think>The user wants {"ok": true}; I will answer in JSON.</think>\n' + JSON.stringify(cannedOutput(schemaName, model, userText)));
+      case 'double':
+        return wrapped(res, anthropic, model, schemaName, JSON.stringify(JSON.stringify(cannedOutput(schemaName, model, userText))));
+      case 'array':
+        return wrapped(res, anthropic, model, schemaName, JSON.stringify([cannedOutput(schemaName, model, userText)]));
       case 'invalid':
         return validAnswer(res, anthropic, model, schemaName, { ok: 'yes' });
       case 'fail500':

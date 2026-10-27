@@ -252,6 +252,19 @@ for (const [model, label, fits] of [
   check(`[${failed.status}] ${label} fails the test`, failed.status === 200 && failed.json?.ok === false && fits(String(failed.json?.error)), failed.text);
   check('...and leaves AI untested', (await workspaceView()).testedAt === null);
 }
+for (const [model, label] of [
+  ['fenced', 'an answer in a code fence'],
+  ['prefixed', 'an answer after a sentence'],
+  ['think', 'an answer after a <think> block'],
+  ['double', 'an answer that is JSON inside a JSON string'],
+]) {
+  await ok(admin, 'PUT', WS, openAi(model));
+  const wrapped = await testWorkspace();
+  check(`[${wrapped.status}] ${label} still passes the test`, wrapped.status === 200 && wrapped.json?.ok === true, wrapped.text);
+}
+await ok(admin, 'PUT', WS, openAi('array'));
+const arrayAnswer = await testWorkspace();
+check('an answer that is a JSON array fails the test, saying what it is', arrayAnswer.json?.ok === false && /JSON object/.test(String(arrayAnswer.json?.error)) && /array/.test(String(arrayAnswer.json?.error)), arrayAnswer.text);
 await ok(admin, 'PUT', WS, openAi('slow', { requestTimeoutMs: 5000 }));
 const slow = await testWorkspace();
 check(`[${slow.status}] a provider that does not answer in time fails the test`, slow.json?.ok === false && String(slow.json?.error).includes('No answer within 5 s'), slow.text);
@@ -400,6 +413,43 @@ try {
   check('a validation message does not repeat a property name the provider made up', typeof units.unexpected === 'string' && !units.unexpected.includes('LEAKED-PROPERTY'), String(units.unexpected));
   check('http:// to a public address is refused when saving', units.httpPublic === true && units.httpsPublic === false, JSON.stringify(units));
   check('...but http:// to a private address or localhost is fine', units.httpPrivate === false && units.httpLocalhost === false, JSON.stringify(units));
+  const parsed = JSON.parse(
+    inApp(`
+      const { parseModelJson, answerHint } = require('./dist/ai/providers/model-json');
+      const attempt = (text) => { try { return JSON.stringify(parseModelJson(text)); } catch { return 'THROWS'; } };
+      console.log(JSON.stringify({
+        plain: attempt('{"a":1}'),
+        fenced: attempt('\\u0060\\u0060\\u0060json\\n{"a":1}\\n\\u0060\\u0060\\u0060'),
+        bareFence: attempt('\\u0060\\u0060\\u0060\\n{"a":1}\\n\\u0060\\u0060\\u0060'),
+        prefixed: attempt('Sure! Here you go:\\n{"a":1}\\nHope it helps.'),
+        think: attempt('<think>maybe {"b":2}</think>\\n{"a":1}'),
+        double: attempt(JSON.stringify(JSON.stringify({ a: 1 }))),
+        nested: attempt('{"a":{"b":[1,2]}}'),
+        text: attempt('I cannot do that.'),
+        empty: attempt(''),
+        trailingComma: attempt('{"a":[1,2,],"b":{"c":1,},}'),
+        rawNewline: attempt('{"a":"first line\\nsecond line","b":"tab\\there"}'),
+        commaInString: attempt('{"a":"x,}","b":1}'),
+        brokenHint: answerHint('{"a": "b" "c": 1}', false, null),
+        publicHint: answerHint('Sorry, I cannot help with sk-1 or this.', false, 'sk-1'),
+        privateHint: answerHint('Sorry, I cannot help.', true, null),
+        longHint: answerHint('x'.repeat(2000), false, null).length,
+      }));
+    `),
+  );
+  check('an answer in a code fence is read', parsed.fenced === '{"a":1}' && parsed.bareFence === '{"a":1}', JSON.stringify(parsed));
+  check('...after a sentence', parsed.prefixed === '{"a":1}', JSON.stringify(parsed));
+  check('...after a <think> block, ignoring what is in it', parsed.think === '{"a":1}', JSON.stringify(parsed));
+  check('...and JSON inside a JSON string', parsed.double === '{"a":1}', JSON.stringify(parsed));
+  check('plain and nested JSON are read as before', parsed.plain === '{"a":1}' && parsed.nested === '{"a":{"b":[1,2]}}', JSON.stringify(parsed));
+  check('text without JSON is still refused', parsed.text === 'THROWS' && parsed.empty === 'THROWS', JSON.stringify(parsed));
+  check('trailing commas are tolerated', parsed.trailingComma === '{"a":[1,2],"b":{"c":1}}', JSON.stringify(parsed));
+  check('...and a line break or tab inside a string', parsed.rawNewline === '{"a":"first line\\nsecond line","b":"tab\\there"}', JSON.stringify(parsed));
+  check('...without touching a comma inside a string', parsed.commaInString === '{"a":"x,}","b":1}', JSON.stringify(parsed));
+  check('a public endpoint\'s error also says where the JSON breaks', /breaks at/.test(parsed.brokenHint) && /position|column|Expected/i.test(parsed.brokenHint), parsed.brokenHint);
+  check('a public endpoint\'s answer is quoted in the error, without the key', parsed.publicHint.includes('cannot help') && !parsed.publicHint.includes('sk-1'), parsed.publicHint);
+  check('...but a private one\'s is not', parsed.privateHint === '', parsed.privateHint);
+  check('...and the quote is short', parsed.longHint <= 220, String(parsed.longHint));
   check('a provider key is removed from error text', !helpers.scrubbed.includes('sk-1'), helpers.scrubbed);
   check('error text is cut to 500 characters', helpers.cut <= 500, String(helpers.cut));
   check('...and a key at the cut is removed before cutting', !helpers.edge.includes('sk-'), helpers.edge);

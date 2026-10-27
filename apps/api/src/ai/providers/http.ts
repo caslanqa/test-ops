@@ -15,13 +15,15 @@ export interface CallOptions {
  * POSTs JSON to a provider and returns the parsed answer. Private addresses are allowed (a model on the same
  * machine or network is a supported setup); link-local, multicast and reserved ones are not, redirects are not
  * followed, and the call has one deadline. Every failure is an AiProviderError that says whether a retry may help.
+ * `endpointIsPrivate` says whether the answer came from a private address (an unknown one counts as private), so a
+ * caller decides how much of the answer an error message may show.
  */
 export async function callProvider(
   url: URL,
   body: unknown,
   headers: Record<string, string>,
   { credential, requestTimeoutMs, explainFailure }: CallOptions,
-): Promise<unknown> {
+): Promise<{ answer: unknown; endpointIsPrivate: boolean }> {
   let result: PostResult;
   try {
     result = await safePost(
@@ -45,8 +47,10 @@ export async function callProvider(
       result.status === 429 || result.status >= 500,
     );
   }
+  // Not knowing where the answer came from counts as private: the safe way to be wrong.
+  const endpointIsPrivate = isPrivateAddress(result.remoteAddress ?? "");
   try {
-    return JSON.parse(result.body);
+    return { answer: JSON.parse(result.body), endpointIsPrivate };
   } catch {
     throw new AiProviderError("The provider's answer isn't JSON; check the endpoint", false);
   }
