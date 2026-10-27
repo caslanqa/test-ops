@@ -199,6 +199,25 @@ TestOps can draft test cases from a requirement with an AI model you choose. On 
 - **What is sent.** The requirement's title and description, any notes you add, the cases already linked to it (title and steps; the first 50, within a size budget), and the id and title of up to 200 other cases of the project, for spotting duplicates. Nothing else, and nothing from other projects. The run page says where it went.
 - **Limits.** Each setting has a longest answer, a time to wait, and a number of runs per person per day (20 by default). A run makes at most five model calls; a step whose answer can't be used is tried once more, then the run fails with the reason. Runs are carried out in the background, so a restart in the middle of one doesn't lose it.
 
+### Guidance for the AI assistant
+
+Guidance is your team's advice for the assistant: how you name and design test cases, what a good case looks like, how your automation code is written. It is added to the instructions of each step of a run, so drafts follow your standards. The answer format and the rules of the step always win: guidance is advice, never an instruction to change the format, and the model's answer is still checked as before.
+
+- **Who writes it.** Workspace admins write guidance for every project of the workspace (the workspace's **AI** tab, **Guidance**); project admins write guidance for their project (the project's **AI** section), and can switch a workspace guidance off for the project alone. The two add up, the workspace's first. Each guidance has a title, a text (plain text, up to 20,000 characters), a kind (case content, automation code or team rule), the steps it is for (requirement review, case design, coverage audit, and code generation, which only the export below reads), and a priority. A text can also be read from a markdown file such as a `SKILL.md`: the page shows what it would make, and nothing is saved until you confirm.
+- **Versions.** Every change to a guidance's text, steps, kind or priority is kept as a version, and the history can be read. A run keeps the guidance it was started with, text included, so editing or deleting guidance later changes nothing about a run in progress or its page.
+- **Built-in packs.** A few short packs ship with TestOps (test case design principles, a requirement review checklist, Playwright tests, test-first automation code, regression coverage, browser checks). They are off until a workspace admin, or a project admin for one project, switches them on. A pack says where it comes from and under which licence; the notice that goes with them is [`apps/api/guidance/NOTICE.md`](apps/api/guidance/NOTICE.md).
+- **Budget.** Guidance costs tokens on every call, so each AI setting has a **guidance budget per step** (6000 estimated tokens by default, 0 for no limit). When more applies, the built-in packs are left out first, then the workspace's guidance, and inside each group the lowest priority first. Nothing is cut in the middle; the run page lists what was left out.
+- **Choosing.** When drafting test cases for a requirement in a project that has guidance, you choose between the project's guidance, none, or named guidance among what applies. Only an admin can name guidance that is switched off, to try it; the project's **AI** section shows what the model will see for a step, including the exact text added to its prompt.
+- **What is sent.** The guidance a step uses is sent to the AI provider with the rest of the prompt, so keep secrets out of it. Guidance is shown as plain text everywhere and the server never fetches anything for it.
+- **For a coding agent.** Any member of a project, and an API token, can read what applies to it:
+
+  ```sh
+  curl -H "Authorization: Bearer $TESTOPS_TOKEN" \
+    "http://localhost:8080/api/v1/projects/<project-id>/ai/guidance/effective?step=CODEGEN&format=markdown"
+  ```
+
+  `format` is `json` (with the text and where each guidance comes from), `prompt` (the exact block added to a prompt) or `markdown` (one document). `step` is `REVIEW`, `DESIGN`, `AUDIT` or `CODEGEN`. The answer carries an `ETag`, so asking again with `If-None-Match` is cheap. Writing guidance needs a signed-in web session; a token can only read.
+
 ### HTTPS and reverse proxies
 
 TestOps serves HTTP on its own. Before exposing it outside a trusted network, put a TLS reverse proxy such as Caddy, nginx, or Traefik in front of it. If there is one trusted proxy hop, set `TRUST_PROXY=1`; use the correct hop count if your setup has more than one proxy.

@@ -10,6 +10,7 @@
 // 0 to 200000.
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import http from 'node:http';
 
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
@@ -942,6 +943,57 @@ await expectStatus('...nor one that does not exist', 404, runner.token, 'POST', 
 const namedPack = await startRun({ guidance: { mode: 'LIST', ids: ['builtin:case-design-principles'] } });
 check('a Tester can name a pack that is on', namedPack.status === 202, namedPack.text);
 if (namedPack.status === 202) await ok(runner.token, 'POST', `${RR}/${namedPack.json.runId}/cancel`);
+
+// ---------------------------------------------------------------------------------------------------------------
+// The export: what applies to a project, as one markdown document, for a coding agent to read.
+// ---------------------------------------------------------------------------------------------------------------
+console.log('--- Export: a markdown document ---');
+const EFFR = `/projects/${projR.id}/ai/guidance/effective`;
+const raw = (token, path, headers = {}) => fetch(BASE + path, { headers: { authorization: `Bearer ${token}`, ...headers } });
+const exported = await raw(admin, `${EFFR}?step=DESIGN&format=markdown`);
+const exportText = await exported.text();
+check('format=markdown answers a markdown document', exported.status === 200 && String(exported.headers.get('content-type')).startsWith('text/markdown'), `${exported.status} ${exported.headers.get('content-type')}`);
+check('...it opens with a title for the step', exportText.startsWith('# Team guidance for case design'), exportText.slice(0, 80));
+const at = (needle) => exportText.indexOf(needle);
+check('...each guidance used is a heading, built-ins first, then the workspace\'s, then the project\'s', at('## Test case design principles') > 0 && at('## Test case design principles') < at('## WS design rule') && at('## Playwright end-to-end tests') > at('## Test case design principles'), exportText.slice(0, 600));
+check('...with where it comes from, its version and priority', exportText.includes('Source: TestOps · MIT · Version 1 · Priority 600') && exportText.includes('Source: Written in TestOps · Version 1 · Priority 500'), exportText.slice(0, 900));
+check('...and its text', exportText.includes('One behaviour per case') && exportText.includes('WSD-'), exportText.slice(0, 300));
+check('...and says how much it is', /\d+ guidance, about \d+ tokens/.test(exportText), exportText.slice(0, 200));
+const codegen = await (await raw(admin, `${EFFR}?step=CODEGEN&format=markdown`)).text();
+check('the code generation step gets only guidance for it', codegen.includes('## Codegen rule') && codegen.includes('## Playwright end-to-end tests') && !codegen.includes('WS design rule') && !codegen.includes('Test case design principles'), codegen.slice(0, 400));
+const emptyStep = await (await raw(admin, `${EFFR}?step=AUDIT&selection=NONE&format=markdown`)).text();
+check('a step emptyStep applies to says so', /No guidance applies to this step/.test(emptyStep), emptyStep.slice(0, 200));
+setR('"guidanceBudgetTokens" = 50');
+const leftOut = await (await raw(admin, `${EFFR}?step=DESIGN&format=markdown`)).text();
+check('what the budget left out is listed at the end', /## Left out \(over the budget of 50 tokens\)/.test(leftOut) && /- Test case design principles \(\d+ tokens\)/.test(leftOut), leftOut.slice(-300));
+setR('"guidanceBudgetTokens" = 6000');
+check('the JSON answer says where each guidance comes from', (await ok(admin, 'GET', `${EFFR}?step=DESIGN`)).used.every((u) => typeof u.source === 'string' && u.source !== ''));
+for (const [label, token, expected] of [['a Tester', runner.token, 200], ['an API token', apiToken, 200], ['an account outside the project', outsider.token, 403]]) {
+  const r = await raw(token, `${EFFR}?step=DESIGN&format=markdown`);
+  check(`${label} reading the export gets ${expected}`, r.status === expected, String(r.status));
+}
+await expectStatus('an unknown format is refused', 400, admin, 'GET', `${EFFR}?format=xml`);
+
+console.log('--- Export: asking again ---');
+const tagged = (await raw(admin, `${EFFR}?step=DESIGN&format=markdown`)).headers.get('etag');
+check('the answer carries an ETag, the same for the same content', Boolean(tagged) && tagged === exported.headers.get('etag'), `${tagged} / ${exported.headers.get('etag')}`);
+// fetch() turns a 304 into a 200 for a request that carries its own conditional header, so this one uses node:http.
+const conditional = (path, token, etag) =>
+  new Promise((resolve, reject) => {
+    const url = new URL(BASE + path);
+    const request = http.request({ hostname: url.hostname, port: url.port, path: url.pathname + url.search, headers: { authorization: `Bearer ${token}`, 'if-none-match': etag } }, (res) => {
+      let text = '';
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, etag: res.headers.etag, text }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+const again304 = await conditional(`${EFFR}?step=DESIGN&format=markdown`, admin, tagged);
+check('asking again with it gets 304, and no body', again304.status === 304 && again304.text === '', `${again304.status} ${again304.text.slice(0, 40)}`);
+await ok(admin, 'PATCH', `${WGR}/${R.design}`, { body: body130('WSD') + ' edited' });
+const afterEdit = await conditional(`${EFFR}?step=DESIGN&format=markdown`, admin, tagged);
+check('after an edit the ETag changes and the new text is sent', afterEdit.status === 200 && afterEdit.etag !== tagged && afterEdit.text.includes('edited'), `${afterEdit.status} ${afterEdit.etag}`);
 
 console.log(failures === 0 ? '\nAll guidance checks passed.' : `\n${failures} guidance check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

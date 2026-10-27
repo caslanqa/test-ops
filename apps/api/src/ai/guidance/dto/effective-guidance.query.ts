@@ -2,7 +2,7 @@ import { ApiPropertyOptional } from "@nestjs/swagger";
 import { AiGuidanceStep } from "@prisma/client";
 import { IsEnum, IsIn, IsOptional, IsString, MaxLength } from "class-validator";
 
-export const GUIDANCE_FORMATS = ["json", "prompt"] as const;
+export const GUIDANCE_FORMATS = ["json", "prompt", "markdown"] as const;
 
 /** What both views of resolved guidance take: the step, and how to answer. */
 class GuidanceViewQuery {
@@ -12,7 +12,10 @@ class GuidanceViewQuery {
   @IsEnum(AiGuidanceStep)
   step?: AiGuidanceStep;
 
-  /** `json` (default): the guidance used and left out, with their text; `prompt`: the exact block, as plain text. */
+  /**
+   * `json` (default): the guidance used and left out, with their text; `prompt`: the exact block added to a step's
+   * prompt, as plain text; `markdown`: one document, for a coding agent to read.
+   */
   @IsOptional()
   @ApiPropertyOptional({ enum: GUIDANCE_FORMATS })
   @IsIn(GUIDANCE_FORMATS)

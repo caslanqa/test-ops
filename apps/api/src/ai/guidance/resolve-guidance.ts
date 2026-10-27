@@ -16,6 +16,8 @@ export interface GuidanceCandidate {
   version: number;
   steps: AiGuidanceStep[];
   priority: number;
+  /** Where it comes from, for attribution in an export: "Written in TestOps", a file name, or a pack's origin and licence. */
+  source?: string;
 }
 
 /** A guidance left out for want of budget, with what it would have cost. */

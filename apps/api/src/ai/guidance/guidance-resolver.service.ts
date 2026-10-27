@@ -32,6 +32,7 @@ const toCandidate = (row: AiGuidance): GuidanceCandidate => ({
   version: row.version,
   steps: row.steps,
   priority: row.priority,
+  source: row.sourceKind === "UPLOADED" ? [row.sourceName ?? "An uploaded file", row.license].filter(Boolean).join(" · ") : "Written in TestOps",
 });
 
 const toBuiltinCandidate = (pack: BuiltinGuidance): GuidanceCandidate => ({
@@ -42,6 +43,7 @@ const toBuiltinCandidate = (pack: BuiltinGuidance): GuidanceCandidate => ({
   version: pack.version,
   steps: pack.steps,
   priority: pack.priority,
+  source: `${pack.origin} · ${pack.license}`,
 });
 
 /**
