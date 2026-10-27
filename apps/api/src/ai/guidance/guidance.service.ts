@@ -14,6 +14,8 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { SaveGuidanceDto, UpdateGuidanceDto } from "./dto/save-guidance.dto";
 import { ToggleGuidanceDto } from "./dto/toggle-guidance.dto";
 import { estimateTokens, GUIDANCE_LIMITS, normalizeSteps } from "./guidance-limits";
+import { GuidanceResolver, type ResolvedGuidance } from "./guidance-resolver.service";
+import type { GuidanceSelection } from "./resolve-guidance";
 
 /** The owner of a guidance: a workspace (shared by all its projects) or one project. */
 export type GuidanceOwner = { kind: "WORKSPACE"; id: string } | { kind: "PROJECT"; id: string };
@@ -112,7 +114,18 @@ export class GuidanceService {
     private readonly prisma: PrismaService,
     private readonly accessControl: AccessControlService,
     private readonly audit: AuditService,
+    private readonly resolver: GuidanceResolver,
   ) {}
+
+  /**
+   * What one step of the project would be sent under a selection, for an admin: the same as the read-only route
+   * every member has, and also exactly the named guidance whether it is switched on or not. The text of guidance
+   * that is not in effect is for admins alone.
+   */
+  async preview(userId: string, projectId: string, step: AiGuidanceStep, selection: GuidanceSelection): Promise<ResolvedGuidance> {
+    await this.requireAdmin(userId, { kind: "PROJECT", id: projectId }, true);
+    return this.resolver.resolve(projectId, step, selection);
+  }
 
   /** The guidance of an owner; for a project also the workspace's, with whether each applies to the project. */
   async list(userId: string, owner: GuidanceOwner): Promise<GuidanceList> {

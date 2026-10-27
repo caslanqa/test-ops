@@ -1,9 +1,13 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { AiGuidanceStep } from "@prisma/client";
+import type { Response } from "express";
 import { AuthenticatedUser, CurrentUser } from "../../common/decorators/current-user.decorator";
 import { WebSessionOnly } from "../../common/decorators/web-session-only.decorator";
+import { PreviewGuidanceQuery } from "./dto/effective-guidance.query";
 import { SaveGuidanceDto, UpdateGuidanceDto } from "./dto/save-guidance.dto";
 import { ToggleGuidanceDto } from "./dto/toggle-guidance.dto";
+import { guidanceAnswer, selectionFromQuery } from "./guidance-view";
 import { GuidanceService } from "./guidance.service";
 
 /**
@@ -70,6 +74,22 @@ export class GuidanceController {
     @Param("guidanceId") guidanceId: string,
   ) {
     return this.guidance.versions(user.id, { kind: "WORKSPACE", id: workspaceId }, guidanceId);
+  }
+
+  /**
+   * What the model would be sent for a step: what applies now, nothing, or exactly the named guidance (`ids`),
+   * switched on or not. Unlike `effective` this can show guidance that is not in effect, so it is for admins.
+   */
+  @Get("projects/:projectId/ai/guidance/preview")
+  async previewProject(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Query() query: PreviewGuidanceQuery,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const step = query.step ?? AiGuidanceStep.DESIGN;
+    const selection = selectionFromQuery(query.selection, query.ids);
+    return guidanceAnswer(response, query.format, step, selection, await this.guidance.preview(user.id, projectId, step, selection));
   }
 
   /** The project's guidance, and the workspace's with whether each applies to the project. */

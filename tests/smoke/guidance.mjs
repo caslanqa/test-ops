@@ -8,7 +8,8 @@
 // The rule (docs/superpowers/specs/2026-10-27-ai-guidance-design.md): a guidance belongs to exactly one
 // workspace or project; a toggle names exactly one target; every version keeps its steps; the token budget is
 // 0 to 200000.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const BASE = process.env.BASE ?? 'http://localhost:8080/api/v1';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@testops.local';
@@ -492,9 +493,8 @@ for (const [label, query] of [
   ['an unknown format', '?format=xml'],
   ['an unknown selection', '?selection=EVERYTHING'],
   ['a parameter that does not exist', '?flavour=2'],
-  ['a list without ids', '?selection=LIST'],
-  ['a list of 21 ids', `?selection=LIST&ids=${Array.from({ length: 21 }, (_, i) => `id${i}`).join(',')}`],
-  ['ids with a selection that takes none', `?selection=NONE&ids=${gW}`],
+  ['a list (that is for admins, on the preview route)', `?selection=LIST&ids=${gW}`],
+  ['ids', `?ids=${gW}`],
 ]) {
   await expectStatus(`${label} is refused`, 400, admin, 'GET', EFF(PG, query));
 }
@@ -508,13 +508,31 @@ await ok(admin, 'PATCH', `${PG}/${gP}`, { enabled: false });
 check('a guidance that is off is not applied', refsOf(await effective(admin, PG, '?step=DESIGN')) === gW);
 
 console.log('--- Which guidance applies: a list of ids ---');
-check('a list applies what it names, a disabled guidance included', refsOf(await effective(admin, PG, `?step=DESIGN&selection=LIST&ids=${gP}`)) === gP);
-check('...in the order of a prompt, whatever order the ids come in', refsOf(await effective(admin, PG, `?step=DESIGN&selection=LIST&ids=${gP},${gW}`)) === `${gW},${gP}`);
-check('...and an id named twice counts once', refsOf(await effective(admin, PG, `?step=DESIGN&selection=LIST&ids=${gP},${gP}`)) === gP);
-check('...only for the steps the guidance is for', (await effective(admin, PG, `?step=AUDIT&selection=LIST&ids=${gP}`)).used.length === 0);
-await expectStatus('a list naming a guidance of another workspace is not found', 404, admin, 'GET', EFF(PG, `?selection=LIST&ids=${gwB}`));
-await expectStatus('...nor one that does not exist', 404, admin, 'GET', EFF(PG, `?selection=LIST&ids=${ghost}`));
-await expectStatus('...nor a project guidance of another project', 404, admin, 'GET', EFF(PG2, `?selection=LIST&ids=${gP}`));
+const PV = (base, query = '') => `${base}/preview${query}`;
+const previewed = (token, base, query = '') => ok(token, 'GET', PV(base, query));
+check('an admin previews what the project applies, as members read it', refsOf(await previewed(admin, PG, '?step=DESIGN')) === gW);
+check('a list applies what it names, a disabled guidance included', refsOf(await previewed(admin, PG, `?step=DESIGN&selection=LIST&ids=${gP}`)) === gP);
+check('...in the order of a prompt, whatever order the ids come in', refsOf(await previewed(admin, PG, `?step=DESIGN&selection=LIST&ids=${gP},${gW}`)) === `${gW},${gP}`);
+check('...and an id named twice counts once', refsOf(await previewed(admin, PG, `?step=DESIGN&selection=LIST&ids=${gP},${gP}`)) === gP);
+check('...only for the steps the guidance is for', (await previewed(admin, PG, `?step=AUDIT&selection=LIST&ids=${gP}`)).used.length === 0);
+check('...the prompt is the exact block for the list', (await call(admin, 'GET', PV(PG, `?step=DESIGN&selection=LIST&ids=${gP}&format=prompt`))).text.includes('## Project rule'));
+await expectStatus('a list naming a guidance of another workspace is not found', 404, admin, 'GET', PV(PG, `?selection=LIST&ids=${gwB}`));
+await expectStatus('...nor one that does not exist', 404, admin, 'GET', PV(PG, `?selection=LIST&ids=${ghost}`));
+await expectStatus('...nor a project guidance of another project', 404, admin, 'GET', PV(PG2, `?selection=LIST&ids=${gP}`));
+for (const [label, query] of [
+  ['a list without ids', '?selection=LIST'],
+  ['a list of 21 ids', `?selection=LIST&ids=${Array.from({ length: 21 }, (_, i) => `id${i}`).join(',')}`],
+  ['ids with a selection that takes none', `?selection=NONE&ids=${gW}`],
+  ['an unknown selection', '?selection=EVERYTHING'],
+]) {
+  await expectStatus(`${label} is refused`, 400, admin, 'GET', PV(PG, query));
+}
+await expectStatus('a project admin previews', 200, pa.token, 'GET', PV(PG, `?selection=LIST&ids=${gP}`));
+for (const who of [tester, automation, viewer, outsider, { label: 'an API token', token: apiToken }]) {
+  // The text of a guidance that is off is for admins, and an API token never reads it.
+  await expectStatus(`${who.label} cannot preview a list (the text of guidance that is not in effect)`, 403, who.token, 'GET', PV(PG, `?selection=LIST&ids=${gP}`));
+}
+await expectStatus('a project admin cannot preview another project', 403, pa.token, 'GET', PV(PG2));
 await ok(admin, 'PATCH', `${PG}/${gP}`, { enabled: true });
 
 console.log('--- Which guidance applies: the prompt block ---');
