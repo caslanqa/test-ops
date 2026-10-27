@@ -1,6 +1,7 @@
 import { AiProviderKind } from "@prisma/client";
 import { AnthropicProvider } from "./anthropic";
 import { OpenAiCompatibleProvider } from "./openai-compatible";
+import type { AnswerMode, Repair } from "./output-mode";
 
 export interface AiGenerateRequest {
   system: string;
@@ -9,6 +10,10 @@ export interface AiGenerateRequest {
   schemaName: string;
   /** A JSON Schema (draft-07) object schema the answer must fit. */
   schema: object;
+  /** How to ask for it (OpenAI-compatible servers; Anthropic always answers through a forced tool). Default: a JSON schema. */
+  mode?: AnswerMode;
+  /** A rejected earlier answer and why, when this is a retry. */
+  repair?: Repair;
 }
 
 export interface AiGenerateResult {

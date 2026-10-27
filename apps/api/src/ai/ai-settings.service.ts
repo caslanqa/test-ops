@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import { createHash, createHmac, hkdfSync, timingSafeEqual } from "crypto";
 import { ConfigService } from "@nestjs/config";
-import { AiProviderKind, ProjectRole, WorkspaceRole, type AiSettings } from "@prisma/client";
+import { AiOutputMode, AiProviderKind, ProjectRole, WorkspaceRole, type AiSettings } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { AccessControlService } from "../common/access-control.service";
 import { SecretBox } from "../common/secret-box";
@@ -17,6 +17,7 @@ import { AiEndpointError, assertAiEndpoint } from "../webhooks/safe-post";
 import { SaveAiSettingsDto } from "./dto/save-ai-settings.dto";
 import { TestAiSettingsDto } from "./dto/test-ai-settings.dto";
 import { AiProviderError, scrubProviderError } from "./provider-error";
+import { AUTO_LADDER, modeFor, type AnswerMode } from "./providers/output-mode";
 import { createAiProvider } from "./providers/provider";
 
 /** Which setting a project uses: its own, its workspace's default, or none. */
@@ -34,6 +35,10 @@ export interface AiSettingsView {
   maxOutputTokens: number;
   requestTimeoutMs: number;
   maxRunsPerUserPerDay: number;
+  /** How an OpenAI-compatible server is asked for a structured answer; AUTO tries ways in turn. */
+  outputMode: AiOutputMode;
+  /** The way AUTO learned from runs and tests, if any. */
+  learnedMode: AiOutputMode | null;
   testedAt: Date | null;
   updatedAt: Date;
 }
@@ -70,6 +75,8 @@ const toView = (row: AiSettings): AiSettingsView => ({
   maxOutputTokens: row.maxOutputTokens,
   requestTimeoutMs: row.requestTimeoutMs,
   maxRunsPerUserPerDay: row.maxRunsPerUserPerDay,
+  outputMode: row.outputMode,
+  learnedMode: row.learnedMode,
   testedAt: row.testedAt,
   updatedAt: row.updatedAt,
 });
@@ -188,7 +195,7 @@ export class AiSettingsService {
     userId: string,
     scope: { workspaceId: string } | { projectId: string },
     dto?: TestAiSettingsDto,
-  ): Promise<{ ok: boolean; latencyMs: number; error?: string; proof?: string }> {
+  ): Promise<{ ok: boolean; latencyMs: number; error?: string; proof?: string; mode?: AnswerMode }> {
     const owner: Owner =
       "workspaceId" in scope ? { kind: "WORKSPACE", id: scope.workspaceId } : { kind: "PROJECT", id: scope.projectId };
     if (owner.kind === "WORKSPACE") await this.requireWorkspaceAdmin(userId, owner.id);
@@ -220,46 +227,64 @@ export class AiSettingsService {
       }
     }
 
-    let failure: string | null = null;
-    const started = Date.now();
-    if (unreadable) {
-      failure = "The saved provider key can't be read, probably because AI_ENCRYPTION_KEY changed; enter the key again";
-    } else {
-      try {
-        const { output } = await createAiProvider({
-          provider,
-          model,
-          endpoint,
-          credential,
-          maxOutputTokens: Math.min(row?.maxOutputTokens ?? TEST_MAX_OUTPUT_TOKENS, TEST_MAX_OUTPUT_TOKENS),
-          requestTimeoutMs: Math.min(row?.requestTimeoutMs ?? TEST_TIMEOUT_MS, TEST_TIMEOUT_MS),
-        }).generate({
-          system: 'This is a connection test. Answer with the JSON object {"ok": true}.',
-          user: "Reply now.",
-          schemaName: "connection_test",
-          schema: TEST_SCHEMA,
-        });
-        if (typeof output !== "object" || output === null || (output as { ok?: unknown }).ok !== true) {
-          failure = "The model answered, but not in the shape the test asked for";
-        }
-      } catch (error) {
-        if (!(error instanceof AiProviderError)) this.logger.error(`AI connection test failed unexpectedly: ${String(error)}`);
-        failure = scrubProviderError(
-          error instanceof AiProviderError ? error.message : "The test failed unexpectedly",
-          credential,
-        );
-      }
-    }
-    const latencyMs = Date.now() - started;
-
-    // A test of other values says nothing about what is saved. Only a test of exactly what is saved records itself,
-    // and only if the saved connection is still the one that was tested: a save during the test wins.
+    // How to ask: a way, or in AUTO each of the ladder in turn until one works. The values of a form that differ
+    // from what is saved can't use what was learned for the saved connection.
     const savedIsTested =
       row !== null &&
       row.provider === provider &&
       row.model === model &&
       row.endpoint === endpoint &&
       (row.credentialCipher ? this.openCredential(row) : null) === credential;
+    const outputMode = draft ? (dto.outputMode ?? row?.outputMode ?? AiOutputMode.AUTO) : (row?.outputMode ?? AiOutputMode.AUTO);
+    const learnedMode = savedIsTested && row ? row.learnedMode : null;
+    const tries: AnswerMode[] =
+      provider === AiProviderKind.ANTHROPIC
+        ? ["TOOL_CALL"]
+        : outputMode === AiOutputMode.AUTO ? AUTO_LADDER.map((_, index) => modeFor(outputMode, learnedMode, index)) : [outputMode];
+    // Only a failure of the answer's form or of the way is worth asking another way; a wrong key or a dead server is not.
+    let failure: string | null = null;
+    let worked: AnswerMode | null = null;
+    const started = Date.now();
+    if (unreadable) {
+      failure = "The saved provider key can't be read, probably because AI_ENCRYPTION_KEY changed; enter the key again";
+    } else {
+      for (const mode of tries) {
+        try {
+          const { output } = await createAiProvider({
+            provider,
+            model,
+            endpoint,
+            credential,
+            maxOutputTokens: Math.min(row?.maxOutputTokens ?? TEST_MAX_OUTPUT_TOKENS, TEST_MAX_OUTPUT_TOKENS),
+            requestTimeoutMs: Math.min(row?.requestTimeoutMs ?? TEST_TIMEOUT_MS, TEST_TIMEOUT_MS),
+          }).generate({
+            system: 'This is a connection test. Answer with the JSON object {"ok": true}.',
+            user: "Reply now.",
+            schemaName: "connection_test",
+            schema: TEST_SCHEMA,
+            mode,
+          });
+          if (typeof output !== "object" || output === null || (output as { ok?: unknown }).ok !== true) {
+            throw new AiProviderError("The model answered, but not in the shape the test asked for", true, { escalate: true });
+          }
+          worked = mode;
+          failure = null;
+          break;
+        } catch (error) {
+          if (!(error instanceof AiProviderError)) this.logger.error(`AI connection test failed unexpectedly: ${String(error)}`);
+          // The first failure is what is reported: it says why the preferred way didn't work.
+          failure ??= scrubProviderError(
+            error instanceof AiProviderError ? error.message : "The test failed unexpectedly",
+            credential,
+          );
+          if (!(error instanceof AiProviderError && (error.escalate || error.unsupportedMode))) break;
+        }
+      }
+    }
+    const latencyMs = Date.now() - started;
+
+    // A test of other values says nothing about what is saved. Only a test of exactly what is saved records itself,
+    // and only if the saved connection is still the one that was tested: a save during the test wins.
     if (row && savedIsTested) {
       const unchanged = {
         id: row.id,
@@ -271,13 +296,19 @@ export class AiSettingsService {
       if (failure && !draft) {
         await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: null, enabled: false } });
       } else if (!failure) {
-        await this.prisma.aiSettings.updateMany({ where: unchanged, data: { testedAt: new Date() } });
+        // A way that worked after another failed is what this server keeps to, so AUTO starts there next time.
+        const learn = row.outputMode === AiOutputMode.AUTO && worked && worked !== modeFor(row.outputMode, row.learnedMode, 0);
+        await this.prisma.aiSettings.updateMany({
+          where: unchanged,
+          data: { testedAt: new Date(), ...(learn ? { learnedMode: worked } : {}) },
+        });
       }
     }
     if (failure) return { ok: false, latencyMs, error: failure };
     return {
       ok: true,
       latencyMs,
+      mode: worked ?? undefined,
       ...(draft ? { proof: this.signProof(owner, provider, model, endpoint, credential, Date.now() + TEST_PROOF_TTL_MS) } : {}),
     };
   }
@@ -390,6 +421,9 @@ export class AiSettingsService {
       if (!testedAt) throw new ConflictException("Run the connection test first");
     }
     const enabled = dto.enabled ?? (connectionChanged ? false : (existing?.enabled ?? false));
+    // What AUTO learned belongs to the connection and to AUTO: another model, endpoint or key, or a pinned way, starts over.
+    const outputMode = dto.outputMode ?? existing?.outputMode ?? AiOutputMode.AUTO;
+    const learnedMode = existing && !connectionChanged && existing.outputMode === outputMode ? existing.learnedMode : null;
 
     const data = {
       provider: dto.provider,
@@ -401,6 +435,8 @@ export class AiSettingsService {
       maxOutputTokens: dto.maxOutputTokens,
       requestTimeoutMs: dto.requestTimeoutMs,
       maxRunsPerUserPerDay: dto.maxRunsPerUserPerDay,
+      outputMode,
+      learnedMode,
       updatedById: userId,
     };
     const row = existing
@@ -417,6 +453,7 @@ export class AiSettingsService {
         ["maxOutputTokens", existing?.maxOutputTokens !== row.maxOutputTokens],
         ["requestTimeoutMs", existing?.requestTimeoutMs !== row.requestTimeoutMs],
         ["maxRunsPerUserPerDay", existing?.maxRunsPerUserPerDay !== row.maxRunsPerUserPerDay],
+        ["outputMode", (existing?.outputMode ?? AiOutputMode.AUTO) !== row.outputMode],
       ] as const
     )
       .filter(([, differs]) => differs)

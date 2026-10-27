@@ -1,5 +1,6 @@
 import { AiProviderError } from "../provider-error";
 import { callProvider, tokenCount } from "./http";
+import { withRepair } from "./output-mode";
 import type { AiGenerateRequest, AiGenerateResult, AiProvider, AiProviderInput } from "./provider";
 
 const PUBLIC_API = "https://api.anthropic.com";
@@ -18,7 +19,7 @@ interface MessagesAnswer {
 export class AnthropicProvider implements AiProvider {
   constructor(private readonly input: AiProviderInput) {}
 
-  async generate({ system, user, schemaName, schema }: AiGenerateRequest): Promise<AiGenerateResult> {
+  async generate({ system, user, schemaName, schema, repair }: AiGenerateRequest): Promise<AiGenerateResult> {
     if (!this.input.credential) throw new AiProviderError("Anthropic needs a provider key", false);
     const base = (this.input.endpoint ?? PUBLIC_API).replace(/\/+$/, "");
     const { answer: envelope } = await callProvider(
@@ -27,7 +28,7 @@ export class AnthropicProvider implements AiProvider {
         model: this.input.model,
         max_tokens: this.input.maxOutputTokens,
         system,
-        messages: [{ role: "user", content: user }],
+        messages: [{ role: "user", content: withRepair(user, repair) }],
         tools: [{ name: schemaName, description: "Returns the answer in the required shape.", input_schema: schema }],
         tool_choice: { type: "tool", name: schemaName },
       },

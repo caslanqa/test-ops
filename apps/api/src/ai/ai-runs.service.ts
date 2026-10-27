@@ -22,6 +22,7 @@ const stepView = (step: AiWorkflowStep) => ({
   skillVersion: step.skillVersion,
   status: step.status,
   attempt: step.attempt,
+  mode: step.mode,
   usage: step.usage,
   error: step.error,
   startedAt: step.startedAt,

@@ -1,10 +1,32 @@
-/** A failed call to an AI provider. `retryable` is true for what may pass on a second try: the network, 429, 5xx, an answer that isn't usable. */
+/** What a failed call knows beyond its message; none of it is shown or stored, it only steers the next try. */
+export interface AiProviderErrorDetails {
+  /** Another way of asking for the answer (another output mode) may help: the answer was unusable, or the way is refused. */
+  escalate?: boolean;
+  /** The server doesn't accept the way the answer was asked for (HTTP 400/422 naming it). */
+  unsupportedMode?: boolean;
+  /** The unusable answer, so the next try can quote it; never shown, stored or logged. */
+  rawAnswer?: string;
+  /** Why the answer was unusable, in a few plain words, for the next try to quote. */
+  problem?: string;
+}
+
+/** A failed call to an AI provider. `retryable` is true for what may pass on another try: the network, 429, 5xx, an answer that isn't usable. */
 export class AiProviderError extends Error {
+  readonly escalate: boolean;
+  readonly unsupportedMode: boolean;
+  readonly rawAnswer?: string;
+  readonly problem?: string;
+
   constructor(
     message: string,
     readonly retryable: boolean,
+    details: AiProviderErrorDetails = {},
   ) {
     super(message);
+    this.escalate = details.escalate ?? false;
+    this.unsupportedMode = details.unsupportedMode ?? false;
+    this.rawAnswer = details.rawAnswer;
+    this.problem = details.problem;
   }
 }
 

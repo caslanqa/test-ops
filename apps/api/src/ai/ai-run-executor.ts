@@ -1,10 +1,11 @@
 import { Injectable, Logger } from "@nestjs/common";
-import type { AiWorkflowRun, Prisma } from "@prisma/client";
+import type { AiOutputMode, AiWorkflowRun, Prisma } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AiSettingsService } from "./ai-settings.service";
 import { settingChanged } from "./ai-snapshot";
 import { AiProviderError, scrubProviderError } from "./provider-error";
+import { modeFor, type Repair } from "./providers/output-mode";
 import { createAiProvider, type AiProvider } from "./providers/provider";
 import { coverageAuditor, sanitizeAudit } from "./skills/coverage-auditor";
 import { requirementReviewer } from "./skills/requirement-reviewer";
@@ -15,10 +16,12 @@ import { stripBounds } from "./validate-output";
 
 /** How long a claim on a run holds, unless a step needs longer (see extendLock). */
 export const RUN_LOCK_MS = 5 * 60 * 1000;
-/** A step is tried at most twice: once, and once more when the first answer was unusable. */
-const MAX_ATTEMPTS_PER_STEP = 2;
-/** Every model call of a run, retries included. A revision makes exactly five. */
-const MAX_MODEL_CALLS = 5;
+/** A step is tried at most three times: when an answer is unusable it is asked for again, saying what was wrong. */
+const MAX_ATTEMPTS_PER_STEP = 3;
+/** Every model call of a run, retries included. A revision makes exactly five when every answer is usable at once. */
+const MAX_MODEL_CALLS = 10;
+/** The error of a step that was in flight when the process died: nothing is known about how it would have ended. */
+const INTERRUPTED = "Interrupted by a restart";
 /** Other cases of the project that are sent for duplicate detection. */
 const OTHER_CASES_SENT = 200;
 
@@ -26,6 +29,18 @@ const OTHER_CASES_SENT = 200;
 class RunStopped extends Error {}
 /** The run cannot go on; the message is shown to people. */
 class RunFailure extends Error {}
+
+/** What a model call needs besides the prompt: who to call, how to ask, and what the setting has learned about it. */
+interface ProviderHandle {
+  provider: AiProvider;
+  timeoutMs: number;
+  credential: string | null;
+  settingsId: string;
+  /** Anthropic always answers through a forced tool: there is no other way to ask for it. */
+  anthropic: boolean;
+  outputMode: AiOutputMode;
+  learnedMode: AiOutputMode | null;
+}
 
 type StepName = "REVIEW" | "DESIGN" | "AUDIT" | "REVISE" | "AUDIT_REVISED";
 
@@ -71,7 +86,7 @@ export class AiRunExecutor {
     // A step still marked as running was in flight when the process died; it has no answer.
     await this.prisma.aiWorkflowStep.updateMany({
       where: { runId: run.id, status: "RUNNING" },
-      data: { status: "FAILED", error: "Interrupted by a restart", endedAt: new Date() },
+      data: { status: "FAILED", error: INTERRUPTED, endedAt: new Date() },
     });
 
     // The setting is read again before every model call (see currentProvider), not once per claim: AI can be
@@ -111,7 +126,7 @@ export class AiRunExecutor {
   private async currentProvider(
     run: AiWorkflowRun,
     rememberCredential: (value: string | null) => void,
-  ): Promise<{ provider: AiProvider; timeoutMs: number; credential: string | null }> {
+  ): Promise<ProviderHandle> {
     const { settings } = await this.settings.resolve(run.projectId);
     if (!settings || !settings.enabled) throw new RunFailure("AI is not enabled for this project");
     if (settingChanged(run.providerSnapshot, settings)) {
@@ -136,6 +151,10 @@ export class AiRunExecutor {
       }),
       timeoutMs: settings.requestTimeoutMs,
       credential,
+      settingsId: settings.id,
+      anthropic: settings.provider === "ANTHROPIC",
+      outputMode: settings.outputMode,
+      learnedMode: settings.learnedMode,
     };
   }
 
@@ -172,17 +191,23 @@ export class AiRunExecutor {
   }
 
   /**
-   * One step: its saved answer when it has one, else a model call. A call whose answer is unusable, or that failed
-   * in a way that may pass, is made once more; then the run fails with the last error. Between calls the run is
-   * read again, so a cancel takes effect as soon as the step in flight returns.
+   * One step: its saved answer when it has one, else a model call. What the provider sends back is read and checked
+   * by us (the way a server is asked for a structured answer is a request, not a promise), and an answer that can't
+   * be used is asked for again, up to three times in all, each time saying what was wrong. In Automatic a failure of
+   * the answer's form also changes how it is asked (a JSON schema, then a tool call, then json_object); when a way
+   * works after another failed, the setting remembers it, so the next run starts there. A pinned way is kept. Between
+   * calls the run is read again, so a cancel takes effect as soon as the step in flight returns.
    */
   private async runStep<I, O>(
     runId: string,
-    getProvider: () => Promise<{ provider: AiProvider; timeoutMs: number; credential: string | null }>,
+    getProvider: () => Promise<ProviderHandle>,
     name: StepName,
     skill: AiSkill<I, O>,
     input: I,
   ): Promise<O> {
+    // How many times asking another way is due, and what to quote back on the next try.
+    let ways: number | undefined;
+    let previous: Repair | undefined;
     for (;;) {
       await this.assertStillRunning(runId);
       const rows = await this.prisma.aiWorkflowStep.findMany({ where: { runId, name }, orderBy: { attempt: "asc" } });
@@ -194,10 +219,13 @@ export class AiRunExecutor {
       }
 
       // Before the step is recorded: a run that must stop here has no step for a call that was never made.
-      const { provider, timeoutMs, credential } = await getProvider();
+      const { provider, timeoutMs, credential, settingsId, anthropic, outputMode, learnedMode } = await getProvider();
+      // After a restart the ways already tried are known from the steps; one that was cut off says nothing about its way.
+      ways ??= new Set(rows.filter((row) => row.status === "FAILED" && row.error !== INTERRUPTED).map((row) => row.mode)).size;
+      const mode = anthropic ? "TOOL_CALL" : modeFor(outputMode, learnedMode, ways);
       const user = skill.user(input);
       const row = await this.prisma.aiWorkflowStep.create({
-        data: { runId, name, skillVersion: skill.version, attempt: (rows[rows.length - 1]?.attempt ?? 0) + 1, input: { user } },
+        data: { runId, name, skillVersion: skill.version, attempt: (rows[rows.length - 1]?.attempt ?? 0) + 1, mode, input: { user } },
       });
       // The claim has to outlast the call, whatever the setting's timeout is.
       await this.extendLock(runId, Math.max(RUN_LOCK_MS, timeoutMs + 60_000));
@@ -209,6 +237,8 @@ export class AiRunExecutor {
           user,
           schemaName: skill.schemaName,
           schema: stripBounds(skill.schema),
+          mode,
+          repair: previous,
         });
         usage = result.usage;
         const output = skill.validate(result.output);
@@ -222,6 +252,8 @@ export class AiRunExecutor {
           },
         });
         await this.extendLock(runId, RUN_LOCK_MS);
+        // A way that worked after another failed is what this setting's server keeps to.
+        if (!anthropic && outputMode === "AUTO" && mode !== modeFor(outputMode, learnedMode, 0)) await this.rememberMode(settingsId, mode);
         return output;
       } catch (error) {
         const message = scrubProviderError(
@@ -241,10 +273,20 @@ export class AiRunExecutor {
           this.logger.error(`AI step ${name} of run ${runId} failed unexpectedly: ${error instanceof Error ? error.stack : String(error)}`);
           throw new RunFailure(message);
         }
-        if (!error.retryable) throw new RunFailure(message);
-        // Retryable: the next turn of the loop tries once more, or gives up.
+        // A way the server refuses is only worth another look in Automatic, which asks another way.
+        if (!(error.retryable || (outputMode === "AUTO" && error.unsupportedMode))) throw new RunFailure(message);
+        if (error.escalate && !anthropic) ways += 1;
+        previous = error.rawAnswer ? { answer: error.rawAnswer, problem: error.problem ?? "it was unusable" } : undefined;
       }
     }
+  }
+
+  /** Remembers how this setting's server was asked successfully, unless it was changed or pinned since. */
+  private async rememberMode(settingsId: string, mode: AiOutputMode): Promise<void> {
+    await this.prisma.aiSettings.updateMany({
+      where: { id: settingsId, outputMode: "AUTO" },
+      data: { learnedMode: mode },
+    });
   }
 
   private async assertStillRunning(runId: string): Promise<void> {

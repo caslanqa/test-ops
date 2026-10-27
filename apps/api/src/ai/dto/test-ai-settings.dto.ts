@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { AiProviderKind } from "@prisma/client";
+import { AiOutputMode, AiProviderKind } from "@prisma/client";
 import { Transform } from "class-transformer";
 import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 
@@ -34,6 +34,12 @@ export class TestAiSettingsDto {
   @IsNotEmpty()
   @MaxLength(4096)
   credential?: string;
+
+  /** How to ask: a way, or AUTO (the default), which tries them in turn and says which one worked. */
+  @IsOptional()
+  @ApiPropertyOptional({ enum: AiOutputMode, enumName: "AiOutputMode" })
+  @IsEnum(AiOutputMode)
+  outputMode?: AiOutputMode;
 
   /** The saved key is being removed, so the test sends none. */
   @IsOptional()

@@ -1,6 +1,6 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
-import { AiProviderKind } from "@prisma/client";
+import { AiOutputMode, AiProviderKind } from "@prisma/client";
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 
 /** The ranges of the numeric settings; the documented defaults are 8192, 120000 and 20. */
@@ -43,6 +43,15 @@ export class SaveAiSettingsDto {
   @IsOptional()
   @IsBoolean()
   clearCredential?: boolean;
+
+  /**
+   * How an OpenAI-compatible server is asked for a structured answer: AUTO (default) tries a JSON schema, a tool
+   * call and json_object in turn and remembers what worked; the others pin one way. Left out, the saved one stays.
+   */
+  @IsOptional()
+  @ApiPropertyOptional({ enum: AiOutputMode, enumName: "AiOutputMode" })
+  @IsEnum(AiOutputMode)
+  outputMode?: AiOutputMode;
 
   /** Only possible after a passing connection test: of the saved settings, or of these values (see `testProof`). */
   @IsOptional()

@@ -686,6 +686,17 @@ enum AiProviderKind {
   OPENAI_COMPATIBLE
 }
 
+/// How an OpenAI-compatible server is asked for a structured answer. AUTO tries JSON_SCHEMA, then TOOL_CALL, then
+/// JSON_OBJECT, and remembers (learnedMode) what worked; the others pin one way. PROMPT (the schema in the prompt
+/// alone) is only ever pinned. Anthropic always answers through a forced tool.
+enum AiOutputMode {
+  AUTO
+  JSON_SCHEMA
+  TOOL_CALL
+  JSON_OBJECT
+  PROMPT
+}
+
 /// Where the AI provider is defined: one row per workspace (its default) and one per project (an override
 /// that replaces the default whole). Exactly one of workspaceId and projectId is set; the migration adds
 /// that as a CHECK, which Prisma doesn't model. Only workspace admins and project admins write it.
@@ -703,6 +714,9 @@ model AiSettings {
   maxOutputTokens      Int            @default(8192)
   requestTimeoutMs     Int            @default(120000)
   maxRunsPerUserPerDay Int            @default(20)
+  outputMode           AiOutputMode   @default(AUTO)
+  /// What AUTO learned from runs and tests (never AUTO or PROMPT); cleared when the connection or outputMode changes.
+  learnedMode          AiOutputMode?
   /// Set by a passing connection test, cleared by any change to provider, model, endpoint or key.
   /// AI can only be switched on while it is set.
   testedAt             DateTime?
@@ -775,6 +789,8 @@ model AiWorkflowStep {
   skillVersion Int
   status       AiStepStatus @default(RUNNING)
   attempt      Int
+  /// How the provider was asked for the answer (an AiOutputMode other than AUTO).
+  mode         String?
   /// What was sent to the provider; project data, so it is never part of an API answer.
   input        Json
   output       Json?

@@ -3,8 +3,11 @@ import { Info, PlugZap } from 'lucide-react';
 import { FormError } from './Page';
 import { Select } from './Select';
 import {
+  AI_OUTPUT_MODE_HINT,
+  AI_OUTPUT_MODE_LABEL,
   AI_PROVIDER_LABEL,
   aiEndpointHost,
+  type AiOutputMode,
   type AiProviderKind,
   type AiSettingsView,
   type AiTestResult,
@@ -40,6 +43,7 @@ export function AiSettingsForm({
   const [provider, setProvider] = useState<AiProviderKind>(view?.provider ?? 'OPENAI_COMPATIBLE');
   const [model, setModel] = useState(view?.model ?? '');
   const [endpoint, setEndpoint] = useState(view?.endpoint ?? '');
+  const [outputMode, setOutputMode] = useState<AiOutputMode>(view?.outputMode ?? 'AUTO');
   const [credential, setCredential] = useState('');
   const [removeKey, setRemoveKey] = useState(false);
   // Null follows the saved setting.
@@ -54,7 +58,7 @@ export function AiSettingsForm({
   // The proof of a passing test, with the values it was for: it only counts while the form still holds them.
   const [passed, setPassed] = useState<{ values: string; proof: string } | null>(null);
   const ids = {
-    provider: useId(), model: useId(), endpoint: useId(), endpointHint: useId(), key: useId(), keyHint: useId(),
+    provider: useId(), mode: useId(), modeHint: useId(), model: useId(), endpoint: useId(), endpointHint: useId(), key: useId(), keyHint: useId(),
     remove: useId(), enabled: useId(), enabledHint: useId(), tokens: useId(), timeout: useId(), runs: useId(), testHint: useId(),
   };
 
@@ -87,6 +91,7 @@ export function AiSettingsForm({
         model: model.trim(),
         endpoint: endpointValue || undefined,
         ...(credential ? { credential } : removeKey ? { clearCredential: true } : {}),
+        outputMode,
         enabled,
         ...(provedByTest ? { testProof: provedByTest } : {}),
         maxOutputTokens: Number(maxOutputTokens),
@@ -117,6 +122,7 @@ export function AiSettingsForm({
         model: model.trim(),
         endpoint: endpointValue || undefined,
         ...(credential ? { credential } : removeKey ? { clearCredential: true } : {}),
+        outputMode,
       });
       setTestResult(result);
       setPassed(result.ok && result.proof ? { values, proof: result.proof } : null);
@@ -160,6 +166,21 @@ export function AiSettingsForm({
           {' '}Link-local addresses such as 169.254.169.254 are refused.
         </p>
       </div>
+      {provider === 'OPENAI_COMPATIBLE' && (
+        <div className="field">
+          <label htmlFor={ids.mode} className="field-label">Answer format</label>
+          <Select id={ids.mode} value={outputMode} aria-describedby={ids.modeHint} onChange={(e) => setOutputMode(e.target.value as AiOutputMode)}>
+            {(Object.keys(AI_OUTPUT_MODE_LABEL) as AiOutputMode[]).map((mode) => (
+              <option key={mode} value={mode}>{AI_OUTPUT_MODE_LABEL[mode]}</option>
+            ))}
+          </Select>
+          <p id={ids.modeHint} className="field-hint">
+            {AI_OUTPUT_MODE_HINT[outputMode]}
+            {outputMode === 'AUTO' && view?.learnedMode ? ` Right now it asks as: ${AI_OUTPUT_MODE_LABEL[view.learnedMode]}, which is what worked before.` : ''}
+            {' '}Every answer is read and checked here whatever the server does, and asked for again, saying what was wrong, if it can't be used.
+          </p>
+        </div>
+      )}
       <div className="field">
         <label htmlFor={ids.key} className="field-label">Provider key</label>
         <input
@@ -241,7 +262,7 @@ export function AiSettingsForm({
       <div role="status">
         {testResult && (
           <p className={testResult.ok ? 'note' : 'form-error'}>
-            {testResult.ok ? `Connection works (${testResult.latencyMs} ms).` : `Connection test failed: ${testResult.error ?? 'no reason given'}`}
+            {testResult.ok ? `Connection works (${testResult.latencyMs} ms${testResult.mode ? `, answered as: ${AI_OUTPUT_MODE_LABEL[testResult.mode]}` : ''}).` : `Connection test failed: ${testResult.error ?? 'no reason given'}`}
           </p>
         )}
       </div>

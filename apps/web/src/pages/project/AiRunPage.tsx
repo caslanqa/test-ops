@@ -7,7 +7,7 @@ import { FormError, LoadError, Loading, PageHeader } from '../../components/Page
 import { Select } from '../../components/Select';
 import { useFocusFallback } from '../../lib/focus';
 import { Tag } from '../../components/StatusChip';
-import { AI_STEP_LABEL, aiRunStatusText, type AiRun, type CaseDraft } from '../../lib/ai';
+import { AI_OUTPUT_MODE_LABEL, AI_STEP_LABEL, aiRunStatusText, type AiRun, type CaseDraft } from '../../lib/ai';
 import { useNotice } from '../../lib/notice';
 import { useProjectPermissions } from '../../lib/permissions';
 import { suitePath, type Suite } from '../../lib/suites';
@@ -133,7 +133,9 @@ function RunView({
             {run.steps.map((step) => (
               <li key={`${step.name}-${step.attempt}`}>
                 {AI_STEP_LABEL[step.name] ?? step.name}
-                {step.attempt > 1 ? ` (try ${step.attempt})` : ''}: {step.status === 'COMPLETED' ? 'done' : step.status === 'RUNNING' ? 'running' : 'failed'}
+                {step.attempt > 1 || (step.mode && step.mode !== 'JSON_SCHEMA')
+                  ? ` (${step.attempt > 1 ? `try ${step.attempt}` : 'first try'}${step.mode ? `, ${AI_OUTPUT_MODE_LABEL[step.mode].toLowerCase()}` : ''})`
+                  : ''}: {step.status === 'COMPLETED' ? 'done' : step.status === 'RUNNING' ? 'running' : 'failed'}
                 {step.error && <span className="muted"> — {step.error}</span>}
               </li>
             ))}

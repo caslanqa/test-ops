@@ -40,10 +40,13 @@ export async function callProvider(
   if (result.truncated) throw new AiProviderError("The provider's answer is larger than 2 MiB", false);
   if (result.status < 200 || result.status >= 300) {
     const explained = explainFailure?.(result.status, result.body);
+    // An explained failure is the server refusing the way the answer was asked for. It is no use asking again the
+    // same way; in Automatic the next try asks another way.
+    if (explained) throw new AiProviderError(explained, false, { unsupportedMode: true, escalate: true });
     // Not knowing where the answer came from counts as private: the safe way to be wrong.
     const isPrivate = isPrivateAddress(result.remoteAddress ?? "");
     throw new AiProviderError(
-      explained ?? providerFailureMessage(result.status, isPrivate, result.body, credential),
+      providerFailureMessage(result.status, isPrivate, result.body, credential),
       result.status === 429 || result.status >= 500,
     );
   }

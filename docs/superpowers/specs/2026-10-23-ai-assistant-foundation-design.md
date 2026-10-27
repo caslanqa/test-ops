@@ -131,6 +131,22 @@ interface AiProvider {
   tool input is the output.
 - OpenAI-compatible: chat completions with `response_format: { type: 'json_schema', ... }`; the output limit is sent as `max_completion_tokens` to OpenAI and Azure OpenAI and as `max_tokens` to other servers. A server without
   `json_schema` support fails the connection test with a message that says so.
+- Answer guarantee: what a server does with `response_format` is a request, not a promise (gateways such as
+  LiteLLM drop parameters a backend doesn't support, with `drop_params`), so the provider's answer is always read
+  (`parseModelJson`) and checked against the schema by us. The way of asking is a setting, `outputMode`: `AUTO`
+  (default), `JSON_SCHEMA`, `TOOL_CALL` (the schema as the parameters of one function the model must call),
+  `JSON_OBJECT` (`response_format` json_object, the schema in the system prompt) and `PROMPT` (the schema in the
+  system prompt alone). `AUTO` asks in the order JSON schema, tool call, JSON object, starting with `learnedMode`
+  when there is one. A step that fails in the form of its answer (unreadable, not an object, wrong shape) or because
+  the server refuses the way asked (HTTP 400/422 naming it, `unsupportedMode`) is tried again with the next way; a
+  transport failure (5xx, 429, timeout) is tried again the same way. A way that works after another failed is saved
+  as `learnedMode` (compare-and-set on the setting; cleared when provider, model, endpoint, key or `outputMode`
+  changes). A pinned way is never changed, and a pinned way the server refuses fails the run at once. Anthropic
+  always answers through its forced tool.
+- Repair turn: every retry after a failed answer quotes the rejected answer (at most 8000 characters, in
+  `<previous_answer>` tags) and why it was rejected, and asks for only the corrected JSON object. The reason names
+  only what the schema names, never a property the provider invented. The rejected answer is kept in memory for the
+  retry; it is never stored, shown or logged.
 - Both: timeout from settings, `max_tokens` from settings, no streaming, retries are the workflow's job. Errors
   carry `retryable` (network, 429, 5xx) so the engine can decide.
 - Requests go through one outbound helper derived from the CI webhook's `safePost`
@@ -163,8 +179,9 @@ Worker (`AiWorkerService`, started on module init, stopped on module destroy):
   the run fails with "AI is not enabled for this project". Starting a run refuses earlier (section 5), so this
   covers only a setting that was switched off while the run waited.
 - Between steps the worker re-reads the run and stops when it was cancelled.
-- A step that fails with a retryable provider error or an output that does not validate is retried once, then the
-  run fails with the last error. Bounded: at most 5 model calls per run.
+- A step that fails with a retryable provider error or an output that does not validate is tried again, up to three
+  times in all, then the run fails with the last error. Bounded: at most 10 model calls per run (five when every
+  answer is usable at once and a revision happens).
 - On shutdown the loop stops claiming and lets an in-flight provider call finish for up to 10 seconds; any
   remainder is recovered by the lock expiry.
 

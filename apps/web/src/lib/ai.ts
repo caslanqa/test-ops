@@ -1,5 +1,24 @@
 export type AiProviderKind = 'ANTHROPIC' | 'OPENAI_COMPATIBLE';
 
+/** How an OpenAI-compatible server is asked for a structured answer. */
+export type AiOutputMode = 'AUTO' | 'JSON_SCHEMA' | 'TOOL_CALL' | 'JSON_OBJECT' | 'PROMPT';
+
+export const AI_OUTPUT_MODE_LABEL: Record<AiOutputMode, string> = {
+  AUTO: 'Automatic',
+  JSON_SCHEMA: 'JSON schema',
+  TOOL_CALL: 'Tool call',
+  JSON_OBJECT: 'JSON object',
+  PROMPT: 'Prompt only',
+};
+
+export const AI_OUTPUT_MODE_HINT: Record<AiOutputMode, string> = {
+  AUTO: 'Tries a JSON schema, then a tool call, then a JSON object, and remembers what works for this server.',
+  JSON_SCHEMA: 'response_format with the schema. Servers and gateways often ignore it without saying so.',
+  TOOL_CALL: 'The schema as a function the model must call. Works on most gateways that ignore a JSON schema.',
+  JSON_OBJECT: 'response_format json_object, with the schema written into the prompt.',
+  PROMPT: 'The schema in the prompt alone, for a server with no other way. The answer is still checked and asked for again.',
+};
+
 /** Which AI setting a project uses: its own, its workspace's default, or none. */
 export type AiSource = 'PROJECT' | 'WORKSPACE' | 'NONE';
 
@@ -20,6 +39,9 @@ export interface AiSettingsView {
   maxOutputTokens: number;
   requestTimeoutMs: number;
   maxRunsPerUserPerDay: number;
+  outputMode: AiOutputMode;
+  /** What Automatic learned from runs and tests, if anything. */
+  learnedMode: AiOutputMode | null;
   /** Set by a passing connection test; AI can only be switched on while it is set. */
   testedAt: string | null;
   updatedAt: string;
@@ -46,6 +68,7 @@ export interface SaveAiSettings {
   endpoint?: string;
   credential?: string;
   clearCredential?: boolean;
+  outputMode: AiOutputMode;
   enabled: boolean;
   maxOutputTokens: number;
   requestTimeoutMs: number;
@@ -60,11 +83,14 @@ export interface AiTestResult {
   error?: string;
   /** Returned by a passing test of the form's values: saving exactly those values with it counts as tested. */
   proof?: string;
+  /** The way of asking that worked (OpenAI-compatible servers). */
+  mode?: AiOutputMode;
 }
 
 /** The values of the form to test before they are saved. */
 export interface TestAiSettings {
   provider: AiProviderKind;
+  outputMode?: AiOutputMode;
   model: string;
   endpoint?: string;
   credential?: string;
@@ -92,6 +118,8 @@ export interface AiRunStep {
   skillVersion: number;
   status: 'RUNNING' | 'COMPLETED' | 'FAILED';
   attempt: number;
+  /** How the answer was asked for on this try. */
+  mode: AiOutputMode | null;
   usage: { inputTokens: number; outputTokens: number } | null;
   error: string | null;
   startedAt: string;

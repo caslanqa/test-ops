@@ -270,6 +270,18 @@ const slow = await testWorkspace();
 check(`[${slow.status}] a provider that does not answer in time fails the test`, slow.json?.ok === false && String(slow.json?.error).includes('No answer within 5 s'), slow.text);
 await ok(admin, 'PUT', WS, openAi('ok', { requestTimeoutMs: 120000 }));
 
+await ok(admin, 'PUT', WS, openAi('tools-only', { outputMode: 'AUTO' }));
+const answersViaTool = await testWorkspace();
+check('the test of a server that only answers through tools passes, and says how', answersViaTool.json?.ok === true && answersViaTool.json?.mode === 'TOOL_CALL', answersViaTool.text);
+check('...and what worked is remembered when it was the saved setting that was tested', psql(`select "learnedMode" from ai_settings where "workspaceId" = '${ws.id}'`) === 'TOOL_CALL');
+await ok(admin, 'PUT', WS, openAi('tools-only', { outputMode: 'AUTO', maxOutputTokens: 4096 }));
+check('saving the same connection keeps what was learned', psql(`select "learnedMode" from ai_settings where "workspaceId" = '${ws.id}'`) === 'TOOL_CALL');
+await ok(admin, 'PUT', WS, openAi('ok', { outputMode: 'AUTO' }));
+check('another model forgets it', psql(`select coalesce("learnedMode"::text, '-') from ai_settings where "workspaceId" = '${ws.id}'`) === '-');
+await ok(admin, 'PUT', WS, openAi('tools-only', { outputMode: 'PROMPT' }));
+const pinnedTest = await testWorkspace();
+check('a test with the way pinned asks only that way', pinnedTest.json?.ok === false && (await lastRequest()).body.tools === undefined, pinnedTest.text);
+await ok(admin, 'PUT', WS, openAi('ok', { outputMode: 'AUTO' }));
 await ok(admin, 'PUT', WS, { provider: 'ANTHROPIC', model: 'ok', endpoint: fakeUrl, credential: 'sk-anthropic-1' });
 const anthropic = await testWorkspace();
 check(`[${anthropic.status}] the Anthropic provider passes the test`, anthropic.json?.ok === true, anthropic.text);
@@ -416,6 +428,7 @@ try {
   const parsed = JSON.parse(
     inApp(`
       const { parseModelJson, answerHint } = require('./dist/ai/providers/model-json');
+      const { modeFor } = require('./dist/ai/providers/output-mode');
       const attempt = (text) => { try { return JSON.stringify(parseModelJson(text)); } catch { return 'THROWS'; } };
       console.log(JSON.stringify({
         plain: attempt('{"a":1}'),
@@ -431,6 +444,9 @@ try {
         rawNewline: attempt('{"a":"first line\\nsecond line","b":"tab\\there"}'),
         commaInString: attempt('{"a":"x,}","b":1}'),
         brokenHint: answerHint('{"a": "b" "c": 1}', false, null),
+        order: JSON.stringify([0, 1, 2, 3].map((i) => modeFor('AUTO', null, i))),
+        learnedOrder: JSON.stringify([0, 1, 2].map((i) => modeFor('AUTO', 'TOOL_CALL', i))),
+        pinned: JSON.stringify([0, 1, 2].map((i) => modeFor('PROMPT', 'TOOL_CALL', i))),
         // Answers built to make a pattern search run for ever: many openings and no closing.
         slowThink: (() => { const t = Date.now(); try { parseModelJson('<think>'.repeat(30000)); } catch { /* expected */ } return Date.now() - t; })(),
         slowFence: (() => { const t = Date.now(); try { parseModelJson('\\u0060\\u0060\\u0060\\nx'.repeat(30000)); } catch { /* expected */ } return Date.now() - t; })(),
@@ -452,6 +468,9 @@ try {
   check('...and so are many code fences without a closing', parsed.slowFence < 500, `${parsed.slowFence} ms`);
   check('...and a long run of braces', parsed.slowBrace < 500, `${parsed.slowBrace} ms`);
   check('a large plain answer is still read whole', parsed.bigPlain >= 0 && parsed.bigPlain < 1000, `${parsed.bigPlain} ms`);
+  check('Automatic asks as a JSON schema first, then a tool call, then json_object', parsed.order === '["JSON_SCHEMA","TOOL_CALL","JSON_OBJECT","JSON_OBJECT"]', parsed.order);
+  check('...starting from what was learned, then the rest in that order', parsed.learnedOrder === '["TOOL_CALL","JSON_SCHEMA","JSON_OBJECT"]', parsed.learnedOrder);
+  check('a pinned way is the only way', parsed.pinned === '["PROMPT","PROMPT","PROMPT"]', parsed.pinned);
   check('trailing commas are tolerated', parsed.trailingComma === '{"a":[1,2],"b":{"c":1}}', JSON.stringify(parsed));
   check('...and a line break or tab inside a string', parsed.rawNewline === '{"a":"first line\\nsecond line","b":"tab\\there"}', JSON.stringify(parsed));
   check('...without touching a comma inside a string', parsed.commaInString === '{"a":"x,}","b":1}', JSON.stringify(parsed));
@@ -557,7 +576,7 @@ check('...holding the review, the drafts and the audit', first.result?.review?.a
 check('...every draft says what kind of case it is', first.result.drafts.every((draft) => ['positive', 'negative', 'boundary', 'error'].includes(draft.kind)));
 check('the run shows which setting it used', first.providerSnapshot?.source === 'WORKSPACE' && first.providerSnapshot?.endpointHost === '127.0.0.1:8098' && first.providerSnapshot?.model === 'ok', JSON.stringify(first.providerSnapshot));
 check('...and what was asked', first.input?.requirementId === requirement.id && first.input?.extraContext === 'Mention the mobile app.', JSON.stringify(first.input));
-check('a step shows no prompt and no answer, only how it went', keys(first.steps[0]) === 'attempt,endedAt,error,name,skillVersion,startedAt,status,usage', keys(first.steps[0]));
+check('a step shows no prompt and no answer, only how it went', keys(first.steps[0]) === 'attempt,endedAt,error,mode,name,skillVersion,startedAt,status,usage', keys(first.steps[0]));
 check('the run carries no provider key', !JSON.stringify(first).includes(SECRET) && !JSON.stringify(first).includes('credential'));
 check('nothing was written to the cases yet', (await caseCount()) === casesBefore);
 const lastPrompt = JSON.stringify((await lastRequest()).body.messages);
@@ -573,6 +592,55 @@ await expectStatus('someone outside the project cannot read a run', 403, outside
 await expectStatus('...or list runs', 403, outsider.token, 'GET', `${RUNS}?requirementId=${requirement.id}`);
 await expectStatus('a run of another project is not found through this one', 404, admin, 'GET', `/projects/${otherProject.id}/ai/runs/${started.json.runId}`);
 await expectStatus('an unknown run is not found', 404, tester.token, 'GET', `${RUNS}/00000000-0000-0000-0000-000000000000`);
+
+console.log('--- Answers that are not in the shape asked for ---');
+// A server may ignore what it is asked for (response_format, tools): the run reads and checks every answer itself,
+// asks again with what was wrong, and in Automatic tries another way of asking, then remembers what worked.
+const modesOf = (run, name) => run.steps.filter((step) => step.name === name).map((step) => `${step.attempt}:${step.mode}:${step.status}`).join(',');
+const callModes = () => calls().map((c) => c.mode).join(',');
+const learned = () => psql(`select coalesce("learnedMode"::text, '-') from ai_settings where "workspaceId" = '${ws.id}'`);
+async function formatRun(model, outputMode) {
+  useModel(model);
+  setting(`"outputMode" = '${outputMode}', "learnedMode" = null`);
+  resetFake();
+  const started = await start(tester.token, { extraContext: `format ${model} ${outputMode} ${Math.random()}` });
+  return waitForRun(started.json.runId, finished, 90);
+}
+
+const toolsOnly = await formatRun('tools-only', 'AUTO');
+check('a server that ignores response_format still gets a run through: asked again as a tool call', toolsOnly.status === 'AWAITING_APPROVAL' && modesOf(toolsOnly, 'REVIEW') === '1:JSON_SCHEMA:FAILED,2:TOOL_CALL:COMPLETED', `${toolsOnly.status} ${modesOf(toolsOnly, 'REVIEW')} ${toolsOnly.error ?? ''}`);
+check('...the way that worked is remembered for the setting', learned() === 'TOOL_CALL', learned());
+resetFake();
+const nextRun = await waitForRun((await start(tester.token, { extraContext: `format tools-only again ${Math.random()}` })).json.runId, finished, 90);
+check('...and the next run asks that way from the start', nextRun.status === 'AWAITING_APPROVAL' && modesOf(nextRun, 'REVIEW') === '1:TOOL_CALL:COMPLETED' && callModes() === 'TOOL_CALL,TOOL_CALL,TOOL_CALL', `${modesOf(nextRun, 'REVIEW')} ${callModes()}`);
+const toolCallRequest = (await lastRequest()).body;
+check('a tool call carries the schema as the tool and forces it', toolCallRequest.tools?.length === 1 && toolCallRequest.tool_choice?.function?.name === toolCallRequest.tools[0].function.name && toolCallRequest.tools[0].function.parameters?.type === 'object' && !toolCallRequest.response_format, JSON.stringify(toolCallRequest).slice(0, 300));
+
+const jsonObjectOnly = await formatRun('json-object-only', 'AUTO');
+check('a server that only keeps to json_object is reached on the third way', jsonObjectOnly.status === 'AWAITING_APPROVAL' && modesOf(jsonObjectOnly, 'REVIEW') === '1:JSON_SCHEMA:FAILED,2:TOOL_CALL:FAILED,3:JSON_OBJECT:COMPLETED' && learned() === 'JSON_OBJECT', `${modesOf(jsonObjectOnly, 'REVIEW')} learned=${learned()}`);
+const jsonObjectRequest = (await lastRequest()).body;
+check('...with the schema written into the prompt, since json_object carries none', jsonObjectRequest.response_format?.type === 'json_object' && /JSON Schema/.test(JSON.stringify(jsonObjectRequest.messages)) && !jsonObjectRequest.tools, JSON.stringify(jsonObjectRequest).slice(0, 300));
+
+const noTools = await formatRun('no-tools', 'AUTO');
+check('a server that refuses tools is skipped, not failed on', noTools.status === 'AWAITING_APPROVAL' && modesOf(noTools, 'REVIEW') === '1:JSON_SCHEMA:FAILED,2:TOOL_CALL:FAILED,3:JSON_OBJECT:COMPLETED', `${modesOf(noTools, 'REVIEW')} ${noTools.error ?? ''}`);
+
+const repairs = await formatRun('repairs', 'JSON_SCHEMA');
+check('with the way pinned, the next try stays on it and says what was wrong', repairs.status === 'AWAITING_APPROVAL' && modesOf(repairs, 'REVIEW') === '1:JSON_SCHEMA:FAILED,2:JSON_SCHEMA:COMPLETED', `${modesOf(repairs, 'REVIEW')} ${repairs.error ?? ''}`);
+const repairText = JSON.stringify((await lastRequest()).body.messages);
+check('...quoting the rejected answer and why it was rejected', /was rejected/.test(repairText) && /cannot produce JSON/.test(repairText) && /previous_answer/.test(repairText), repairText.slice(-400));
+check('...and a pinned way is not replaced by what was learned', learned() === '-', learned());
+
+const pinnedFails = await formatRun('tools-only', 'JSON_SCHEMA');
+check('a pinned way that the server does not keep to fails the run after three tries, all in that way', pinnedFails.status === 'FAILED' && modesOf(pinnedFails, 'REVIEW') === '1:JSON_SCHEMA:FAILED,2:JSON_SCHEMA:FAILED,3:JSON_SCHEMA:FAILED' && calls().length === 3, `${pinnedFails.status} ${modesOf(pinnedFails, 'REVIEW')} calls=${calls().length}`);
+const pinnedRefused = await formatRun('no-tools', 'TOOL_CALL');
+check('a pinned way that the server refuses fails the run at once, saying so', pinnedRefused.status === 'FAILED' && modesOf(pinnedRefused, 'REVIEW') === '1:TOOL_CALL:FAILED' && /tool/i.test(String(pinnedRefused.error)), `${pinnedRefused.status} ${modesOf(pinnedRefused, 'REVIEW')} ${pinnedRefused.error}`);
+const promptOnly = await formatRun('prompt-only', 'PROMPT');
+const promptRequest = (await lastRequest()).body;
+check('asking in the prompt alone works for a server that has no other way', promptOnly.status === 'AWAITING_APPROVAL' && modesOf(promptOnly, 'REVIEW') === '1:PROMPT:COMPLETED' && !promptRequest.response_format && !promptRequest.tools && /JSON Schema/.test(JSON.stringify(promptRequest.messages)), `${modesOf(promptOnly, 'REVIEW')}`);
+
+setting(`"outputMode" = 'AUTO', "learnedMode" = null`);
+useModel('ok');
+resetFake();
 
 console.log('--- Revision, retry and failure ---');
 useModel('revise');
@@ -590,16 +658,16 @@ check('...four model calls in all', calls().length === 4, String(calls().length)
 useModel('invalid');
 resetFake();
 const invalid = await waitForRun((await start(tester.token)).json.runId, finished);
-check('an answer that does not fit the schema fails the run after one retry', invalid.status === 'FAILED' && Boolean(invalid.error) && calls().length === 2, `${invalid.status} ${invalid.error} calls=${calls().length}`);
+check('an answer that does not fit the schema fails the run after two more tries', invalid.status === 'FAILED' && Boolean(invalid.error) && calls().length === 3, `${invalid.status} ${invalid.error} calls=${calls().length}`);
 check('...and writes no cases', (await caseCount()) === casesBefore);
-check('...and the failed steps still record what the provider used', invalid.steps.length === 2 && invalid.steps.every((step) => step.status === 'FAILED' && step.usage?.inputTokens === 11 && step.usage?.outputTokens === 7), JSON.stringify(invalid.steps));
+check('...and the failed steps still record what the provider used', invalid.steps.length === 3 && invalid.steps.every((step) => step.status === 'FAILED' && step.usage?.inputTokens === 11 && step.usage?.outputTokens === 7), JSON.stringify(invalid.steps));
 
 useModel('fail500');
 resetFake();
 const failing = await waitForRun((await start(tester.token)).json.runId, finished);
-check('a provider that keeps failing fails the run after one retry', failing.status === 'FAILED' && calls().length === 2, `${failing.status} calls=${calls().length}`);
+check('a provider that keeps failing fails the run after two more tries', failing.status === 'FAILED' && calls().length === 3, `${failing.status} calls=${calls().length}`);
 check('...saying only the status, for a private address', String(failing.error).includes('500') && !String(failing.error).includes('INTERNAL-SECRET-BODY'), String(failing.error));
-check('...and the failed step is recorded without its answer', failing.steps.length === 2 && failing.steps.every((step) => step.status === 'FAILED' && step.attempt >= 1), JSON.stringify(failing.steps));
+check('...and the failed step is recorded without its answer', failing.steps.length === 3 && failing.steps.every((step) => step.status === 'FAILED' && step.attempt >= 1), JSON.stringify(failing.steps));
 
 console.log('--- Cancelling ---');
 useModel('ok');

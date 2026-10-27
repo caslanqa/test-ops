@@ -16,6 +16,13 @@
 //   dup                      the coverage audit says draft 0 repeats the first existing case it was given
 //   fenced, prefixed, think, double   a valid answer wrapped in a code fence / after a sentence / after a <think> block / encoded twice
 //   array                    the answer is a JSON array, not an object
+// How the request asks for the answer decides what these models do (the mode is what the request carries: tools,
+// response_format json_schema, response_format json_object, or nothing):
+//   tools-only               a valid answer only through a tool call; prose otherwise
+//   json-object-only         a valid answer only with response_format json_object; prose otherwise
+//   no-tools                 HTTP 400 "tools are not supported" for a tool call; valid with json_object; prose otherwise
+//   prompt-only              a valid answer only when the request carries neither tools nor response_format
+//   repairs                  prose, until the user message says the previous answer "was rejected"; then valid
 //   slow-after-review        the requirement review is instant, every later call answers after 20 s
 // Control: GET /__last (the last request: path, headers, body), GET /__calls (every request: path, model),
 // POST /__reset, POST /__quit. Start it with `docker compose exec -T app node -` and the file on stdin.
@@ -84,7 +91,7 @@ function cannedOutput(schemaName, model, userText = '') {
   }
 }
 
-function validAnswer(res, anthropic, model, schemaName, output) {
+function validAnswer(res, anthropic, model, schemaName, output, mode = 'JSON_SCHEMA') {
   json(
     res,
     200,
@@ -102,10 +109,26 @@ function validAnswer(res, anthropic, model, schemaName, output) {
           id: 'chatcmpl-fake',
           object: 'chat.completion',
           model,
-          choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(output) }, finish_reason: 'stop' }],
+          choices: [
+            {
+              index: 0,
+              message:
+                mode === 'TOOL_CALL'
+                  ? { role: 'assistant', content: null, tool_calls: [{ id: 'call_fake', type: 'function', function: { name: schemaName, arguments: JSON.stringify(output) } }] }
+                  : { role: 'assistant', content: JSON.stringify(output) },
+              finish_reason: mode === 'TOOL_CALL' ? 'tool_calls' : 'stop',
+            },
+          ],
           usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
         },
   );
+}
+/** Prose where the JSON should be: what a model says when it can't or won't keep to the format. */
+function prose(res, anthropic, model) {
+  const text = 'Sure! I would be happy to help, but I cannot produce JSON for this.';
+  json(res, 200, anthropic
+    ? { id: 'msg_fake', type: 'message', role: 'assistant', model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 11, output_tokens: 4 } }
+    : { id: 'chatcmpl-fake', object: 'chat.completion', model, choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }], usage: { prompt_tokens: 11, completion_tokens: 4, total_tokens: 15 } });
 }
 /** The answer as given text, the way models that don't keep to the schema send it. */
 function wrapped(res, anthropic, model, schemaName, text) {
@@ -151,10 +174,14 @@ const server = http.createServer((req, res) => {
     let body = {};
     try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* an empty or broken body */ }
     const model = body.model;
-    const schemaName = anthropic ? body.tool_choice?.name : body.response_format?.json_schema?.name;
+    const mode = body.tools ? 'TOOL_CALL' : body.response_format?.type === 'json_schema' ? 'JSON_SCHEMA' : body.response_format?.type === 'json_object' ? 'JSON_OBJECT' : 'PROMPT';
+    // Without a schema in the request (json_object, no format) the role in the system prompt says which answer is meant.
+    const systemText = String((body.messages || []).filter((m) => m.role === 'system').map((m) => m.content).join('\n'));
+    const inferred = /connection test/.test(systemText) ? 'connection_test' : /requirement reviewer/.test(systemText) ? 'requirement_review' : /coverage auditor/.test(systemText) ? 'coverage_audit' : /test designer/.test(systemText) ? 'test_design' : undefined;
+    const schemaName = anthropic ? body.tool_choice?.name : (body.tool_choice?.function?.name ?? body.response_format?.json_schema?.name ?? inferred);
     last = { path: req.url, headers: req.headers, body };
     const userText = String((body.messages || []).filter((m) => m.role === 'user').map((m) => m.content).join('\n'));
-    calls.push({ path: req.url, model });
+    calls.push({ path: req.url, model, mode });
 
     switch (model) {
       case 'bad-json':
@@ -169,8 +196,19 @@ const server = http.createServer((req, res) => {
         return wrapped(res, anthropic, model, schemaName, JSON.stringify(JSON.stringify(cannedOutput(schemaName, model, userText))));
       case 'array':
         return wrapped(res, anthropic, model, schemaName, JSON.stringify([cannedOutput(schemaName, model, userText)]));
+      case 'tools-only':
+        return mode === 'TOOL_CALL' ? validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText), mode) : prose(res, anthropic, model);
+      case 'json-object-only':
+        return mode === 'JSON_OBJECT' ? validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText), mode) : prose(res, anthropic, model);
+      case 'no-tools':
+        if (mode === 'TOOL_CALL') return json(res, 400, { error: { message: 'tools are not supported by this server' } });
+        return mode === 'JSON_OBJECT' ? validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText), mode) : prose(res, anthropic, model);
+      case 'prompt-only':
+        return mode === 'PROMPT' ? validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText), mode) : prose(res, anthropic, model);
+      case 'repairs':
+        return /was rejected/.test(userText) ? validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText), mode) : prose(res, anthropic, model);
       case 'invalid':
-        return validAnswer(res, anthropic, model, schemaName, { ok: 'yes' });
+        return validAnswer(res, anthropic, model, schemaName, { ok: 'yes' }, mode);
       case 'fail500':
         return json(res, 500, { error: { message: 'INTERNAL-SECRET-BODY' } });
       case 'unsupported':
@@ -194,7 +232,7 @@ const server = http.createServer((req, res) => {
         if (flakyCalls++ === 0) return notJson(res, anthropic, model);
         return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText));
       default:
-        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText));
+        return validAnswer(res, anthropic, model, schemaName, cannedOutput(schemaName, model, userText), mode);
     }
   });
 });

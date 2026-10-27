@@ -22,7 +22,14 @@ export interface AiSkill<I, O> {
 /** Wraps `validateAgainst` for a skill: a wrong shape is the model's fault and may pass on another try. */
 export function checkShape(schema: JsonSchema, output: unknown): void {
   const problem = validateAgainst(schema, output);
-  if (problem) throw new AiProviderError(`The model's answer doesn't fit the expected shape: ${problem}`, true);
+  if (problem) {
+    // The problem names only what the schema names, never a property the provider made up, so it can be sent back.
+    throw new AiProviderError(`The model's answer doesn't fit the expected shape: ${problem}`, true, {
+      escalate: true,
+      rawAnswer: JSON.stringify(output),
+      problem: `it doesn't fit the expected shape (${problem})`,
+    });
+  }
 }
 
 /** Text cut to `max` characters, so one huge field can't blow up a prompt. */
