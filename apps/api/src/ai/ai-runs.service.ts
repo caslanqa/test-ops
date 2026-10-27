@@ -1,4 +1,4 @@
-import { ConflictException, HttpException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma, ProjectRole, type AiWorkflowRun, type AiWorkflowStep } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { AccessControlService } from "../common/access-control.service";
@@ -10,6 +10,9 @@ import { snapshotOf } from "./ai-snapshot";
 import { ApproveRunDto } from "./dto/approve-run.dto";
 import { ListRunsQueryDto } from "./dto/list-runs-query.dto";
 import { StartRunDto } from "./dto/start-run.dto";
+import { GuidanceResolver } from "./guidance/guidance-resolver.service";
+import { buildSnapshot, publicSnapshot, sameSelection, type GuidanceSnapshot } from "./guidance/guidance-snapshot";
+import type { GuidanceSelection } from "./guidance/resolve-guidance";
 
 /** Starting and cancelling a run needs the right to create cases, as approving it does. */
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
@@ -23,6 +26,7 @@ const stepView = (step: AiWorkflowStep) => ({
   status: step.status,
   attempt: step.attempt,
   mode: step.mode,
+  guidanceTokens: step.guidanceTokens,
   usage: step.usage,
   error: step.error,
   startedAt: step.startedAt,
@@ -56,6 +60,7 @@ export class AiRunsService {
     private readonly settings: AiSettingsService,
     private readonly audit: AuditService,
     private readonly testCases: TestCasesService,
+    private readonly guidanceResolver: GuidanceResolver,
   ) {}
 
   async start(userId: string, projectId: string, dto: StartRunDto) {
@@ -74,6 +79,10 @@ export class AiRunsService {
     if (!requirement || requirement.projectId !== projectId || requirement.archivedAt) {
       throw new NotFoundException("Requirement not found");
     }
+    // The guidance is resolved now, once, and the run keeps what came of it (text included): the steps never read the
+    // live guidance. Before the transaction, so a selection that names what the project can't see is refused first.
+    const selection = this.selectionOf(dto);
+    const snapshot = await buildSnapshot(this.guidanceResolver, projectId, selection);
     const { run, created } = await this.prisma.$transaction(async (tx) => {
       // One start at a time per person: without this, starts that arrive together are all counted before any
       // of them is saved, and the limit lets them all through.
@@ -85,7 +94,11 @@ export class AiRunsService {
       });
       const same = open.find((candidate) => {
         const input = candidate.input as { requirementId?: string; extraContext?: string | null };
-        return input.requirementId === dto.requirementId && (input.extraContext ?? null) === (dto.extraContext ?? null);
+        return (
+          input.requirementId === dto.requirementId &&
+          (input.extraContext ?? null) === (dto.extraContext ?? null) &&
+          sameSelection(candidate.guidance as unknown as GuidanceSnapshot | null, selection)
+        );
       });
       if (same) return { run: same, created: false };
       // The limit is the person's, across projects: what they started in the last 24 hours.
@@ -105,6 +118,7 @@ export class AiRunsService {
           createdById: userId,
           input: { requirementId: dto.requirementId, extraContext: dto.extraContext ?? null },
           providerSnapshot: snapshotOf(source, settings),
+          guidance: snapshot as unknown as Prisma.InputJsonValue,
         },
       });
       return { run: made, created: true };
@@ -129,7 +143,24 @@ export class AiRunsService {
       include: { steps: { orderBy: [{ startedAt: "asc" }, { attempt: "asc" }] } },
     });
     if (!run || run.projectId !== projectId) throw new NotFoundException("Run not found");
-    return { ...summaryView(run), result: run.result, steps: run.steps.map(stepView) };
+    return {
+      ...summaryView(run),
+      // What the run was sent of the team's guidance: titles, versions and sizes, never the text.
+      guidance: publicSnapshot(run.guidance as unknown as GuidanceSnapshot | null),
+      result: run.result,
+      steps: run.steps.map(stepView),
+    };
+  }
+
+  /** The selection a start asks for: what applies now unless it says otherwise; `ids` belong to a list only. */
+  private selectionOf(dto: StartRunDto): GuidanceSelection {
+    const asked = dto.guidance;
+    if (!asked) return { mode: "EFFECTIVE" };
+    if (asked.mode !== "LIST") {
+      if (asked.ids !== undefined) throw new BadRequestException("ids go with mode LIST");
+      return { mode: asked.mode };
+    }
+    return { mode: "LIST", ids: asked.ids ?? [] };
   }
 
   /** The runs of a project, newest first, optionally of one requirement; a summary of each. */

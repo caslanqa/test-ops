@@ -576,7 +576,7 @@ check('...holding the review, the drafts and the audit', first.result?.review?.a
 check('...every draft says what kind of case it is', first.result.drafts.every((draft) => ['positive', 'negative', 'boundary', 'error'].includes(draft.kind)));
 check('the run shows which setting it used', first.providerSnapshot?.source === 'WORKSPACE' && first.providerSnapshot?.endpointHost === '127.0.0.1:8098' && first.providerSnapshot?.model === 'ok', JSON.stringify(first.providerSnapshot));
 check('...and what was asked', first.input?.requirementId === requirement.id && first.input?.extraContext === 'Mention the mobile app.', JSON.stringify(first.input));
-check('a step shows no prompt and no answer, only how it went', keys(first.steps[0]) === 'attempt,endedAt,error,mode,name,skillVersion,startedAt,status,usage', keys(first.steps[0]));
+check('a step shows no prompt and no answer, only how it went', keys(first.steps[0]) === 'attempt,endedAt,error,guidanceTokens,mode,name,skillVersion,startedAt,status,usage', keys(first.steps[0]));
 check('the run carries no provider key', !JSON.stringify(first).includes(SECRET) && !JSON.stringify(first).includes('credential'));
 check('nothing was written to the cases yet', (await caseCount()) === casesBefore);
 const lastPrompt = JSON.stringify((await lastRequest()).body.messages);

@@ -4,6 +4,8 @@ import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AiSettingsService } from "./ai-settings.service";
 import { settingChanged } from "./ai-snapshot";
+import { guidanceForStep, type GuidanceSnapshot, type RunStepName } from "./guidance/guidance-snapshot";
+import { renderTeamGuidance } from "./guidance/resolve-guidance";
 import { AiProviderError, scrubProviderError } from "./provider-error";
 import { modeFor, type Repair } from "./providers/output-mode";
 import { createAiProvider, type AiProvider } from "./providers/provider";
@@ -42,7 +44,7 @@ interface ProviderHandle {
   learnedMode: AiOutputMode | null;
 }
 
-type StepName = "REVIEW" | "DESIGN" | "AUDIT" | "REVISE" | "AUDIT_REVISED";
+type StepName = RunStepName;
 
 /**
  * Carries one claimed run to its next resting place: waiting for approval, failed, or stopped by a cancel. The
@@ -93,8 +95,10 @@ export class AiRunExecutor {
     // switched off, removed or pointed elsewhere while a run waits or works, and the run must not go on sending.
     const getProvider = () => this.currentProvider(run, rememberCredential);
     const context = await this.loadContext(run);
+    // The guidance the run was started with, text included: never the live guidance, which may have changed since.
+    const guidance = run.guidance as unknown as GuidanceSnapshot | null;
     const step = <I, O>(name: StepName, skill: AiSkill<I, O>, input: I) =>
-      this.runStep(run.id, getProvider, name, skill, input);
+      this.runStep(run.id, getProvider, name, skill, input, guidanceForStep(guidance, name));
 
     const review: Review = await step("REVIEW", requirementReviewer, context);
     const design = await step("DESIGN", testDesigner, { context, review });
@@ -204,7 +208,11 @@ export class AiRunExecutor {
     name: StepName,
     skill: AiSkill<I, O>,
     input: I,
+    guidance: { items: { title: string; body: string }[]; tokens: number },
   ): Promise<O> {
+    // The step's own prompt, then the team's guidance for it (nothing when none applies).
+    const block = renderTeamGuidance(guidance.items);
+    const system = block === "" ? skill.system : `${skill.system}\n\n${block}`;
     // How many times asking another way is due, and what to quote back on the next try.
     let ways: number | undefined;
     let previous: Repair | undefined;
@@ -225,7 +233,15 @@ export class AiRunExecutor {
       const mode = anthropic ? "TOOL_CALL" : modeFor(outputMode, learnedMode, ways);
       const user = skill.user(input);
       const row = await this.prisma.aiWorkflowStep.create({
-        data: { runId, name, skillVersion: skill.version, attempt: (rows[rows.length - 1]?.attempt ?? 0) + 1, mode, input: { user } },
+        data: {
+          runId,
+          name,
+          skillVersion: skill.version,
+          attempt: (rows[rows.length - 1]?.attempt ?? 0) + 1,
+          mode,
+          guidanceTokens: guidance.items.length > 0 ? guidance.tokens : null,
+          input: { user },
+        },
       });
       // The claim has to outlast the call, whatever the setting's timeout is.
       await this.extendLock(runId, Math.max(RUN_LOCK_MS, timeoutMs + 60_000));
@@ -233,7 +249,7 @@ export class AiRunExecutor {
       let usage: { inputTokens: number; outputTokens: number } | undefined;
       try {
         const result = await provider.generate({
-          system: skill.system,
+          system,
           user,
           schemaName: skill.schemaName,
           schema: stripBounds(skill.schema),

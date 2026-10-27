@@ -24,7 +24,8 @@
 //   prompt-only              a valid answer only when the request carries neither tools nor response_format
 //   repairs                  prose, until the user message says the previous answer "was rejected"; then valid
 //   slow-after-review        the requirement review is instant, every later call answers after 20 s
-// Control: GET /__last (the last request: path, headers, body), GET /__calls (every request: path, model),
+// Control: GET /__last (the last request: path, headers, body), GET /__calls (every request: path, model, mode,
+// and the system prompt of an OpenAI-compatible one),
 // POST /__reset, POST /__quit. Start it with `docker compose exec -T app node -` and the file on stdin.
 const fs = require('fs');
 const http = require('http');
@@ -181,7 +182,7 @@ const server = http.createServer((req, res) => {
     const schemaName = anthropic ? body.tool_choice?.name : (body.tool_choice?.function?.name ?? body.response_format?.json_schema?.name ?? inferred);
     last = { path: req.url, headers: req.headers, body };
     const userText = String((body.messages || []).filter((m) => m.role === 'user').map((m) => m.content).join('\n'));
-    calls.push({ path: req.url, model, mode });
+    calls.push({ path: req.url, model, mode, system: systemText });
 
     switch (model) {
       case 'bad-json':
