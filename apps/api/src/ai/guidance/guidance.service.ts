@@ -11,11 +11,13 @@ import {
 import { AuditService } from "../../audit/audit.service";
 import { AccessControlService } from "../../common/access-control.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { ImportPreviewDto } from "./dto/import-preview.dto";
 import { SaveGuidanceDto, UpdateGuidanceDto } from "./dto/save-guidance.dto";
 import { ToggleGuidanceDto } from "./dto/toggle-guidance.dto";
 import { estimateTokens, GUIDANCE_LIMITS, normalizeSteps } from "./guidance-limits";
 import { GuidanceResolver, type ResolvedGuidance } from "./guidance-resolver.service";
 import type { GuidanceSelection } from "./resolve-guidance";
+import { parseSkillMarkdown } from "./skill-markdown";
 
 /** The owner of a guidance: a workspace (shared by all its projects) or one project. */
 export type GuidanceOwner = { kind: "WORKSPACE"; id: string } | { kind: "PROJECT"; id: string };
@@ -125,6 +127,30 @@ export class GuidanceService {
   async preview(userId: string, projectId: string, step: AiGuidanceStep, selection: GuidanceSelection): Promise<ResolvedGuidance> {
     await this.requireAdmin(userId, { kind: "PROJECT", id: projectId }, true);
     return this.resolver.resolve(projectId, step, selection);
+  }
+
+  /**
+   * What a markdown file (a SKILL.md, say) would make as a guidance, for the dialog to fill in; nothing is saved
+   * and nothing is fetched: the browser read the file and sent its text. A file over 100000 bytes, with a NUL
+   * character, with no text, or with more text than a guidance can hold is a 400 that says which.
+   */
+  async previewImport(userId: string, owner: GuidanceOwner, dto: ImportPreviewDto) {
+    await this.requireAdmin(userId, owner, true);
+    if (dto.content.includes("\u0000")) throw new BadRequestException("The file contains a NUL character, so it is not a text file");
+    if (Buffer.byteLength(dto.content, "utf8") > GUIDANCE_LIMITS.uploadBytes) {
+      throw new BadRequestException(`The file is too large: at most ${GUIDANCE_LIMITS.uploadBytes.toLocaleString("en")} bytes`);
+    }
+    const parsed = parseSkillMarkdown(dto.content);
+    if (parsed.body.length > GUIDANCE_LIMITS.body) {
+      throw new BadRequestException(`The text is longer than the ${GUIDANCE_LIMITS.body.toLocaleString("en")} characters a guidance can hold`);
+    }
+    return {
+      ...parsed,
+      sourceName: dto.fileName,
+      // A suggestion for the dialog; the person decides.
+      suggestedKind: /\b(playwright|cypress|selenium)\b/i.test(`${parsed.title} ${parsed.body}`) ? "AUTOMATION_CODE" : "CASE_CONTENT",
+      estimatedTokens: estimateTokens(parsed.body),
+    };
   }
 
   /** The guidance of an owner; for a project also the workspace's, with whether each applies to the project. */

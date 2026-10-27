@@ -5,6 +5,7 @@ import type { Response } from "express";
 import { AuthenticatedUser, CurrentUser } from "../../common/decorators/current-user.decorator";
 import { WebSessionOnly } from "../../common/decorators/web-session-only.decorator";
 import { PreviewGuidanceQuery } from "./dto/effective-guidance.query";
+import { ImportPreviewDto } from "./dto/import-preview.dto";
 import { SaveGuidanceDto, UpdateGuidanceDto } from "./dto/save-guidance.dto";
 import { ToggleGuidanceDto } from "./dto/toggle-guidance.dto";
 import { guidanceAnswer, selectionFromQuery } from "./guidance-view";
@@ -34,6 +35,17 @@ export class GuidanceController {
     @Body() dto: SaveGuidanceDto,
   ) {
     return this.guidance.create(user.id, { kind: "WORKSPACE", id: workspaceId }, dto);
+  }
+
+  /** What a markdown file would make as a workspace guidance (the text of the file in the body); nothing is saved. */
+  @Post("workspaces/:workspaceId/ai/guidance/import/preview")
+  @HttpCode(200)
+  importPreviewWorkspace(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("workspaceId") workspaceId: string,
+    @Body() dto: ImportPreviewDto,
+  ) {
+    return this.guidance.previewImport(user.id, { kind: "WORKSPACE", id: workspaceId }, dto);
   }
 
   /** Switches a built-in pack on or off for the whole workspace. */
@@ -105,6 +117,17 @@ export class GuidanceController {
     @Body() dto: SaveGuidanceDto,
   ) {
     return this.guidance.create(user.id, { kind: "PROJECT", id: projectId }, dto);
+  }
+
+  /** What a markdown file would make as a project guidance (the text of the file in the body); nothing is saved. */
+  @Post("projects/:projectId/ai/guidance/import/preview")
+  @HttpCode(200)
+  importPreviewProject(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() dto: ImportPreviewDto,
+  ) {
+    return this.guidance.previewImport(user.id, { kind: "PROJECT", id: projectId }, dto);
   }
 
   /** Switches a built-in pack, or a guidance of the workspace, on or off for this project alone. */

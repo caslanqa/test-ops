@@ -14,6 +14,8 @@ export const GUIDANCE_LIMITS = {
   perOwner: 100,
   /** The most guidance a run (or a preview) can name by id. */
   selectionIds: 20,
+  /** The largest markdown file that can be read as a guidance, in bytes. */
+  uploadBytes: 100_000,
 } as const;
 
 /** The most tokens of guidance one step's prompt may carry: an AI setting's `guidanceBudgetTokens`; 0 means no limit. */

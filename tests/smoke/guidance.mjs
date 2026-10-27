@@ -772,5 +772,68 @@ check('the run that was started with NONE sent no guidance', heard.slice(3, 6).l
 inApp(`require('fs').rmSync('/tmp/fake-ai-fast', { force: true })`);
 setR(`model = 'ok'`);
 
+// ---------------------------------------------------------------------------------------------------------------
+// Importing a markdown file: what it would make, with nothing saved.
+// ---------------------------------------------------------------------------------------------------------------
+console.log('--- Import: reading a SKILL.md file (the pure parts) ---');
+const md = JSON.parse(
+  inApp(`
+    const { splitFrontmatter, parseSkillMarkdown } = require('./dist/ai/guidance/skill-markdown');
+    const attempt = (fn) => { try { return { ok: fn() }; } catch (error) { return { error: String(error.message) }; } };
+    const ecc = ['---', 'name: e2e-testing', 'description: Playwright patterns for end-to-end tests.', 'metadata:', '  origin: ECC', 'tools: [Read, "Write"]', 'allowed-tools: Read, Write', 'model: opus', '---', '# Heading', '', 'Body text here.'].join('\\n');
+    const out = {};
+    out.ecc = parseSkillMarkdown(ecc);
+    out.eccFields = splitFrontmatter(ecc).fields;
+    out.crlf = parseSkillMarkdown('\\uFEFF' + ecc.split('\\n').join('\\r\\n'));
+    out.quoted = [parseSkillMarkdown('---\\nname: q\\ndescription: "a: b"\\n---\\nText').summary, parseSkillMarkdown("---\\nname: q\\ndescription: 'c: d'\\n---\\nText").summary];
+    out.plain = parseSkillMarkdown('Intro line\\n\\n# My rule\\n\\nText');
+    out.unterminated = parseSkillMarkdown('---\\nname: x\\nno end\\n# H\\nbody');
+    out.onlyBlock = attempt(() => parseSkillMarkdown('---\\nname: x\\n---\\n'));
+    out.empty = attempt(() => parseSkillMarkdown('   \\n'));
+    out.noTitle = attempt(() => parseSkillMarkdown('Just some text without a heading'));
+    out.long = parseSkillMarkdown('---\\nname: big\\n---\\n' + 'a'.repeat(5000)).body.length;
+    out.clipped = [parseSkillMarkdown('---\\nname: ' + 'n'.repeat(300) + '\\n---\\nText').title.length, parseSkillMarkdown('---\\nname: n\\ndescription: ' + 'd'.repeat(700) + '\\n---\\nText').summary.length];
+    out.blankName = parseSkillMarkdown('---\\nname:\\ndescription: only a description\\n---\\n# From heading\\nText');
+    out.noSplit = splitFrontmatter('no block here');
+    process.stdout.write(JSON.stringify(out));
+  `),
+);
+check('a SKILL.md header gives a title, a summary and the text after it', md.ecc.title === 'E2e testing' && md.ecc.summary === 'Playwright patterns for end-to-end tests.' && md.ecc.body.startsWith('# Heading') && md.ecc.body.endsWith('Body text here.') && !md.ecc.body.includes('name:'), JSON.stringify(md.ecc));
+check('...it reads scalar keys and inline lists, and ignores nested ones', md.eccFields.name === 'e2e-testing' && same(md.eccFields.tools, ['Read', 'Write']) && md.eccFields['allowed-tools'] === 'Read, Write' && md.eccFields.origin === undefined, JSON.stringify(md.eccFields));
+check('Windows line endings and a byte-order mark change nothing', same(md.crlf, md.ecc), JSON.stringify(md.crlf));
+check('a quoted description keeps its colon', same(md.quoted, ['a: b', 'c: d']), JSON.stringify(md.quoted));
+check('without a header the first heading is the title and the text is the whole file', md.plain.title === 'My rule' && md.plain.summary === null && md.plain.body.startsWith('Intro line'), JSON.stringify(md.plain));
+check('a header that never ends is no header', md.unterminated.title === 'H' && md.unterminated.body.startsWith('---'), JSON.stringify(md.unterminated));
+check('a file with a header and no text is refused', md.onlyBlock.error !== undefined && md.empty.error !== undefined, JSON.stringify([md.onlyBlock, md.empty]));
+check('a file with neither a name nor a heading is refused', md.noTitle.error !== undefined, JSON.stringify(md.noTitle));
+check('a long single line is kept whole', md.long === 5000, String(md.long));
+check('a title is cut at 200 characters and a summary at 500', same(md.clipped, [200, 500]), JSON.stringify(md.clipped));
+check('a blank name falls back to the first heading', md.blankName.title === 'From heading' && md.blankName.summary === 'only a description', JSON.stringify(md.blankName));
+check('text without a header has no fields', same(md.noSplit, { fields: {}, body: 'no block here' }), JSON.stringify(md.noSplit));
+
+console.log('--- Import: the preview route ---');
+const IW = `${WG}/import/preview`;
+const IP = `${PG}/import/preview`;
+const eccFile = ['---', 'name: playwright-e2e', 'description: Keep Playwright tests stable.', '---', '# Playwright', '', 'Use getByRole, never CSS paths. ' + MARK].join('\n');
+const guidanceBefore = count('ai_guidance', `"workspaceId" = ${q(wsA.id)} OR "projectId" IN (${q(projA.id)}, ${q(projA2.id)})`);
+const prev = await expectStatus('a workspace admin previews a file', 200, admin, 'POST', IW, { fileName: 'SKILL.md', content: eccFile });
+check('...it says what the file would make', prev.json?.title === 'Playwright e2e' && prev.json.summary === 'Keep Playwright tests stable.' && prev.json.body.startsWith('# Playwright') && prev.json.sourceName === 'SKILL.md', prev.text);
+check('...the tokens it would cost and a kind to suggest', prev.json?.estimatedTokens === tokens(prev.json.body) && prev.json.suggestedKind === 'AUTOMATION_CODE', prev.text);
+const plainPrev = await expectStatus('a project admin previews a file for the project', 200, pa.token, 'POST', IP, { fileName: 'rules.md', content: '# Name cases\n\nName cases after behaviour.' });
+check('...a text that is not about automation suggests case content', plainPrev.json?.suggestedKind === 'CASE_CONTENT' && plainPrev.json.summary === null, plainPrev.text);
+check('...and nothing was saved', count('ai_guidance', `"workspaceId" = ${q(wsA.id)} OR "projectId" IN (${q(projA.id)}, ${q(projA2.id)})`) === guidanceBefore);
+const tooBig = await call(admin, 'POST', IW, { fileName: 'big.md', content: `# Big\n${'x'.repeat(100_001)}` });
+check('a file over 100000 bytes is refused', tooBig.status === 400 && /too large/i.test(tooBig.text), `${tooBig.status} ${tooBig.text}`);
+await expectStatus('a file with a NUL character is refused', 400, admin, 'POST', IW, { fileName: 'x.md', content: '# Title\nText\u0000more' });
+await expectStatus('a file that is only a header is refused', 400, admin, 'POST', IW, { fileName: 'x.md', content: '---\nname: x\n---\n' });
+const tooLong = await call(admin, 'POST', IW, { fileName: 'x.md', content: `# Long\n${'y'.repeat(20_001)}` });
+check('a text longer than a guidance can hold is refused, saying so', tooLong.status === 400 && /20000|20,000/.test(tooLong.text), `${tooLong.status} ${tooLong.text}`);
+await expectStatus('a request without a file name is refused', 400, admin, 'POST', IW, { content: '# Title\nText' });
+await expectStatus('a request with another field is refused', 400, admin, 'POST', IW, { fileName: 'x.md', content: '# Title\nText', save: true });
+for (const who of [tester, automation, viewer, outsider, { label: 'an API token', token: apiToken }]) {
+  for (const path of [IW, IP]) await expectStatus(`${who.label} cannot preview a file (${path.startsWith('/work') ? 'workspace' : 'project'})`, 403, who.token, 'POST', path, { fileName: 'x.md', content: '# Title\nText' });
+}
+await expectStatus('a project admin cannot preview on the workspace route', 403, pa.token, 'POST', IW, { fileName: 'x.md', content: '# Title\nText' });
+
 console.log(failures === 0 ? '\nAll guidance checks passed.' : `\n${failures} guidance check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
