@@ -83,6 +83,26 @@ const lists = await Promise.all([1, 2, 3].map(() => ok(one, 'GET', '/workspaces'
 const demos = lists[0].filter((w) => w.isDemo);
 check('the first listing has one DEMO workspace', demos.length === 1 && demos[0].name === 'DEMO', JSON.stringify(lists[0]));
 check('...in every parallel listing', lists.every((l) => l.filter((w) => w.isDemo).length === 1 && l.find((w) => w.isDemo).id === demos[0].id));
+// A listing that arrives while the demo is being made waits for it: what it shows is whole, never half-made.
+const late = await register('late');
+let making = true;
+const listThenCount = async () => {
+  const own = (await ok(late, 'GET', '/workspaces')).filter((w) => w.isDemo);
+  if (own.length !== 1) return `${own.length} demos`;
+  const shop = (await ok(late, 'GET', `/workspaces/${own[0].id}/projects`)).find((p) => p.key === 'SHOP');
+  return shop ? (await ok(late, 'GET', `/projects/${shop.id}/cases`)).length : 'no project yet';
+};
+const overlapping = [listThenCount().finally(() => { making = false; })];
+while (making) {
+  overlapping.push(listThenCount());
+  await new Promise((resolve) => setTimeout(resolve, 15));
+}
+const counts = await Promise.all(overlapping);
+check(
+  `...whole in the ${counts.length - 1} listings that arrive while it is being made`,
+  counts.length > 1 && counts.every((count) => count === 17),
+  JSON.stringify(counts),
+);
 const demo = demos[0];
 const ws = await ok(one, 'GET', `/workspaces/${demo.id}`);
 check('...where they are the admin', ws.currentUserRole === 'ADMIN' && ws.isDemo === true, JSON.stringify(ws));

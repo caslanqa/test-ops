@@ -40,6 +40,7 @@ model User {
   auditLogEntries      AuditLog[]
   testCaseHistory      TestCaseHistory[]
   sentInvitations      WorkspaceInvitation[]
+  aiRuns               AiWorkflowRun[]   @relation("AiRunCreatedBy")
 
   @@map("users")
 }
@@ -62,6 +63,7 @@ model Workspace {
   invitations WorkspaceInvitation[]
   projects    Project[]
   auditLog    AuditLog[]
+  aiSettings  AiSettings?
 
   @@map("workspaces")
 }
@@ -135,6 +137,8 @@ model Project {
   auditLog     AuditLog[]
   webhook      ProjectWebhook?
   invitations  WorkspaceInvitation[]
+  aiSettings   AiSettings?
+  aiRuns       AiWorkflowRun[]
 
   @@unique([workspaceId, key])
   @@map("projects")
@@ -671,4 +675,132 @@ model AuditLog {
   @@index([workspaceId])
   @@index([projectId])
   @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// AI assistant (docs/superpowers/specs/2026-10-23-ai-assistant-foundation-design.md)
+// ---------------------------------------------------------------------------
+
+enum AiProviderKind {
+  ANTHROPIC
+  OPENAI_COMPATIBLE
+}
+
+/// How an OpenAI-compatible server is asked for a structured answer. AUTO tries JSON_SCHEMA, then TOOL_CALL, then
+/// JSON_OBJECT, and remembers (learnedMode) what worked; the others pin one way. PROMPT (the schema in the prompt
+/// alone) is only ever pinned. Anthropic always answers through a forced tool.
+enum AiOutputMode {
+  AUTO
+  JSON_SCHEMA
+  TOOL_CALL
+  JSON_OBJECT
+  PROMPT
+}
+
+/// Where the AI provider is defined: one row per workspace (its default) and one per project (an override
+/// that replaces the default whole). Exactly one of workspaceId and projectId is set; the migration adds
+/// that as a CHECK, which Prisma doesn't model. Only workspace admins and project admins write it.
+model AiSettings {
+  id                   String         @id @default(uuid())
+  workspaceId          String?        @unique
+  projectId            String?        @unique
+  enabled              Boolean        @default(false)
+  provider             AiProviderKind
+  model                String
+  /// OpenAI-compatible: the base URL including /v1. Anthropic: the base URL, or null for the public API.
+  endpoint             String?
+  /// The provider key, encrypted with AI_ENCRYPTION_KEY (common/secret-box.ts); never returned.
+  credentialCipher     String?
+  maxOutputTokens      Int            @default(8192)
+  requestTimeoutMs     Int            @default(120000)
+  maxRunsPerUserPerDay Int            @default(20)
+  outputMode           AiOutputMode   @default(AUTO)
+  /// What AUTO learned from runs and tests (never AUTO or PROMPT); cleared when the connection or outputMode changes.
+  learnedMode          AiOutputMode?
+  /// Set by a passing connection test, cleared by any change to provider, model, endpoint or key.
+  /// AI can only be switched on while it is set.
+  testedAt             DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  updatedById          String?
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("ai_settings")
+}
+
+enum AiWorkflowType {
+  REQUIREMENT_TO_CASES
+}
+
+enum AiRunStatus {
+  QUEUED
+  RUNNING
+  /// The drafts are ready and wait for a person to approve them; nothing is written to cases before that.
+  AWAITING_APPROVAL
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AiStepStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// One run of an AI workflow on a project (ai/ai-worker.service.ts). The API only queues it; a worker loop in
+/// the API process claims it, and a claim that outlives lockedUntil is taken over, so a crash loses nothing.
+model AiWorkflowRun {
+  id               String         @id @default(uuid())
+  type             AiWorkflowType
+  projectId        String
+  createdById      String
+  status           AiRunStatus    @default(QUEUED)
+  /// What the person asked for: { requirementId, extraContext }.
+  input            Json
+  /// Which setting the run was started with: provider, model, endpoint host, source, settings id. Never the key.
+  providerSnapshot Json
+  /// { review, drafts, audit } once the drafts are ready.
+  result           Json?
+  error            String?
+  availableAt      DateTime       @default(now())
+  lockedUntil      DateTime?
+  createdAt        DateTime       @default(now())
+  startedAt        DateTime?
+  finishedAt       DateTime?
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User             @relation("AiRunCreatedBy", fields: [createdById], references: [id])
+  steps     AiWorkflowStep[]
+
+  @@index([status, availableAt])
+  @@index([projectId, createdAt])
+  @@map("ai_workflow_runs")
+}
+
+/// One model call of a run. A step that has to be repeated gets a new row with the next attempt number.
+model AiWorkflowStep {
+  id           String       @id @default(uuid())
+  runId        String
+  /// REVIEW, DESIGN, AUDIT, REVISE or AUDIT_REVISED (the audit that follows a revision).
+  name         String
+  skillVersion Int
+  status       AiStepStatus @default(RUNNING)
+  attempt      Int
+  /// How the provider was asked for the answer (an AiOutputMode other than AUTO).
+  mode         String?
+  /// What was sent to the provider; project data, so it is never part of an API answer.
+  input        Json
+  output       Json?
+  usage        Json?
+  error        String?
+  startedAt    DateTime     @default(now())
+  endedAt      DateTime?
+
+  run AiWorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, name, attempt])
+  @@map("ai_workflow_steps")
 }

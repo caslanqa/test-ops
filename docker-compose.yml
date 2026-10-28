@@ -29,11 +29,17 @@ services:
     # connections; after the grace period Docker stops it forcibly.
     init: true
     stop_grace_period: 30s
+    # Lets the app reach a model server on the machine that runs Docker, as http://host.docker.internal:11434/v1.
+    # Docker Desktop has that name already; on Linux this line maps it to the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-testops}:${POSTGRES_PASSWORD:-testops}@postgres:5432/${POSTGRES_DB:-testops}?schema=public
       # No default: compose stops if it is empty; the app does not start with the example/a short value.
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is not set; add it to .env (scripts/start.sh generates one)}"
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      # Encrypts saved AI provider keys (64 hex characters). Empty: a provider key can't be saved.
+      AI_ENCRYPTION_KEY: ${AI_ENCRYPTION_KEY:-}
       # Self-registration ("Create one" link on the login screen); if false, people join through workspace invitation links.
       SELF_REGISTRATION: ${SELF_REGISTRATION:-true}
       # The built-in DEMO workspace every signed-in user can look around in, read-only; false hides it.

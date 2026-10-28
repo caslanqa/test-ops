@@ -85,7 +85,8 @@ export class DemoService implements OnApplicationBootstrap {
    * the next listing, and never fails the listing itself.
    */
   async ensureFor(userId: string): Promise<void> {
-    if (!this.enabled || this.handled.has(userId)) return;
+    // `handled` is set as soon as the demo is claimed, before it is whole: while one is being made, wait for it.
+    if (!this.enabled || (this.handled.has(userId) && !this.inFlight.has(userId))) return;
     await this.once(userId, async () => {
       // Claimed in the database first, so a second app process or a retry never makes another.
       const claimed = await this.prisma.user.updateMany({

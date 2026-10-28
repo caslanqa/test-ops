@@ -15,7 +15,9 @@ import { BlockList, isIP, type LookupFunction } from "net";
  * internal network.
  */
 
-const blocked = new BlockList();
+// One list per address family: Node's BlockList checks an IPv4 address as an IPv4-mapped IPv6 one, so the IPv6
+// "mapped" rule below, in the same list as these ranges, would match every IPv4 address, public ones included.
+const blocked4 = new BlockList();
 for (const [network, prefix] of [
   ["0.0.0.0", 8], // "this" network
   ["10.0.0.0", 8], // private
@@ -32,10 +34,11 @@ for (const [network, prefix] of [
   ["224.0.0.0", 4], // multicast
   ["240.0.0.0", 4], // reserved and broadcast
 ] as const) {
-  blocked.addSubnet(network, prefix, "ipv4");
+  blocked4.addSubnet(network, prefix, "ipv4");
 }
 // IPv6 forms that carry an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo) are refused
 // whole: written in hex (::ffff:7f00:1) they would otherwise slip past the IPv4 list.
+const blocked6 = new BlockList();
 for (const [network, prefix] of [
   ["::", 96], // unspecified, loopback and IPv4-compatible
   ["::ffff:0:0", 96], // IPv4-mapped
@@ -50,18 +53,98 @@ for (const [network, prefix] of [
   ["fec0::", 10], // site-local (deprecated)
   ["ff00::", 8], // multicast
 ] as const) {
-  blocked.addSubnet(network, prefix, "ipv6");
+  blocked6.addSubnet(network, prefix, "ipv6");
 }
 
 /** Whether `address` belongs to a private, local or reserved network. */
 export function isPrivateAddress(address: string): boolean {
   const version = isIP(address);
-  if (version === 4) return blocked.check(address, "ipv4");
+  if (version === 4) return blocked4.check(address, "ipv4");
   if (version !== 6) return true;
-  return blocked.check(address, "ipv6");
+  return blocked6.check(address, "ipv6");
+}
+
+/**
+ * Addresses no service can sit on, which the AI provider calls refuse even though private ones are allowed
+ * (a model on the same machine or network is a supported setup): link-local, which includes cloud metadata,
+ * "this network", multicast and reserved. IPv6 forms that carry an IPv4 address are refused whole, as above.
+ */
+const reserved4 = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8], // "this" network
+  ["169.254.0.0", 16], // link-local, including cloud metadata
+  ["192.0.2.0", 24], // documentation
+  ["198.51.100.0", 24], // documentation
+  ["203.0.113.0", 24], // documentation
+  ["224.0.0.0", 4], // multicast
+  ["240.0.0.0", 4], // reserved and broadcast
+  // Cloud metadata services outside the link-local range, which the private ranges above would otherwise let through.
+  ["100.100.100.200", 32], // Alibaba Cloud
+  ["168.63.129.16", 32], // Azure wire server
+  ["192.0.0.192", 32], // Oracle Cloud
+] as const) {
+  reserved4.addSubnet(network, prefix, "ipv4");
+}
+const reserved6 = new BlockList();
+for (const [network, prefix] of [
+  ["::", 96], // unspecified and IPv4-compatible; ::1 is let through below
+  ["::ffff:0:0", 96], // IPv4-mapped
+  ["64:ff9b::", 96], // NAT64
+  ["64:ff9b:1::", 48], // local-use NAT64
+  ["100::", 64], // discard
+  ["2001::", 32], // Teredo
+  ["2001:db8::", 32], // documentation
+  ["2002::", 16], // 6to4
+  ["fe80::", 10], // link-local
+  ["fec0::", 10], // site-local (deprecated)
+  ["ff00::", 8], // multicast
+  ["fd00:ec2::254", 128], // AWS metadata over IPv6, inside the unique local range
+] as const) {
+  reserved6.addSubnet(network, prefix, "ipv6");
+}
+const loopback6 = new BlockList();
+loopback6.addAddress("::1", "ipv6");
+
+/** Whether `address` is link-local, "this network", multicast or reserved (loopback and private ranges are not). */
+export function isReservedAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) return reserved4.check(address, "ipv4");
+  if (version !== 6) return true;
+  if (loopback6.check(address, "ipv6")) return false;
+  return reserved6.check(address, "ipv6");
 }
 
 export class WebhookAddressError extends Error {}
+
+export class AiEndpointError extends Error {}
+
+/**
+ * Checks an AI provider endpoint before it is saved: http(s), no credentials in it, and no IP literal that is
+ * link-local, multicast or reserved. localhost and private addresses pass. Names are checked when the
+ * connection is made, so a name that later resolves to a refused address is still caught.
+ */
+export function assertAiEndpoint(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new AiEndpointError("The endpoint isn't a valid URL");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new AiEndpointError("The endpoint must start with https:// or http://");
+  }
+  if (url.username || url.password) {
+    throw new AiEndpointError("Put the provider key in the key field, not in the endpoint");
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host) && isReservedAddress(host)) {
+    throw new AiEndpointError("The endpoint points to a link-local, multicast or reserved address");
+  }
+  if (url.protocol === "http:" && isIP(host) && !isPrivateAddress(host)) {
+    throw new AiEndpointError("An http:// endpoint on a public address would send project data in clear text; use https://");
+  }
+  return url;
+}
 
 /** Checks a webhook URL before it is saved: http(s), a host, and no private IP literal. */
 export function assertWebhookUrl(raw: string, allowPrivate: boolean): URL {
@@ -86,20 +169,39 @@ export function assertWebhookUrl(raw: string, allowPrivate: boolean): URL {
 
 export interface PostResult {
   status: number;
-  /** The start of the response body, for showing why a call failed. */
+  /** The start of the response body (`maxChars` of it), for showing why a call failed. */
   body: string;
+  /** The answer was longer than `maxChars`, so `body` is only its start. */
+  truncated: boolean;
+  /** The address that was connected to, so callers can tell whether the answer came from a private network. */
+  remoteAddress: string | undefined;
 }
 
 /**
  * POSTs `body` to `url`; rejects on network errors, refused addresses, and when the whole call
  * (connecting, sending, and the answer) takes longer than `timeoutMs`. Only the start of the answer
- * is read; the rest is dropped, so a server that keeps sending can't hold the call open.
+ * (`maxChars`, 1000 unless asked) is read; the rest is dropped, so a server that keeps sending can't hold
+ * the call open. `refuseReserved` additionally refuses link-local, multicast and reserved addresses, for
+ * callers that set `allowPrivate`; `refuseCleartextPublic` refuses http:// to a public address, so nothing
+ * private is sent in clear text over the internet.
  */
 export function safePost(
   url: URL,
   body: string,
   headers: Record<string, string>,
-  { allowPrivate, timeoutMs = 10_000 }: { allowPrivate: boolean; timeoutMs?: number },
+  {
+    allowPrivate,
+    refuseReserved = false,
+    refuseCleartextPublic = false,
+    maxChars = 1000,
+    timeoutMs = 10_000,
+  }: {
+    allowPrivate: boolean;
+    refuseReserved?: boolean;
+    refuseCleartextPublic?: boolean;
+    maxChars?: number;
+    timeoutMs?: number;
+  },
 ): Promise<PostResult> {
   const lookup: LookupFunction = (hostname, options, callback) => {
     dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
@@ -108,6 +210,12 @@ export function safePost(
       const refused = !allowPrivate && list.some((a) => isPrivateAddress(a.address));
       if (refused || list.length === 0) {
         return callback(new WebhookAddressError(`${hostname} resolves to a private or local network address`), "", 0);
+      }
+      if (refuseReserved && list.some((a) => isReservedAddress(a.address))) {
+        return callback(new WebhookAddressError(`${hostname} resolves to a link-local, multicast or reserved address`), "", 0);
+      }
+      if (refuseCleartextPublic && url.protocol === "http:" && list.some((a) => !isPrivateAddress(a.address))) {
+        return callback(new WebhookAddressError(`${hostname} is a public address; use https:// so project data isn't sent in clear text`), "", 0);
       }
       if ((options as dns.LookupOptions).all) return (callback as (e: null, a: dns.LookupAddress[]) => void)(null, list);
       callback(null, list[0].address, list[0].family);
@@ -118,6 +226,14 @@ export function safePost(
     const host = url.hostname.replace(/^\[|\]$/g, "");
     if (!allowPrivate && isIP(host) && isPrivateAddress(host)) {
       reject(new WebhookAddressError("The webhook URL points to a private or local network address"));
+      return;
+    }
+    if (refuseReserved && isIP(host) && isReservedAddress(host)) {
+      reject(new WebhookAddressError("The URL points to a link-local, multicast or reserved address"));
+      return;
+    }
+    if (refuseCleartextPublic && url.protocol === "http:" && isIP(host) && !isPrivateAddress(host)) {
+      reject(new WebhookAddressError("The URL is a public address; use https:// so project data isn't sent in clear text"));
       return;
     }
     let settled = false;
@@ -137,14 +253,20 @@ export function safePost(
       },
       (response) => {
         let text = "";
+        const remoteAddress = response.socket?.remoteAddress;
         const done = () => {
-          finish({ status: response.statusCode ?? 0, body: text.slice(0, 1000) });
+          finish({
+            status: response.statusCode ?? 0,
+            body: text.slice(0, maxChars),
+            truncated: text.length >= maxChars,
+            remoteAddress,
+          });
           response.destroy();
         };
         response.setEncoding("utf8");
         response.on("data", (chunk: string) => {
           text += chunk;
-          if (text.length >= 1000) done();
+          if (text.length >= maxChars) done();
         });
         response.on("end", done);
         response.on("error", (error) => finish(error));

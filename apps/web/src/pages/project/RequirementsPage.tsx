@@ -1,6 +1,6 @@
 import { Fragment, useId, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, ChevronRight, Link2, ListChecks, Pencil, Plus } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Archive, ArchiveRestore, ChevronRight, Link2, ListChecks, Pencil, Plus, Sparkles } from 'lucide-react';
 import { api } from '../../api/client';
 import { ArchivedToggle } from '../../components/ArchivedToggle';
 import { CaseChecklist, type ChecklistCase } from '../../components/CaseChecklist';
@@ -11,6 +11,7 @@ import { useNotice } from '../../lib/notice';
 import { EmptyState, FormError, LoadError, Loading, PageHeader } from '../../components/Page';
 import { ResultRibbon } from '../../components/ResultRibbon';
 import { StatusChip, Tag } from '../../components/StatusChip';
+import { OPEN_RUN_STATUSES, type AiRunSummary } from '../../lib/ai';
 import { changedFields, hasChanges } from '../../lib/changes';
 import { useFocusFallback } from '../../lib/focus';
 import { removeLink } from '../../lib/links';
@@ -305,6 +306,22 @@ export function RequirementsPage() {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [actionError, setActionError] = useState<string | null>(null);
   const { notify } = useNotice();
+  const navigate = useNavigate();
+  // The requirement a run is being started for; the button waits, so a double click starts one run.
+  const [starting, setStarting] = useState<string | null>(null);
+  // Whether AI is on for the project decides whether the rows get a "Draft test cases" action.
+  const aiStatus = useResource(
+    () => api.get<{ enabled: boolean }>(`/projects/${projectId}/ai/status`).catch(() => ({ enabled: false })),
+    [projectId],
+  );
+  const aiEnabled = Boolean(aiStatus.data?.enabled);
+  // The newest runs of the project; a requirement with a run that is going or waiting links to it instead.
+  const aiRuns = useResource(
+    () => (aiEnabled ? api.get<AiRunSummary[]>(`/projects/${projectId}/ai/runs?limit=100`).catch(() => []) : Promise.resolve([])),
+    [projectId, aiEnabled],
+  );
+  const openRunOf = (requirementId: string) =>
+    (aiRuns.data ?? []).find((run) => run.input.requirementId === requirementId && OPEN_RUN_STATUSES.includes(run.status));
   const reqRes = useResource(
     () => api.get<Requirement[]>(`/projects/${projectId}/requirements${showArchived ? '?includeArchived=true' : ''}`),
     [projectId, showArchived],
@@ -339,6 +356,23 @@ export function RequirementsPage() {
   function open(action: () => void) {
     setActionError(null);
     action();
+  }
+
+  async function draftWithAi(r: Requirement) {
+    if (starting) return;
+    setStarting(r.id);
+    setActionError(null);
+    try {
+      const started = await api.post<{ runId: string }>(`/projects/${projectId}/ai/runs`, {
+        type: 'REQUIREMENT_TO_CASES',
+        requirementId: r.id,
+      });
+      navigate(`/projects/${projectId}/ai/runs/${started.runId}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't start the AI run");
+    } finally {
+      setStarting(null);
+    }
   }
 
   async function restore(r: Requirement) {
@@ -445,6 +479,29 @@ export function RequirementsPage() {
                     </td>
                     {editRepository && (
                     <td className="cell-actions">
+                      {aiEnabled && !r.archivedAt && (
+                        openRunOf(r.id) ? (
+                          <Link
+                            to={`/projects/${projectId}/ai/runs/${openRunOf(r.id)!.id}`}
+                            className="btn btn-secondary btn-sm"
+                            aria-label={`AI drafts for ${r.title}`}
+                          >
+                            <Sparkles size={14} aria-hidden="true" />
+                            AI drafts
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={starting !== null}
+                            onClick={() => draftWithAi(r)}
+                            aria-label={`Draft test cases for ${r.title}`}
+                          >
+                            <Sparkles size={14} aria-hidden="true" />
+                            Draft test cases
+                          </button>
+                        )
+                      )}
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"

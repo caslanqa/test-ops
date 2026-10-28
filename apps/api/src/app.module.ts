@@ -24,6 +24,8 @@ import { ApiTokensModule } from "./api-tokens/api-tokens.module";
 import { SystemModule } from "./system/system.module";
 import { DemoModule } from "./demo/demo.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
+import { AuditModule } from "./audit/audit.module";
+import { AiModule } from "./ai/ai.module";
 
 @Module({
   imports: [
@@ -36,6 +38,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     }),
     PrismaModule,
     CommonModule,
+    AuditModule,
     HealthModule,
     AuthModule,
     WorkspacesModule,
@@ -54,6 +57,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     ApiTokensModule,
     SystemModule,
     WebhooksModule,
+    AiModule,
     DemoModule,
   ],
 })
