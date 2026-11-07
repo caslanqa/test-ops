@@ -7,6 +7,9 @@ import { UpdateTestCaseDto } from "./dto/update-test-case.dto";
 import { ListTestCasesQueryDto } from "./dto/list-test-cases-query.dto";
 import { pageArgs } from "../common/pagination";
 import { BulkCreateTestCasesDto } from "./dto/bulk-create-test-cases.dto";
+import { BulkMoveTestCasesDto } from "./dto/bulk-move-test-cases.dto";
+import { BulkArchiveTestCasesDto } from "./dto/bulk-archive-test-cases.dto";
+import { BulkCopyTestCasesDto } from "./dto/bulk-copy-test-cases.dto";
 
 const WRITE_ROLES: ProjectRole[] = [ProjectRole.ADMIN, ProjectRole.TESTER];
 
@@ -265,6 +268,108 @@ export class TestCasesService {
                 }
               : undefined,
             requirements: linkRequirements(c.requirementIds),
+          },
+          include: { steps: true, requirements: REQUIREMENT_LINKS },
+        }),
+      ),
+    );
+    return { count: items.length, cases: items };
+  }
+
+  /**
+   * Moves multiple cases to a target suite (or top level) in one transaction.
+   * All cases must belong to the project; the target suite must belong to the project too.
+   */
+  async bulkMove(userId: string, projectId: string, dto: BulkMoveTestCasesDto) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.accessControl.assertCasesInProject(projectId, dto.caseIds);
+    await this.accessControl.assertSuiteInProject(projectId, dto.targetSuiteId);
+
+    const items = await this.prisma.$transaction(
+      dto.caseIds.map((caseId) =>
+        this.prisma.testCase.update({
+          where: { id: caseId },
+          data: { suiteId: dto.targetSuiteId ?? null },
+        }),
+      ),
+    );
+    return { count: items.length, cases: items };
+  }
+
+  /**
+   * Archives multiple cases in one transaction.
+   * All cases must belong to the project.
+   */
+  async bulkArchive(userId: string, projectId: string, dto: BulkArchiveTestCasesDto) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.accessControl.assertCasesInProject(projectId, dto.caseIds);
+
+    const items = await this.prisma.$transaction(
+      dto.caseIds.map((caseId) =>
+        this.prisma.testCase.update({
+          where: { id: caseId },
+          data: { archivedAt: new Date() },
+        }),
+      ),
+    );
+    return { count: items.length, cases: items };
+  }
+
+  /**
+   * Copies multiple cases to a target suite (or top level) in one transaction.
+   * Copies steps and requirement links; createdBy is set to the current user.
+   * All cases must belong to the project; the target suite must belong to the project too.
+   */
+  async bulkCopy(userId: string, projectId: string, dto: BulkCopyTestCasesDto) {
+    await this.accessControl.requireProjectRoleOrWorkspaceAdmin(
+      userId,
+      projectId,
+      WRITE_ROLES,
+    );
+    await this.accessControl.assertCasesInProject(projectId, dto.caseIds);
+    await this.accessControl.assertSuiteInProject(projectId, dto.targetSuiteId);
+
+    const sourceCases = await this.prisma.testCase.findMany({
+      where: { id: { in: dto.caseIds } },
+      include: { steps: { orderBy: { position: "asc" } }, requirements: REQUIREMENT_LINKS },
+    });
+
+    const items = await this.prisma.$transaction(
+      sourceCases.map((source) =>
+        this.prisma.testCase.create({
+          data: {
+            projectId,
+            suiteId: dto.targetSuiteId ?? null,
+            title: source.title,
+            preconditions: source.preconditions,
+            description: source.description,
+            priority: source.priority,
+            severity: source.severity,
+            type: source.type,
+            automationStatus: source.automationStatus,
+            tags: source.tags,
+            customFields: source.customFields as Prisma.InputJsonValue,
+            createdById: userId,
+            steps: source.steps.length
+              ? {
+                  create: source.steps.map((step, index) => ({
+                    position: index,
+                    action: step.action,
+                    expectedResult: step.expectedResult,
+                  })),
+                }
+              : undefined,
+            requirements: linkRequirements(
+              source.requirements.map((r) => r.requirement.id),
+            ),
           },
           include: { steps: true, requirements: REQUIREMENT_LINKS },
         }),
