@@ -11,6 +11,9 @@ import type { Response } from "express";
 import { PagedResponse, sendPage } from "../common/pagination";
 import { ListTestCasesQueryDto } from "./dto/list-test-cases-query.dto";
 import { BulkCreateTestCasesDto } from "./dto/bulk-create-test-cases.dto";
+import { BulkMoveTestCasesDto } from "./dto/bulk-move-test-cases.dto";
+import { BulkArchiveTestCasesDto } from "./dto/bulk-archive-test-cases.dto";
+import { BulkCopyTestCasesDto } from "./dto/bulk-copy-test-cases.dto";
 
 @ApiTags("test-cases")
 @Controller("projects/:projectId/cases")
@@ -93,5 +96,32 @@ export class TestCasesController {
     @Body() dto: BulkCreateTestCasesDto,
   ) {
     return this.testCasesService.createMany(user.id, projectId, dto);
+  }
+
+  @Patch("bulk/move")
+  bulkMove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() dto: BulkMoveTestCasesDto,
+  ) {
+    return this.testCasesService.bulkMove(user.id, projectId, dto);
+  }
+
+  @Delete("bulk")
+  bulkArchive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() dto: BulkArchiveTestCasesDto,
+  ) {
+    return this.testCasesService.bulkArchive(user.id, projectId, dto);
+  }
+
+  @Post("bulk/copy")
+  bulkCopy(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() dto: BulkCopyTestCasesDto,
+  ) {
+    return this.testCasesService.bulkCopy(user.id, projectId, dto);
   }
 }

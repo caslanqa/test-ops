@@ -311,6 +311,58 @@ function CaseDetail({
 // Dialogs
 // ---------------------------------------------------------------------------
 
+function BulkActionDialog({
+  open,
+  title,
+  actionLabel,
+  suites,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  actionLabel: string;
+  suites: Suite[];
+  onClose: () => void;
+  onConfirm: (suiteId: string | null) => void;
+}) {
+  const [suiteId, setSuiteId] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onConfirm(suiteId || null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title={title}>
+      <form className="dialog-body" onSubmit={onSubmit}>
+        <div className="field">
+          <label htmlFor="bulk-suite" className="field-label">Target suite</label>
+          <SuiteSelect
+            id="bulk-suite"
+            suites={suites}
+            value={suiteId}
+            onChange={setSuiteId}
+            emptyLabel="None (top level)"
+          />
+        </div>
+        <div className="dialog-footer">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {actionLabel}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
 function SuiteSelect({
   id,
   suites,
@@ -722,8 +774,9 @@ export function SuitesCasesPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
   const [openCaseId, setOpenCaseId] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<'suite' | 'edit-suite' | 'case' | 'edit-case' | null>(null);
-  const [confirming, setConfirming] = useState<'archive-case' | 'delete-suite' | null>(null);
+  const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
+  const [dialog, setDialog] = useState<'suite' | 'edit-suite' | 'case' | 'edit-case' | 'bulk-move' | 'bulk-copy' | null>(null);
+  const [confirming, setConfirming] = useState<'archive-case' | 'delete-suite' | 'bulk-archive' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { notify } = useNotice();
   const searchId = useId();
@@ -796,6 +849,50 @@ export function SuitesCasesPage() {
   function openConfirm(next: NonNullable<typeof confirming>) {
     setActionError(null);
     setConfirming(next);
+  }
+
+  async function bulkArchiveCases() {
+    setActionError(null);
+    try {
+      await api.delete(`/projects/${projectId}/cases/bulk`, {
+        caseIds: Array.from(selectedCaseIds),
+      });
+      notify(`${selectedCaseIds.size} cases archived.`);
+      setSelectedCaseIds(new Set());
+      casesRes.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't archive cases");
+    }
+  }
+
+  async function bulkMoveCases(targetSuiteId: string | null) {
+    setActionError(null);
+    try {
+      await api.patch(`/projects/${projectId}/cases/bulk/move`, {
+        caseIds: Array.from(selectedCaseIds),
+        targetSuiteId,
+      });
+      notify(`${selectedCaseIds.size} cases moved.`);
+      setSelectedCaseIds(new Set());
+      casesRes.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't move cases");
+    }
+  }
+
+  async function bulkCopyCases(targetSuiteId: string | null) {
+    setActionError(null);
+    try {
+      await api.post(`/projects/${projectId}/cases/bulk/copy`, {
+        caseIds: Array.from(selectedCaseIds),
+        targetSuiteId,
+      });
+      notify(`${selectedCaseIds.size} cases copied.`);
+      setSelectedCaseIds(new Set());
+      casesRes.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't copy cases");
+    }
   }
 
   async function restoreCase(testCase: TestCase) {
@@ -934,6 +1031,22 @@ export function SuitesCasesPage() {
                   )}
                 </div>
               )}
+              {selectedCaseIds.size > 0 && editRepository && (
+                <div className="toolbar-actions bulk-actions">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDialog('bulk-move')} title="Move selected cases">
+                    <Layers size={16} aria-hidden="true" />
+                    Move
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDialog('bulk-copy')} title="Copy selected cases">
+                    <Plus size={16} aria-hidden="true" />
+                    Copy
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => openConfirm('bulk-archive')} title="Archive selected cases">
+                    <Archive size={16} aria-hidden="true" />
+                    Archive
+                  </button>
+                </div>
+              )}
               <ArchivedToggle checked={showArchived} onChange={setShowArchived} />
               <label htmlFor={searchId} className="search-field">
                 <Search size={16} aria-hidden="true" />
@@ -974,6 +1087,17 @@ export function SuitesCasesPage() {
                   <caption className="visually-hidden">{listTitle}</caption>
                   <thead>
                     <tr>
+                      <th scope="col" className="col-check">
+                        <input
+                          type="checkbox"
+                          checked={selectedCaseIds.size > 0 && selectedCaseIds.size === visibleCases.length}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedCaseIds(new Set(visibleCases.map((c) => c.id)));
+                            else setSelectedCaseIds(new Set());
+                          }}
+                          aria-label="Select all cases in this view"
+                        />
+                      </th>
                       <th scope="col" className="col-main">Title</th>
                       <th scope="col">Priority</th>
                       <th scope="col" className="hide-sm col-optional">Type</th>
@@ -984,11 +1108,24 @@ export function SuitesCasesPage() {
                     <tbody key={group.suiteId ?? 'unsorted'}>
                       {showGroupHeaders && (
                         <tr className="group-row">
-                          <th scope="colgroup" colSpan={4}>{suitePath(suites, group.suiteId)}</th>
+                          <th scope="colgroup" colSpan={5}>{suitePath(suites, group.suiteId)}</th>
                         </tr>
                       )}
                       {group.cases.map((c) => (
                         <ClickableRow key={c.id} className={c.id === openCaseId ? 'is-selected' : undefined}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selectedCaseIds.has(c.id)}
+                              onChange={() => {
+                                const next = new Set(selectedCaseIds);
+                                if (next.has(c.id)) next.delete(c.id);
+                                else next.add(c.id);
+                                setSelectedCaseIds(next);
+                              }}
+                              aria-label={`Select case ${c.title}`}
+                            />
+                          </td>
                           <td>
                             <button
                               type="button"
@@ -1095,6 +1232,17 @@ export function SuitesCasesPage() {
         onClose={() => setConfirming(null)}
       />
       <ConfirmDialog
+        open={confirming === 'bulk-archive' && selectedCaseIds.size > 0}
+        title="Archive selected test cases?"
+        message={`${selectedCaseIds.size} cases will be archived. They leave the case list and new runs; runs and results that include them keep them. You can restore them with "Show archived".`}
+        confirmLabel="Archive cases"
+        onConfirm={async () => {
+          await bulkArchiveCases();
+          setConfirming(null);
+        }}
+        onClose={() => setConfirming(null)}
+      />
+      <ConfirmDialog
         open={confirming === 'delete-suite' && selectedSuite !== null}
         title="Delete this suite?"
         message={`"${selectedSuite?.name ?? ''}" is deleted. Its sub-suites move to the top level and its cases to "No suite"; no case is deleted.`}
@@ -1109,6 +1257,28 @@ export function SuitesCasesPage() {
           casesRes.reload();
         }}
         onClose={() => setConfirming(null)}
+      />
+      <BulkActionDialog
+        open={dialog === 'bulk-move'}
+        title="Move test cases"
+        actionLabel="Move cases"
+        suites={suites}
+        onClose={() => setDialog(null)}
+        onConfirm={async (suiteId) => {
+          await bulkMoveCases(suiteId);
+          setDialog(null);
+        }}
+      />
+      <BulkActionDialog
+        open={dialog === 'bulk-copy'}
+        title="Copy test cases"
+        actionLabel="Copy cases"
+        suites={suites}
+        onClose={() => setDialog(null)}
+        onConfirm={async (suiteId) => {
+          await bulkCopyCases(suiteId);
+          setDialog(null);
+        }}
       />
     </>
   );
