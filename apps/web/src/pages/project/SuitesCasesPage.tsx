@@ -315,7 +315,6 @@ function BulkActionDialog({
   open,
   title,
   actionLabel,
-  projectId,
   suites,
   onClose,
   onConfirm,
@@ -323,7 +322,6 @@ function BulkActionDialog({
   open: boolean;
   title: string;
   actionLabel: string;
-  projectId: string;
   suites: Suite[];
   onClose: () => void;
   onConfirm: (suiteId: string | null) => void;
@@ -857,7 +855,7 @@ export function SuitesCasesPage() {
     setActionError(null);
     try {
       await api.delete(`/projects/${projectId}/cases/bulk`, {
-        body: { caseIds: Array.from(selectedCaseIds) },
+        caseIds: Array.from(selectedCaseIds),
       });
       notify(`${selectedCaseIds.size} cases archived.`);
       setSelectedCaseIds(new Set());
@@ -871,7 +869,8 @@ export function SuitesCasesPage() {
     setActionError(null);
     try {
       await api.patch(`/projects/${projectId}/cases/bulk/move`, {
-        body: { caseIds: Array.from(selectedCaseIds), targetSuiteId },
+        caseIds: Array.from(selectedCaseIds),
+        targetSuiteId,
       });
       notify(`${selectedCaseIds.size} cases moved.`);
       setSelectedCaseIds(new Set());
@@ -885,7 +884,8 @@ export function SuitesCasesPage() {
     setActionError(null);
     try {
       await api.post(`/projects/${projectId}/cases/bulk/copy`, {
-        body: { caseIds: Array.from(selectedCaseIds), targetSuiteId },
+        caseIds: Array.from(selectedCaseIds),
+        targetSuiteId,
       });
       notify(`${selectedCaseIds.size} cases copied.`);
       setSelectedCaseIds(new Set());
@@ -1262,7 +1262,6 @@ export function SuitesCasesPage() {
         open={dialog === 'bulk-move'}
         title="Move test cases"
         actionLabel="Move cases"
-        projectId={projectId}
         suites={suites}
         onClose={() => setDialog(null)}
         onConfirm={async (suiteId) => {
@@ -1274,7 +1273,6 @@ export function SuitesCasesPage() {
         open={dialog === 'bulk-copy'}
         title="Copy test cases"
         actionLabel="Copy cases"
-        projectId={projectId}
         suites={suites}
         onClose={() => setDialog(null)}
         onConfirm={async (suiteId) => {
